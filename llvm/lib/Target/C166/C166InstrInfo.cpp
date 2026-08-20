@@ -15,6 +15,7 @@
 #include "C166Subtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -153,6 +154,62 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(C166::JMPAcc)
         .addMBB(MI.getOperand(0).getMBB())
         .addImm(MI.getOperand(3).getImm());
+    break;
+  }
+  case C166::FARLOAD16:
+  case C166::FARLOAD8:
+  case C166::FARSTORE16:
+  case C166::FARSTORE8:
+  case C166::FARLOAD16i:
+  case C166::FARLOAD8i:
+  case C166::FARSTORE16i:
+  case C166::FARSTORE8i: {
+    // EXTS makes the address of the instruction that follows it a plain 16 bit
+    // offset into the segment held by its register operand, and only covers
+    // that one instruction, so the pair must not be broken up.  The hardware
+    // locks interrupts for the sequence as well, so nothing observes the
+    // partly extended state either.
+    bool IsStore = MI.getOpcode() == C166::FARSTORE16 ||
+                   MI.getOpcode() == C166::FARSTORE8 ||
+                   MI.getOpcode() == C166::FARSTORE16i ||
+                   MI.getOpcode() == C166::FARSTORE8i;
+    bool IsByte =
+        MI.getOpcode() == C166::FARLOAD8 || MI.getOpcode() == C166::FARSTORE8 ||
+        MI.getOpcode() == C166::FARLOAD8i || MI.getOpcode() == C166::FARSTORE8i;
+    unsigned Opc = IsStore ? (IsByte ? C166::MOVB8mr : C166::MOV16mr)
+                           : (IsByte ? C166::MOVB8rm : C166::MOV16rm);
+
+    // The operands are (value, offset, segment), with the value defined
+    // rather than used for a load.
+    const MachineOperand &Value = MI.getOperand(0);
+    const MachineOperand &Offset = MI.getOperand(1);
+    const MachineOperand &Segment = MI.getOperand(2);
+
+    // A segment that is a symbol goes straight into the EXTS as an immediate;
+    // one that had to be computed is in a register.
+    MachineInstrBuilder Exts;
+    if (Segment.isReg())
+      Exts = Emit(C166::EXTSr)
+                 .addReg(Segment.getReg(), getKillRegState(Segment.isKill()))
+                 .addImm(1);
+    else
+      Exts = Emit(C166::EXTSi).add(Segment).addImm(1);
+
+    MachineInstrBuilder Access = Emit(Opc);
+    if (IsStore)
+      Access.addReg(Offset.getReg(), getKillRegState(Offset.isKill()))
+          .addImm(0)
+          .add(Value);
+    else
+      Access.add(Value)
+          .addReg(Offset.getReg(), getKillRegState(Offset.isKill()))
+          .addImm(0);
+    Access.cloneMemRefs(MI);
+
+    // The post-RA scheduler runs straight after this pass and would happily
+    // drop an unrelated instruction into the middle of the pair, so tie the
+    // two together where nothing can get at them.
+    finalizeBundle(MBB, Exts->getIterator(), std::next(Access->getIterator()));
     break;
   }
   case C166::MUL16rr:
@@ -382,4 +439,20 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
   if (BytesAdded)
     *BytesAdded += getInstSizeInBytes(MI);
   return 2;
+}
+
+std::pair<unsigned, unsigned>
+C166InstrInfo::decomposeMachineOperandsTargetFlags(unsigned TF) const {
+  // Every C166 target flag is a plain value; none of them are bitmasks.
+  return {TF, 0u};
+}
+
+ArrayRef<std::pair<unsigned, const char *>>
+C166InstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
+  using namespace C166II;
+  static const std::pair<unsigned, const char *> Flags[] = {
+      {MO_SEG, "c166-seg"},
+      {MO_SOF, "c166-sof"},
+  };
+  return Flags;
 }

@@ -17,6 +17,10 @@ include "C166InstrFormats.td"
 //===----------------------------------------------------------------------===//
 
 def SDT_C166Call         : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+// A far call names the callee's segment and its offset within that segment
+// separately, because that is what CALLS takes.
+def SDT_C166CallSeg      : SDTypeProfile<0, -1, [SDTCisVT<0, i16>,
+                                                 SDTCisVT<1, i16>]>;
 def SDT_C166CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_C166CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_C166Wrapper      : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>,
@@ -31,6 +35,15 @@ def SDT_C166SelectCC     : SDTypeProfile<1, 5, [SDTCisSameAs<0, 1>,
                                                 SDTCisSameAs<1, 2>,
                                                 SDTCisSameAs<3, 4>,
                                                 SDTCisVT<5, i8>]>;
+// A far access carries the two halves of the 24 bit address separately: the
+// 16 bit offset that the memory instruction itself uses, and the segment that
+// the EXTS in front of it names.
+def SDT_C166FarLoad      : SDTypeProfile<1, 2, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>]>;
+def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>]>;
 
 //===----------------------------------------------------------------------===//
 // C166 Specific Node Definitions
@@ -40,7 +53,12 @@ def C166retglue  : SDNode<"C166ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166retiglue : SDNode<"C166ISD::RETI_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def C166retsglue : SDNode<"C166ISD::RETS_GLUE", SDTNone,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166call     : SDNode<"C166ISD::CALL", SDT_C166Call,
+                          [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                           SDNPVariadic]>;
+def C166callseg  : SDNode<"C166ISD::CALL_SEG", SDT_C166CallSeg,
                           [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                            SDNPVariadic]>;
 def C166callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_C166CallSeqStart,
@@ -50,6 +68,10 @@ def C166callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_C166CallSeqEnd,
 def C166Wrapper  : SDNode<"C166ISD::Wrapper", SDT_C166Wrapper>;
 def C166brcc     : SDNode<"C166ISD::BR_CC", SDT_C166BrCC, [SDNPHasChain]>;
 def C166selectcc : SDNode<"C166ISD::SELECT_CC", SDT_C166SelectCC>;
+def C166farload  : SDNode<"C166ISD::FAR_LOAD", SDT_C166FarLoad,
+                          [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
+                          [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -92,6 +114,24 @@ def Data16AsmOperand : AsmOperandClass {
   let Name = "Data16";
   let RenderMethod = "addImmOperands";
   let DiagnosticString = "expected a 16 bit immediate";
+}
+
+def Irang2AsmOperand : AsmOperandClass {
+  let Name = "Irang2";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an instruction range in [1, 4]";
+}
+
+def Seg8AsmOperand : AsmOperandClass {
+  let Name = "Seg8";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an 8 bit segment number";
+}
+
+def Pag10AsmOperand : AsmOperandClass {
+  let Name = "Pag10";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected a 10 bit page number";
 }
 
 // A condition code, printed as cc_XX and encoded in a 4 bit field.
@@ -142,6 +182,34 @@ def data16 : Operand<i16> {
 def data8 : Operand<i8> {
   let EncoderMethod = "getData8OpValue";
   let ParserMatchClass = Data8AsmOperand;
+}
+
+// The scope of an ATOMIC or EXTend sequence, written as 1 to 4 instructions
+// and encoded as 0 to 3.  The written value is what MCOperand carries.
+def irang2 : Operand<i8> {
+  let EncoderMethod = "getIrang2OpValue";
+  let DecoderMethod = "decodeIrang2Operand";
+  let ParserMatchClass = Irang2AsmOperand;
+}
+
+// An 8 bit segment number (#seg8) and a 10 bit page number (#pag10).
+// An 8 bit segment number.  The EXTend instructions keep theirs in the second
+// word of the instruction; JMPS and CALLS put theirs in the second byte of the
+// first word, so the two need their fixups at different offsets.
+def seg8 : Operand<i8> {
+  let EncoderMethod = "getSeg8OpValue";
+  let ParserMatchClass = Seg8AsmOperand;
+}
+
+def jseg8 : Operand<i16> {
+  let EncoderMethod = "getJumpSeg8OpValue";
+  let ParserMatchClass = Seg8AsmOperand;
+}
+
+// A 10 bit page number, in the low ten bits of the second word.
+def pag10 : Operand<i16> {
+  let EncoderMethod = "getPag10OpValue";
+  let ParserMatchClass = Pag10AsmOperand;
 }
 
 // Shift and rotate counts are #data4.
@@ -195,6 +263,46 @@ def Select16_16 : SelectPseudo<GR16, GR16>;
 def Select16_8  : SelectPseudo<GR16, GR8>;
 def Select8_16  : SelectPseudo<GR8, GR16>;
 def Select8_8   : SelectPseudo<GR8, GR8>;
+
+// Far accesses.  The EXTS that names the segment only covers the instruction
+// that follows it, so the two have to stay adjacent all the way through the
+// register allocator; they are separated by expandPostRAPseudo() once nothing
+// can be inserted between them any more.
+let mayLoad = 1 in {
+def FARLOAD16 : Pseudo<(outs GR16:$dst), (ins GR16:$off, GR16:$seg),
+                       "#FARLOAD16",
+                       [(set GR16:$dst, (C166farload GR16:$off, GR16:$seg))]>;
+def FARLOAD8  : Pseudo<(outs GR8:$dst), (ins GR16:$off, GR16:$seg),
+                       "#FARLOAD8",
+                       [(set GR8:$dst, (C166farload GR16:$off, GR16:$seg))]>;
+}
+
+let mayStore = 1 in {
+def FARSTORE16 : Pseudo<(outs), (ins GR16:$src, GR16:$off, GR16:$seg),
+                        "#FARSTORE16",
+                        [(C166farstore GR16:$src, GR16:$off, GR16:$seg)]>;
+def FARSTORE8  : Pseudo<(outs), (ins GR8:$src, GR16:$off, GR16:$seg),
+                        "#FARSTORE8",
+                        [(C166farstore GR8:$src, GR16:$off, GR16:$seg)]>;
+}
+
+// The segment of a far object is settled once the linker has placed it, so
+// there is no need to put it in a register first: EXTS takes an immediate.
+// The patterns for these are further down, next to the other symbol patterns;
+// a segment that is not a symbol simply keeps the register form above.
+let mayLoad = 1 in {
+def FARLOAD16i : Pseudo<(outs GR16:$dst), (ins GR16:$off, i16imm:$seg),
+                        "#FARLOAD16i", []>;
+def FARLOAD8i  : Pseudo<(outs GR8:$dst), (ins GR16:$off, i16imm:$seg),
+                        "#FARLOAD8i", []>;
+}
+
+let mayStore = 1 in {
+def FARSTORE16i : Pseudo<(outs), (ins GR16:$src, GR16:$off, i16imm:$seg),
+                         "#FARSTORE16i", []>;
+def FARSTORE8i  : Pseudo<(outs), (ins GR8:$src, GR16:$off, i16imm:$seg),
+                         "#FARSTORE8i", []>;
+}
 
 // Multiply and divide go through the MDL/MDH register pair.  These pseudos are
 // expanded by C166InstrInfo::expandPostRAPseudo().
@@ -777,6 +885,120 @@ def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
 }
 
 //===----------------------------------------------------------------------===//
+// Segmented Addressing
+//===----------------------------------------------------------------------===//
+//
+// A C166 in segmented mode addresses 16 MByte.  Data goes through the four
+// Data Page Pointers: the top two bits of a 16 bit long or indirect address
+// select a DPP, whose 10 bit page number supplies A23-A14.  The EXTend
+// instructions override that for the next 1 to 4 instructions, either with an
+// explicit page (EXTP) or by using the address as a plain 16 bit offset into
+// an explicit segment (EXTS).  Code crosses segments with JMPS and CALLS,
+// which name the target segment directly, and returns with RETS.
+//
+// These are MC level only for now: nothing generates them yet.
+//===----------------------------------------------------------------------===//
+
+// EXTS/EXTP and their combined-with-EXTR forms taking the page or segment
+// from a register.  Bits 7-6 select which of the four it is.
+class ExtendReg<bits<2> kind, string mnemonic>
+    : InstS<0xDC, (outs), (ins GR16:$src, irang2:$range),
+            !strconcat(mnemonic, "\t$src, $range"), []> {
+  bits<4> src;
+  bits<2> range;
+  let Inst{15-14} = kind;
+  let Inst{13-12} = range;
+  let Inst{11-8} = src;
+  let hasSideEffects = 1;
+}
+
+// The same four, taking an immediate page or segment.
+class ExtendImmSeg<bits<2> kind, string mnemonic>
+    : InstL<0xD7, (outs), (ins seg8:$seg, irang2:$range),
+            !strconcat(mnemonic, "\t$seg, $range"), []> {
+  bits<8> seg;
+  bits<2> range;
+  let Inst{15-14} = kind;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+  let Inst{23-16} = seg;
+  let Inst{31-24} = 0;
+  let hasSideEffects = 1;
+}
+
+class ExtendImmPage<bits<2> kind, string mnemonic>
+    : InstL<0xD7, (outs), (ins pag10:$pag, irang2:$range),
+            !strconcat(mnemonic, "\t$pag, $range"), []> {
+  bits<10> pag;
+  bits<2> range;
+  let Inst{15-14} = kind;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+  let Inst{23-16} = pag{7-0};
+  let Inst{25-24} = pag{9-8};
+  let Inst{31-26} = 0;
+  let hasSideEffects = 1;
+}
+
+def EXTSr  : ExtendReg<0b00, "exts">;
+def EXTPr  : ExtendReg<0b01, "extp">;
+def EXTSRr : ExtendReg<0b10, "extsr">;
+def EXTPRr : ExtendReg<0b11, "extpr">;
+
+def EXTSi  : ExtendImmSeg<0b00, "exts">;
+def EXTSRi : ExtendImmSeg<0b10, "extsr">;
+
+def EXTPi  : ExtendImmPage<0b01, "extp">;
+def EXTPRi : ExtendImmPage<0b11, "extpr">;
+
+// EXTR switches the short register addressing mode over to the ESFR space,
+// and ATOMIC locks interrupts; both share opcode D1.
+let hasSideEffects = 1 in {
+def EXTR : InstS<0xD1, (outs), (ins irang2:$range), "extr\t$range", []> {
+  bits<2> range;
+  let Inst{15-14} = 0b10;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+}
+def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
+  bits<2> range;
+  let Inst{15-14} = 0b00;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+}
+}
+
+// Inter-segment control flow.
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def JMPS : InstL<0xFA, (outs), (ins jseg8:$seg, brtarget:$dst),
+                 "jmps\t$seg, $dst", []> {
+  bits<8> seg;
+  bits<16> dst;
+  let Inst{15-8} = seg;
+  let Inst{31-16} = dst;
+}
+
+let isCall = 1,
+    Defs = [R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
+            PSW, MDL, MDH, MDC, SYSSP],
+    Uses = [R0, SYSSP] in
+def CALLS : InstL<0xDA, (outs), (ins jseg8:$seg, calltarget:$dst),
+                  "calls\t$seg, $dst", []> {
+  bits<8> seg;
+  bits<16> dst;
+  let Inst{15-8} = seg;
+  let Inst{31-16} = dst;
+}
+
+// RETS pops the code segment pointer as well as the instruction pointer, so
+// it is the counterpart of CALLS.
+let isReturn = 1, isTerminator = 1, isBarrier = 1, hasCtrlDep = 1,
+    Defs = [SYSSP], Uses = [SYSSP] in
+def RETS : InstS<0xDB, (outs), (ins), "rets", [(C166retsglue)]> {
+  let Inst{15-8} = 0x00;
+}
+
+//===----------------------------------------------------------------------===//
 // Non-Instruction Patterns
 //===----------------------------------------------------------------------===//
 
@@ -784,9 +1006,31 @@ def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;
 def : Pat<(C166call (i16 texternalsym:$dst)), (CALLA 0, texternalsym:$dst)>;
 def : Pat<(C166call GR16:$src),               (CALLI 0, GR16:$src)>;
+
+// A far call takes the callee's segment and offset as two relocations against
+// the same symbol.
+def : Pat<(C166callseg (i16 tglobaladdr:$seg), (i16 tglobaladdr:$dst)),
+          (CALLS tglobaladdr:$seg, tglobaladdr:$dst)>;
+def : Pat<(C166callseg (i16 texternalsym:$seg), (i16 texternalsym:$dst)),
+          (CALLS texternalsym:$seg, texternalsym:$dst)>;
 def : Pat<(brind GR16:$src),                  (JMPI 0, GR16:$src)>;
 
 // Address materialisation.
+// A far access whose segment is a symbol lets the EXTS name it directly.
+multiclass FarSymbolAccess<SDPatternOperator sym> {
+  def : Pat<(C166farload GR16:$off, (i16 (C166Wrapper sym:$seg))),
+            (FARLOAD16i GR16:$off, sym:$seg)>;
+  def : Pat<(i8 (C166farload GR16:$off, (i16 (C166Wrapper sym:$seg)))),
+            (FARLOAD8i GR16:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR16:$src, GR16:$off, (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE16i GR16:$src, GR16:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR8:$src, GR16:$off, (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE8i GR8:$src, GR16:$off, sym:$seg)>;
+}
+
+defm : FarSymbolAccess<tglobaladdr>;
+defm : FarSymbolAccess<tblockaddress>;
+
 def : Pat<(i16 (C166Wrapper tglobaladdr:$dst)),   (MOV16ri tglobaladdr:$dst)>;
 def : Pat<(i16 (C166Wrapper texternalsym:$dst)),  (MOV16ri texternalsym:$dst)>;
 def : Pat<(i16 (C166Wrapper tblockaddress:$dst)), (MOV16ri tblockaddress:$dst)>;

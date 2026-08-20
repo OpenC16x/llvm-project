@@ -19,6 +19,28 @@
 
 namespace llvm {
 
+namespace C166AS {
+/// C166 address spaces.  The default one holds the 16 bit near pointers the
+/// hardware addresses directly; address space 1 holds far pointers, a linear
+/// 24 bit address zero extended into 32 bits, which are accessed by naming
+/// their segment in an EXTS ahead of the access.
+enum : unsigned {
+  Near = 0,
+  Far = 1,
+};
+} // end namespace C166AS
+
+namespace C166II {
+/// Target flags on a symbol operand, naming which field of the symbol's 24 bit
+/// address the operand wants.  These become the seg() and sof() operators the
+/// assembler understands, and the relocations behind them.
+enum TOF : unsigned {
+  MO_None = 0,
+  MO_SEG, ///< Bits 23-16 of the address, the segment.
+  MO_SOF, ///< Bits 15-0 of the address, the offset within that segment.
+};
+} // end namespace C166II
+
 namespace C166CC {
 /// C166 condition codes.  These are the values encoded in the 'cc' field of
 /// the conditional jump and call instructions.

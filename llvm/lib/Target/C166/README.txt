@@ -53,6 +53,99 @@ boundary, which is why the moves and the ALU instructions are free to leave
 their PSW definition implicit.  Anything that starts consuming the flags
 somewhere else has to model them properly first.
 
+Segmented addressing
+--------------------
+
+A C166 in segmented mode reaches 16 MByte.  Data addressing normally goes
+through the four Data Page Pointers: the top two bits of a 16 bit long or
+indirect address select a DPP, whose 10 bit page number supplies A23-A14.  The
+EXTend instructions override that for the next 1 to 4 instructions, either with
+an explicit page (EXTP) or by treating the address as a plain 16 bit offset
+into an explicit segment (EXTS).  Code crosses segments with JMPS and CALLS and
+returns with RETS, which pops the code segment pointer along with the
+instruction pointer.
+
+Far data
+~~~~~~~~
+
+Address space 1 holds far pointers.  A far pointer is a linear 24 bit address
+zero extended into 32 bits, so bits 15-0 are the offset within a segment, bits
+23-16 are the segment, and pointer arithmetic is a plain 32 bit add that
+crosses segment boundaries correctly rather than wrapping inside a page.  An
+access through one becomes an EXTS naming the segment followed by an ordinary
+16 bit access.
+
+EXTS rather than EXTP is what fits that representation: EXTP would want the
+address split into a 10 bit page and a 14 bit offset, which is a different
+pointer layout, not a cheaper encoding of this one.  Neither buys anything over
+the other in instructions or bytes.  Nothing here programs or tracks the DPP
+registers; the standard reset mapping is assumed throughout, and startup code
+that changes it is on its own.
+
+Since EXTS only covers the single instruction after it, the pair is selected as
+one pseudo, split by expandPostRAPseudo(), and left bundled so the post-RA
+scheduler cannot put anything between them.  The hardware locks interrupts for
+the duration, so an interrupt handler never sees the sequence half done.  A
+displacement is deliberately never folded into a far access: [Rw + #data16]
+wraps inside the segment instead of carrying into it, so the fold would only be
+correct when the sum is known not to cross a 64 KByte boundary.
+
+An addrspacecast widens or narrows the pointer, which assumes the reset
+configuration of the DPP registers, where a 16 bit address maps onto the
+identical physical address in segment 0.  Code that reprograms the DPPs has to
+avoid the cast and build far pointers itself.
+
+An object declared in address space 1 has its address built from two
+relocations, one for the segment and one for the offset, and the segment goes
+straight into the EXTS as an immediate rather than through a register.  Such
+objects are placed in .fardata, .farbss or .farrodata so that a linker script
+can put them outside segment 0; an explicit section still wins.
+
+The C library's block moves take near pointers, so llvm.memcpy, llvm.memmove
+and llvm.memset reaching into the far address space call entry points of their
+own once they are too big or too dynamic to expand inline:
+
+    void *__memcpy_far (void __far *dst, const void __far *src, unsigned n);
+    void *__memmove_far(void __far *dst, const void __far *src, unsigned n);
+    void *__memset_far (void __far *dst, int c, unsigned n);
+
+Both pointers are far, so a near operand is widened on the way in under the
+same DPP assumption as an addrspacecast, and the size stays 16 bit.
+
+Far code
+~~~~~~~~
+
+A function carrying the "far" attribute is entered with CALLS and left with
+RETS, and is placed in .fartext.  An interrupt handler still returns with RETI
+whichever segment it sits in, because the hardware rather than a CALLS put the
+return address on the stack.
+
+A far function can only be called by name.  CALLI stays inside the current
+segment and there is no indirect form of CALLS, so a pointer to a far function
+would be a near address that nothing could call correctly; taking one is
+diagnosed, both in code and in an initialiser.
+
+Relocations and assembler syntax
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Four operators pick a field out of a symbol's 24 bit address, each with a
+relocation of its own: seg(x) and sof(x) are the segment and the offset within
+it, as EXTS, JMPS and CALLS want them, and pag(x) and pof(x) are the 10 bit
+page and the 14 bit offset within it, as EXTP wants them.  Applied to something
+the assembler can already work out they are folded on the spot instead.  They
+are recognised at the top of an operand only, since a field of an address is
+not something to do further arithmetic on.
+
+Caveats the hardware imposes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+EXTS does not exist on the SAB 8XC166(W) devices, and no subtarget feature
+guards that yet.  Inside a class A or class B trap handler the EXTend
+instructions do nothing while a class B trap flag is set, so a far access in
+one will read the wrong place.  There is also only one instruction counter, so
+inline assembly must not wrap a far access in an ATOMIC or EXTend sequence of
+its own.
+
 Encodings and the MC layer
 --------------------------
 
@@ -88,9 +181,10 @@ Known limitations / things to do
   disassembled.  The assembler does understand an SFR name used as an address.
 * The disassembler prints an SFR address numerically rather than by name, so
   "mov r2, mdl" comes back as "mov r2, 65038".
-* The segmented (24 bit) address model is not implemented; code and data are
-  addressed with 16 bit near pointers only.  EXTP/EXTS/EXTR and the DPP
-  registers are unused.
+* The far relocations are LLVM's own invention, like the rest of the C166 ELF
+  scheme here: no linker implements them yet.
+* A far access always costs an EXTS, even for several accesses in a row to the
+  same segment, which one EXTS covering up to four instructions could do.
 * Interrupt handlers do not save MDL/MDH/MDC, so an interrupted multiply or
   divide can be corrupted by an ISR that itself multiplies or divides.
 * The ADDC/SUBC instructions are described but not used: wide integer

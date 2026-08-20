@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "C166MCInstLower.h"
+#include "C166.h"
+#include "MCTargetDesc/C166MCAsmInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -62,6 +64,22 @@ MCOperand C166MCInstLower::lowerSymbolOperand(const MachineOperand &MO,
   if (!MO.isJTI() && MO.getOffset())
     Expr = MCBinaryExpr::createAdd(
         Expr, MCConstantExpr::create(MO.getOffset(), Ctx), Ctx);
+
+  // A far reference wants one field of the symbol's 24 bit address rather than
+  // the whole thing, which the linker works out from the relocation that the
+  // operator brings with it.
+  switch (MO.getTargetFlags()) {
+  case C166II::MO_None:
+    break;
+  case C166II::MO_SEG:
+    Expr = MCSpecifierExpr::create(Expr, C166::S_SEG, Ctx);
+    break;
+  case C166II::MO_SOF:
+    Expr = MCSpecifierExpr::create(Expr, C166::S_SOF, Ctx);
+    break;
+  default:
+    llvm_unreachable("unknown C166 operand target flag");
+  }
 
   return MCOperand::createExpr(Expr);
 }

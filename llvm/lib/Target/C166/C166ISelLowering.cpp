@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -133,6 +134,21 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
 
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
+
+  // A far pointer is an i32, which is not a legal type, so an access through
+  // one is caught while the type legalizer is expanding the pointer operand.
+  // Ordinary i32 loads and stores come through the same hook and are handed
+  // straight back for the generic expansion.
+  setOperationAction(ISD::LOAD, MVT::i32, Custom);
+  setOperationAction(ISD::STORE, MVT::i32, Custom);
+  setOperationAction(ISD::ADDRSPACECAST, MVT::i16, Custom);
+  setOperationAction(ISD::ADDRSPACECAST, MVT::i32, Custom);
+
+  // Naming a symbol that lives in the far address space needs relocations for
+  // its segment that the object writer does not have yet.  Catching it here
+  // turns what would be a type legalizer crash into a diagnostic.
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+  setOperationAction(ISD::BlockAddress, MVT::i32, Custom);
 }
 
 //===----------------------------------------------------------------------===//
@@ -160,15 +176,41 @@ SDValue C166TargetLowering::LowerOperation(SDValue Op,
     return LowerFRAMEADDR(Op, DAG);
   case ISD::VASTART:
     return LowerVASTART(Op, DAG);
+  case ISD::LOAD:
+    return LowerLOAD(Op, DAG);
+  case ISD::STORE:
+    return LowerSTORE(Op, DAG);
+  case ISD::ADDRSPACECAST:
+    return LowerADDRSPACECAST(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation lowering");
   }
+}
+
+/// A function placed in another segment has to be entered with CALLS and left
+/// with RETS, which is a different frame layout on the hardware stack, so it
+/// can only be reached by name.
+static bool isFarFunction(const GlobalValue *GV) {
+  const auto *F = dyn_cast<Function>(GV);
+  return F && F->hasFnAttribute("far");
 }
 
 SDValue C166TargetLowering::LowerGlobalAddress(SDValue Op,
                                                SelectionDAG &DAG) const {
   auto *N = cast<GlobalAddressSDNode>(Op);
   EVT PtrVT = Op.getValueType();
+
+  // The callee of a direct call never reaches here, so anything that does is
+  // the address of the function being taken.  There is no far indirect call:
+  // CALLI stays inside the current segment and RETS would pop a segment that
+  // was never pushed.
+  if (isFarFunction(N->getGlobal()))
+    DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
+        DAG.getMachineFunction().getFunction(),
+        "cannot take the address of a far function; it can only be called by "
+        "name",
+        SDLoc(Op).getDebugLoc()));
+
   SDValue Result = DAG.getTargetGlobalAddress(N->getGlobal(), SDLoc(Op), PtrVT,
                                               N->getOffset());
   return DAG.getNode(C166ISD::Wrapper, SDLoc(Op), PtrVT, Result);
@@ -316,6 +358,146 @@ SDValue C166TargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
 
   return DAG.getStore(Op.getOperand(0), SDLoc(Op), FrameIndex, Ptr,
                       MachinePointerInfo(SV));
+}
+
+//===----------------------------------------------------------------------===//
+// Far (segmented) accesses
+//===----------------------------------------------------------------------===//
+
+// A far pointer holds a linear 24 bit address: bits 15-0 are the offset within
+// a segment and bits 23-16 are the segment number.  The access itself is an
+// ordinary 16 bit one preceded by an EXTS naming the segment, so the pointer
+// is handed to the pseudo as two separate halves.  Both nodes built here are
+// still i32 and get expanded when the type legalizer revisits them.
+static void splitFarPointer(SDValue Ptr, const SDLoc &DL, SelectionDAG &DAG,
+                            SDValue &Offset, SDValue &Segment) {
+  Offset = DAG.getNode(ISD::TRUNCATE, DL, MVT::i16, Ptr);
+  SDValue High = DAG.getNode(ISD::SRL, DL, MVT::i32, Ptr,
+                             DAG.getShiftAmountConstant(16, MVT::i32, DL));
+  Segment = DAG.getNode(ISD::TRUNCATE, DL, MVT::i16, High);
+}
+
+/// Work out how wide a single far access has to be, or return false if this
+/// one is not something a lone EXTS plus MOV can do.  Anything wider than a
+/// word is split by the generic legalizer first and comes back here as its
+/// halves; an i1 is held in a byte just as a promoting load would have it.
+static bool getFarAccessType(EVT MemVT, MVT &AccessVT) {
+  if (!MemVT.isScalarInteger())
+    return false;
+  unsigned Bits = MemVT.getSizeInBits();
+  if (Bits > 16)
+    return false;
+  AccessVT = Bits > 8 ? MVT::i16 : MVT::i8;
+  return true;
+}
+
+SDValue C166TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
+  auto *LD = cast<LoadSDNode>(Op);
+  MVT AccessVT;
+  if (LD->getAddressSpace() != C166AS::Far || !LD->isUnindexed() ||
+      !getFarAccessType(LD->getMemoryVT(), AccessVT))
+    return SDValue();
+
+  SDLoc DL(Op);
+  SDValue Offset, Segment;
+  splitFarPointer(LD->getBasePtr(), DL, DAG, Offset, Segment);
+
+  SDValue Ops[] = {LD->getChain(), Offset, Segment};
+  SDValue Load = DAG.getMemIntrinsicNode(
+      C166ISD::FAR_LOAD, DL, DAG.getVTList(AccessVT, MVT::Other), Ops,
+      LD->getMemoryVT(), LD->getMemOperand());
+
+  SDValue Value = Load;
+  EVT VT = LD->getValueType(0);
+  if (VT != AccessVT) {
+    unsigned Opc = ISD::ANY_EXTEND;
+    if (LD->getExtensionType() == ISD::ZEXTLOAD)
+      Opc = ISD::ZERO_EXTEND;
+    else if (LD->getExtensionType() == ISD::SEXTLOAD)
+      Opc = ISD::SIGN_EXTEND;
+    Value = DAG.getNode(Opc, DL, VT, Load);
+  }
+  return DAG.getMergeValues({Value, Load.getValue(1)}, DL);
+}
+
+SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
+  auto *ST = cast<StoreSDNode>(Op);
+  MVT AccessVT;
+  if (ST->getAddressSpace() != C166AS::Far || !ST->isUnindexed() ||
+      !getFarAccessType(ST->getMemoryVT(), AccessVT))
+    return SDValue();
+
+  SDLoc DL(Op);
+  SDValue Offset, Segment;
+  splitFarPointer(ST->getBasePtr(), DL, DAG, Offset, Segment);
+
+  SDValue Value = ST->getValue();
+  if (Value.getValueType() != AccessVT)
+    Value = DAG.getNode(ISD::TRUNCATE, DL, AccessVT, Value);
+
+  SDValue Ops[] = {ST->getChain(), Value, Offset, Segment};
+  return DAG.getMemIntrinsicNode(C166ISD::FAR_STORE, DL,
+                                 DAG.getVTList(MVT::Other), Ops,
+                                 ST->getMemoryVT(), ST->getMemOperand());
+}
+
+// The address of a symbol in the far address space is only known once the
+// linker has placed it, so it is built from two relocations: one for the
+// segment and one for the offset within it.
+SDValue C166TargetLowering::LowerFarSymbol(SDValue Op,
+                                           SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Seg, Sof;
+
+  if (auto *GA = dyn_cast<GlobalAddressSDNode>(Op)) {
+    Seg = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16,
+                                     GA->getOffset(), C166II::MO_SEG);
+    Sof = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16,
+                                     GA->getOffset(), C166II::MO_SOF);
+  } else {
+    auto *BA = cast<BlockAddressSDNode>(Op);
+    Seg = DAG.getTargetBlockAddress(BA->getBlockAddress(), MVT::i16,
+                                    BA->getOffset(), C166II::MO_SEG);
+    Sof = DAG.getTargetBlockAddress(BA->getBlockAddress(), MVT::i16,
+                                    BA->getOffset(), C166II::MO_SOF);
+  }
+
+  Seg = DAG.getNode(C166ISD::Wrapper, DL, MVT::i16, Seg);
+  Sof = DAG.getNode(C166ISD::Wrapper, DL, MVT::i16, Sof);
+  return DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, Sof, Seg);
+}
+
+SDValue C166TargetLowering::LowerADDRSPACECAST(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  // Narrowing a far pointer back to a near one keeps the offset and drops the
+  // segment; see ReplaceNodeResults() for the other direction.
+  SDValue Src = Op.getOperand(0);
+  if (Op.getValueType().bitsGE(Src.getValueType()))
+    return SDValue();
+  return DAG.getNode(ISD::TRUNCATE, SDLoc(Op), Op.getValueType(), Src);
+}
+
+void C166TargetLowering::ReplaceNodeResults(SDNode *N,
+                                            SmallVectorImpl<SDValue> &Results,
+                                            SelectionDAG &DAG) const {
+  // Leaving Results empty asks the type legalizer to carry on with its own
+  // expansion, which is what the ordinary i32 loads and stores that share the
+  // custom action with the far ones want.
+  switch (N->getOpcode()) {
+  default:
+    return;
+  case ISD::ADDRSPACECAST:
+    // Widening a near pointer into a far one assumes the reset configuration
+    // of the data page pointers, in which a 16 bit address maps onto the
+    // identical physical address in segment zero.
+    Results.push_back(DAG.getNode(ISD::ZERO_EXTEND, SDLoc(N),
+                                  N->getValueType(0), N->getOperand(0)));
+    return;
+  case ISD::GlobalAddress:
+  case ISD::BlockAddress:
+    Results.push_back(LowerFarSymbol(SDValue(N, 0), DAG));
+    return;
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -636,14 +818,26 @@ SDValue C166TargetLowering::LowerCCCCallTo(
     InGlue = Chain.getValue(1);
   }
 
-  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
-    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i16);
-  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+  // A far callee is reached with CALLS, which names its segment as well as its
+  // offset within that segment; both come from the same symbol.
+  bool IsFarCall = false;
+  SDValue CalleeSeg;
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    IsFarCall = isFarFunction(G->getGlobal());
+    CalleeSeg = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i16, 0,
+                                           C166II::MO_SEG);
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i16, 0,
+                                        IsFarCall ? C166II::MO_SOF
+                                                  : C166II::MO_None);
+  } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i16);
+  }
 
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   SmallVector<SDValue, 8> Ops;
   Ops.push_back(Chain);
+  if (IsFarCall)
+    Ops.push_back(CalleeSeg);
   Ops.push_back(Callee);
 
   for (const auto &[Reg, N] : RegsToPass)
@@ -657,7 +851,8 @@ SDValue C166TargetLowering::LowerCCCCallTo(
   if (InGlue.getNode())
     Ops.push_back(InGlue);
 
-  Chain = DAG.getNode(C166ISD::CALL, DL, NodeTys, Ops);
+  Chain = DAG.getNode(IsFarCall ? C166ISD::CALL_SEG : C166ISD::CALL, DL,
+                      NodeTys, Ops);
   InGlue = Chain.getValue(1);
 
   Chain = DAG.getCALLSEQ_END(Chain, NumBytes, 0, InGlue, DL);
@@ -758,8 +953,13 @@ C166TargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
   if (Glue.getNode())
     RetOps.push_back(Glue);
 
-  unsigned Opc = MF.getFunction().hasFnAttribute("interrupt")
-                     ? C166ISD::RETI_GLUE
-                     : C166ISD::RET_GLUE;
+  // An interrupt handler always comes back with RETI, whichever segment it
+  // was placed in: the hardware, not a CALLS, put the return address there.
+  const Function &F = MF.getFunction();
+  unsigned Opc = C166ISD::RET_GLUE;
+  if (F.hasFnAttribute("interrupt"))
+    Opc = C166ISD::RETI_GLUE;
+  else if (F.hasFnAttribute("far"))
+    Opc = C166ISD::RETS_GLUE;
   return DAG.getNode(Opc, DL, MVT::Other, RetOps);
 }

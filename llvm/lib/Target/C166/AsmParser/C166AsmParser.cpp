@@ -17,6 +17,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "C166.h"
+#include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "TargetInfo/C166TargetInfo.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -96,6 +97,9 @@ public:
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
   }
+  bool isIrang2() const { return isImmInRange(1, 4, /*AllowSymbol=*/false); }
+  bool isSeg8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
+  bool isPag10() const { return isImmInRange(0, 1023, /*AllowSymbol=*/true); }
 
   MCRegister getReg() const override {
     assert(Kind == k_Register && "Not a register operand");
@@ -223,6 +227,7 @@ class C166AsmParser : public MCTargetAsmParser {
                         SMLoc NameLoc, OperandVector &Operands) override;
 
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
+  bool parseExpressionWithSpecifier(const MCExpr *&Res);
   bool reportOperandError(SMLoc IDLoc, OperandVector &Operands,
                           uint64_t ErrorInfo, const Twine &Msg);
   bool parseMemory(OperandVector &Operands);
@@ -332,7 +337,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
     if (getLexer().isNot(AsmToken::Hash))
       return Error(getLexer().getLoc(), "expected '#' before a displacement");
     Lex(); // eat '#'
-    if (getParser().parseExpression(Disp))
+    if (parseExpressionWithSpecifier(Disp))
       return true;
   }
 
@@ -345,6 +350,31 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   return false;
 }
 
+/// Parse an expression, allowing one of the seg/sof/pag/pof operators around
+/// it.  They pick a field out of a 24 bit address and turn into a relocation
+/// of their own, so they are only recognised at the top of an operand rather
+/// than as something that could appear inside arithmetic.
+bool C166AsmParser::parseExpressionWithSpecifier(const MCExpr *&Res) {
+  if (getLexer().is(AsmToken::Identifier)) {
+    C166::Specifier Spec =
+        C166::parseSpecifier(getLexer().getTok().getIdentifier());
+    if (Spec != C166::S_None && getLexer().peekTok().is(AsmToken::LParen)) {
+      SMLoc S = getLexer().getLoc();
+      Lex(); // eat the operator
+      Lex(); // eat '('
+      const MCExpr *Sub;
+      if (getParser().parseExpression(Sub))
+        return true;
+      if (getLexer().isNot(AsmToken::RParen))
+        return Error(getLexer().getLoc(), "expected ')'");
+      Lex();
+      Res = MCSpecifierExpr::create(Sub, Spec, getContext(), S);
+      return false;
+    }
+  }
+  return getParser().parseExpression(Res);
+}
+
 bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   SMLoc S = getLexer().getLoc();
 
@@ -352,7 +382,7 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   case AsmToken::Hash: {
     Lex(); // eat '#'
     const MCExpr *Val;
-    if (getParser().parseExpression(Val))
+    if (parseExpressionWithSpecifier(Val))
       return true;
     Operands.push_back(C166Operand::createImm(Val, S, getLexer().getLoc()));
     return false;
@@ -398,7 +428,7 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
 
   // Anything else is an address: a symbol, a number or an expression.
   const MCExpr *Val;
-  if (getParser().parseExpression(Val))
+  if (parseExpressionWithSpecifier(Val))
     return true;
   Operands.push_back(C166Operand::createAddr(Val, S, getLexer().getLoc()));
   return false;

@@ -98,6 +98,14 @@ static DecodeStatus decodeMemRIOperand(MCInst &MI, uint64_t Imm,
   return MCDisassembler::Success;
 }
 
+/// An instruction range is encoded as 0 to 3 and written as 1 to 4.
+static DecodeStatus decodeIrang2Operand(MCInst &MI, uint64_t Imm,
+                                        uint64_t Address,
+                                        const MCDisassembler *Decoder) {
+  MI.addOperand(MCOperand::createImm((Imm & 0x3) + 1));
+  return MCDisassembler::Success;
+}
+
 #include "C166GenDisassemblerTables.inc"
 
 DecodeStatus C166Disassembler::getInstruction(MCInst &MI, uint64_t &Size,

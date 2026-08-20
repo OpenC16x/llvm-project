@@ -120,3 +120,36 @@
         srvwdt
 ; CHECK: einit            ; encoding: [0xb5,0x4a,0xb5,0xb5]
         einit
+
+; The extend instructions take an instruction range written 1 to 4 but
+; encoded 0 to 3.
+; CHECK: exts r5, #2      ; encoding: [0xdc,0x15]
+        exts    r5, #2
+; CHECK: extp r5, #2      ; encoding: [0xdc,0x55]
+        extp    r5, #2
+; CHECK: extsr r5, #2     ; encoding: [0xdc,0x95]
+        extsr   r5, #2
+; CHECK: extpr r5, #2     ; encoding: [0xdc,0xd5]
+        extpr   r5, #2
+; CHECK: exts #1, #1      ; encoding: [0xd7,0x00,0x01,0x00]
+        exts    #1, #1
+; CHECK: extsr #18, #4    ; encoding: [0xd7,0xb0,0x12,0x00]
+        extsr   #0x12, #4
+; CHECK: extp #3, #4      ; encoding: [0xd7,0x70,0x03,0x00]
+        extp    #3, #4
+
+; The high two bits of a ten bit page number land in the last byte.
+; CHECK: extpr #1023, #1  ; encoding: [0xd7,0xc0,0xff,0x03]
+        extpr   #0x3ff, #1
+; CHECK: extr #1          ; encoding: [0xd1,0x80]
+        extr    #1
+; CHECK: atomic #2        ; encoding: [0xd1,0x10]
+        atomic  #2
+
+; Inter-segment control flow names the target segment as an operand.
+; CHECK: jmps #1, far_target  ; encoding: [0xfa,0x01,A,A]
+        jmps    #1, far_target
+; CHECK: calls #2, far_target ; encoding: [0xda,0x02,A,A]
+        calls   #2, far_target
+; CHECK: rets             ; encoding: [0xdb,0x00]
+        rets

@@ -18,6 +18,7 @@
 #include "TargetInfo/C166TargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInst.h"
@@ -49,6 +50,8 @@ public:
   bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                              const char *ExtraCode, raw_ostream &O) override;
   void emitInstruction(const MachineInstr *MI) override;
+  const MCExpr *lowerConstant(const Constant *CV, const Constant *BaseCV,
+                              uint64_t Offset) override;
 };
 
 } // end anonymous namespace
@@ -113,15 +116,45 @@ bool C166AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
   return false;
 }
 
+// A far function has no near address to store: it can only be reached with a
+// CALLS that names its segment, so a pointer to one would be a near address
+// that nothing can call correctly.  ISel catches the same mistake in code;
+// this catches it in an initialiser.
+const MCExpr *C166AsmPrinter::lowerConstant(const Constant *CV,
+                                            const Constant *BaseCV,
+                                            uint64_t Offset) {
+  if (const auto *F = dyn_cast<Function>(CV); F && F->hasFnAttribute("far"))
+    OutContext.reportError(
+        SMLoc(), "cannot take the address of far function '" + F->getName() +
+                     "'; it can only be called by name");
+  return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
+}
+
 void C166AsmPrinter::emitInstruction(const MachineInstr *MI) {
   C166_MC::verifyInstructionPredicates(MI->getOpcode(),
                                        getSubtargetInfo().getFeatureBits());
 
   C166MCInstLower MCInstLowering(OutContext, *this);
 
-  MCInst TmpInst;
-  MCInstLowering.Lower(MI, TmpInst);
-  EmitToStreamer(*OutStreamer, TmpInst);
+  auto Emit = [&](const MachineInstr *MI) {
+    MCInst TmpInst;
+    MCInstLowering.Lower(MI, TmpInst);
+    EmitToStreamer(*OutStreamer, TmpInst);
+  };
+
+  // A bundle is only ever a group of instructions that must not be separated,
+  // such as an EXTS and the far access it covers, so emit its contents in
+  // order and let the assembler see nothing unusual.
+  if (!MI->isBundle()) {
+    Emit(MI);
+    return;
+  }
+
+  const MachineBasicBlock &MBB = *MI->getParent();
+  for (auto I = std::next(MI->getIterator());
+       I != MBB.instr_end() && I->isInsideBundle(); ++I)
+    if (!I->isDebugInstr() && !I->isImplicitDef())
+      Emit(&*I);
 }
 
 char C166AsmPrinter::ID = 0;

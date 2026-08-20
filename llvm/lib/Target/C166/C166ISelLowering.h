@@ -52,6 +52,9 @@ public:
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
+  void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                          SelectionDAG &DAG) const override;
+
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
@@ -61,6 +64,10 @@ public:
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFarSymbol(SDValue Op, SelectionDAG &DAG) const;
 
   ConstraintType getConstraintType(StringRef Constraint) const override;
   std::pair<unsigned, const TargetRegisterClass *>

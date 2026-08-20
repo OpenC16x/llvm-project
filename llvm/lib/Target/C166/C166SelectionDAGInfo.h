@@ -21,6 +21,26 @@ public:
   C166SelectionDAGInfo();
 
   ~C166SelectionDAGInfo() override;
+
+  SDValue EmitTargetCodeForMemcpy(SelectionDAG &DAG, const SDLoc &DL,
+                                  SDValue Chain, SDValue Dst, SDValue Src,
+                                  SDValue Size, Align DstAlign, Align SrcAlign,
+                                  bool IsVolatile, bool AlwaysInline,
+                                  MachinePointerInfo DstPtrInfo,
+                                  MachinePointerInfo SrcPtrInfo) const override;
+
+  SDValue
+  EmitTargetCodeForMemmove(SelectionDAG &DAG, const SDLoc &DL, SDValue Chain,
+                           SDValue Dst, SDValue Src, SDValue Size,
+                           Align DstAlign, Align SrcAlign, bool IsVolatile,
+                           MachinePointerInfo DstPtrInfo,
+                           MachinePointerInfo SrcPtrInfo) const override;
+
+  SDValue EmitTargetCodeForMemset(SelectionDAG &DAG, const SDLoc &DL,
+                                  SDValue Chain, SDValue Dst, SDValue Byte,
+                                  SDValue Size, Align Alignment,
+                                  bool IsVolatile, bool AlwaysInline,
+                                  MachinePointerInfo DstPtrInfo) const override;
 };
 
 } // namespace llvm
