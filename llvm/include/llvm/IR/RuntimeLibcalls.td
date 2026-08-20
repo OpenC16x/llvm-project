@@ -105,6 +105,7 @@ def IsArchCSKY : LibcallPredicate<[{TT.getArch() == Triple::csky}]>;
 def IsArchArc : LibcallPredicate<[{TT.getArch() == Triple::arc}]>;
 def IsArchM68k : LibcallPredicate<[{TT.getArch() == Triple::m68k}]>;
 def IsArchXtensa : LibcallPredicate<[{TT.getArch() == Triple::xtensa}]>;
+def IsArchC166 : LibcallPredicate<[{TT.getArch() == Triple::c166}]>;
 
 /// Libcall Predicates
 def isOSDarwin : RuntimeLibcallAvailability<(all_of IsOSDarwin)>;
@@ -3623,7 +3624,7 @@ def WasmSystemLibrary
 // TODO: Should make every target explicit.
 def isDefaultLibcallArch : RuntimeLibcallAvailability<
   (any_of IsMIPS, IsLoongArch, IsVE, IsBPF, IsArchCSKY, IsArchArc, IsArchM68k,
-          IsArchXtensa, (all_of IsSystemZ, (not IsOSzOS)))>;
+          IsArchXtensa, IsArchC166, (all_of IsSystemZ, (not IsOSzOS)))>;
 
 
 def isArch64Bit : RuntimeLibcallAvailability<(all_of IsArch64Bit)>;

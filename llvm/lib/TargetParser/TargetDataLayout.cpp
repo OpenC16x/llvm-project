@@ -580,6 +580,10 @@ std::string Triple::computeDataLayout(StringRef ABIName) const {
            "f32:32:32-i64:32-f64:32-a:0:32-n32";
   case Triple::avr:
     return "e-P1-p:16:8-i8:8-i16:8-i32:8-i64:8-f32:8-f64:8-n8:16-a:8";
+  case Triple::c166:
+    // The C166 addresses data with 16 bit near pointers.  Nothing is aligned
+    // to more than a word and the ABI stack in R0 is word aligned.
+    return "e-m:e-p:16:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16";
   case Triple::bpfel:
   case Triple::bpfeb:
     return computeBPFDataLayout(*this);

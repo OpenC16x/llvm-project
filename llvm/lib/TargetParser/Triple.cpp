@@ -92,6 +92,8 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
     return "mips";
   case mipsel:
     return "mipsel";
+  case c166:
+    return "c166";
   case msp430:
     return "msp430";
   case nvptx64:
@@ -472,6 +474,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
       .Case("mips64", mips64)
       .Case("mips64el", mips64el)
       .Case("msp430", msp430)
+      .Case("c166", c166)
       .Case("ppc64", ppc64)
       .Case("ppc32", ppc)
       .Case("ppc", ppc)
@@ -621,6 +624,7 @@ Triple::ArchType Triple::parseArch(StringRef ArchName) {
           .Case("avr", Triple::avr)
           .Case("m68k", Triple::m68k)
           .Case("msp430", Triple::msp430)
+          .Case("c166", Triple::c166)
           .Cases({"mips", "mipseb", "mipsallegrex", "mipsisa32r6", "mipsr6"},
                  Triple::mips)
           .Cases({"mipsel", "mipsallegrexel", "mipsisa32r6el", "mipsr6el"},
@@ -978,6 +982,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::mips64:
   case Triple::mips64el:
   case Triple::mips:
+  case Triple::c166:
   case Triple::msp430:
   case Triple::nvptx64:
   case Triple::nvptx:
@@ -1731,6 +1736,7 @@ unsigned Triple::getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
     return 0;
 
   case llvm::Triple::avr:
+  case llvm::Triple::c166:
   case llvm::Triple::msp430:
     return 16;
 
@@ -1839,6 +1845,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::avr:
   case Triple::bpfeb:
   case Triple::bpfel:
+  case Triple::c166:
   case Triple::msp430:
   case Triple::systemz:
   case Triple::ve:
@@ -1957,6 +1964,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::kalimba:
   case Triple::lanai:
   case Triple::m68k:
+  case Triple::c166:
   case Triple::msp430:
   case Triple::r600:
   case Triple::shave:
@@ -2083,6 +2091,7 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::kalimba:
   case Triple::loongarch32:
   case Triple::loongarch64:
+  case Triple::c166:
   case Triple::msp430:
   case Triple::nvptx64:
   case Triple::nvptx:
@@ -2223,6 +2232,7 @@ bool Triple::isLittleEndian() const {
   case Triple::loongarch64:
   case Triple::mips64el:
   case Triple::mipsel:
+  case Triple::c166:
   case Triple::msp430:
   case Triple::nvptx64:
   case Triple::nvptx:
@@ -2496,6 +2506,7 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
   case Triple::hexagon:
   case Triple::lanai:
   case Triple::m68k:
+  case Triple::c166:
   case Triple::msp430:
   case Triple::systemz:
   case Triple::xcore:
@@ -2531,7 +2542,7 @@ FloatABI::ABIType Triple::getDefaultFloatABI() const {
   if (isMIPS())
     return isOSFreeBSD() ? FloatABI::Soft : FloatABI::Hard;
 
-  if (isCSKY() || isAVR() || getArch() == msp430)
+  if (isCSKY() || isAVR() || getArch() == msp430 || getArch() == c166)
     return FloatABI::Soft;
 
   // Most targets use hard float unless soft float is explicitly requested.
