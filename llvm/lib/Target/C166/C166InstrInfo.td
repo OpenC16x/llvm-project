@@ -17,6 +17,10 @@ include "C166InstrFormats.td"
 //===----------------------------------------------------------------------===//
 
 def SDT_C166Call         : SDTypeProfile<0, -1, [SDTCisVT<0, iPTR>]>;
+// A far call names the callee's segment and its offset within that segment
+// separately, because that is what CALLS takes.
+def SDT_C166CallSeg      : SDTypeProfile<0, -1, [SDTCisVT<0, i16>,
+                                                 SDTCisVT<1, i16>]>;
 def SDT_C166CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_C166CallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
 def SDT_C166Wrapper      : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>,
@@ -49,7 +53,12 @@ def C166retglue  : SDNode<"C166ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166retiglue : SDNode<"C166ISD::RETI_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def C166retsglue : SDNode<"C166ISD::RETS_GLUE", SDTNone,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166call     : SDNode<"C166ISD::CALL", SDT_C166Call,
+                          [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                           SDNPVariadic]>;
+def C166callseg  : SDNode<"C166ISD::CALL_SEG", SDT_C166CallSeg,
                           [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                            SDNPVariadic]>;
 def C166callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_C166CallSeqStart,
@@ -184,11 +193,22 @@ def irang2 : Operand<i8> {
 }
 
 // An 8 bit segment number (#seg8) and a 10 bit page number (#pag10).
+// An 8 bit segment number.  The EXTend instructions keep theirs in the second
+// word of the instruction; JMPS and CALLS put theirs in the second byte of the
+// first word, so the two need their fixups at different offsets.
 def seg8 : Operand<i8> {
+  let EncoderMethod = "getSeg8OpValue";
   let ParserMatchClass = Seg8AsmOperand;
 }
 
+def jseg8 : Operand<i16> {
+  let EncoderMethod = "getJumpSeg8OpValue";
+  let ParserMatchClass = Seg8AsmOperand;
+}
+
+// A 10 bit page number, in the low ten bits of the second word.
 def pag10 : Operand<i16> {
+  let EncoderMethod = "getPag10OpValue";
   let ParserMatchClass = Pag10AsmOperand;
 }
 
@@ -264,6 +284,24 @@ def FARSTORE16 : Pseudo<(outs), (ins GR16:$src, GR16:$off, GR16:$seg),
 def FARSTORE8  : Pseudo<(outs), (ins GR8:$src, GR16:$off, GR16:$seg),
                         "#FARSTORE8",
                         [(C166farstore GR8:$src, GR16:$off, GR16:$seg)]>;
+}
+
+// The segment of a far object is settled once the linker has placed it, so
+// there is no need to put it in a register first: EXTS takes an immediate.
+// The patterns for these are further down, next to the other symbol patterns;
+// a segment that is not a symbol simply keeps the register form above.
+let mayLoad = 1 in {
+def FARLOAD16i : Pseudo<(outs GR16:$dst), (ins GR16:$off, i16imm:$seg),
+                        "#FARLOAD16i", []>;
+def FARLOAD8i  : Pseudo<(outs GR8:$dst), (ins GR16:$off, i16imm:$seg),
+                        "#FARLOAD8i", []>;
+}
+
+let mayStore = 1 in {
+def FARSTORE16i : Pseudo<(outs), (ins GR16:$src, GR16:$off, i16imm:$seg),
+                         "#FARSTORE16i", []>;
+def FARSTORE8i  : Pseudo<(outs), (ins GR8:$src, GR16:$off, i16imm:$seg),
+                         "#FARSTORE8i", []>;
 }
 
 // Multiply and divide go through the MDL/MDH register pair.  These pseudos are
@@ -932,7 +970,7 @@ def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
 
 // Inter-segment control flow.
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def JMPS : InstL<0xFA, (outs), (ins seg8:$seg, brtarget:$dst),
+def JMPS : InstL<0xFA, (outs), (ins jseg8:$seg, brtarget:$dst),
                  "jmps\t$seg, $dst", []> {
   bits<8> seg;
   bits<16> dst;
@@ -944,7 +982,7 @@ let isCall = 1,
     Defs = [R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
             PSW, MDL, MDH, MDC, SYSSP],
     Uses = [R0, SYSSP] in
-def CALLS : InstL<0xDA, (outs), (ins seg8:$seg, calltarget:$dst),
+def CALLS : InstL<0xDA, (outs), (ins jseg8:$seg, calltarget:$dst),
                   "calls\t$seg, $dst", []> {
   bits<8> seg;
   bits<16> dst;
@@ -956,7 +994,7 @@ def CALLS : InstL<0xDA, (outs), (ins seg8:$seg, calltarget:$dst),
 // it is the counterpart of CALLS.
 let isReturn = 1, isTerminator = 1, isBarrier = 1, hasCtrlDep = 1,
     Defs = [SYSSP], Uses = [SYSSP] in
-def RETS : InstS<0xDB, (outs), (ins), "rets", []> {
+def RETS : InstS<0xDB, (outs), (ins), "rets", [(C166retsglue)]> {
   let Inst{15-8} = 0x00;
 }
 
@@ -968,9 +1006,31 @@ def RETS : InstS<0xDB, (outs), (ins), "rets", []> {
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;
 def : Pat<(C166call (i16 texternalsym:$dst)), (CALLA 0, texternalsym:$dst)>;
 def : Pat<(C166call GR16:$src),               (CALLI 0, GR16:$src)>;
+
+// A far call takes the callee's segment and offset as two relocations against
+// the same symbol.
+def : Pat<(C166callseg (i16 tglobaladdr:$seg), (i16 tglobaladdr:$dst)),
+          (CALLS tglobaladdr:$seg, tglobaladdr:$dst)>;
+def : Pat<(C166callseg (i16 texternalsym:$seg), (i16 texternalsym:$dst)),
+          (CALLS texternalsym:$seg, texternalsym:$dst)>;
 def : Pat<(brind GR16:$src),                  (JMPI 0, GR16:$src)>;
 
 // Address materialisation.
+// A far access whose segment is a symbol lets the EXTS name it directly.
+multiclass FarSymbolAccess<SDPatternOperator sym> {
+  def : Pat<(C166farload GR16:$off, (i16 (C166Wrapper sym:$seg))),
+            (FARLOAD16i GR16:$off, sym:$seg)>;
+  def : Pat<(i8 (C166farload GR16:$off, (i16 (C166Wrapper sym:$seg)))),
+            (FARLOAD8i GR16:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR16:$src, GR16:$off, (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE16i GR16:$src, GR16:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR8:$src, GR16:$off, (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE8i GR8:$src, GR16:$off, sym:$seg)>;
+}
+
+defm : FarSymbolAccess<tglobaladdr>;
+defm : FarSymbolAccess<tblockaddress>;
+
 def : Pat<(i16 (C166Wrapper tglobaladdr:$dst)),   (MOV16ri tglobaladdr:$dst)>;
 def : Pat<(i16 (C166Wrapper texternalsym:$dst)),  (MOV16ri texternalsym:$dst)>;
 def : Pat<(i16 (C166Wrapper tblockaddress:$dst)), (MOV16ri tblockaddress:$dst)>;

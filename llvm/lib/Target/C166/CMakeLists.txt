@@ -27,6 +27,7 @@ add_llvm_target(C166CodeGen
   C166SelectionDAGInfo.cpp
   C166Subtarget.cpp
   C166TargetMachine.cpp
+  C166TargetObjectFile.cpp
 
   LINK_COMPONENTS
   Analysis

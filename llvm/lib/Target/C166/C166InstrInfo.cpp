@@ -159,29 +159,41 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case C166::FARLOAD16:
   case C166::FARLOAD8:
   case C166::FARSTORE16:
-  case C166::FARSTORE8: {
+  case C166::FARSTORE8:
+  case C166::FARLOAD16i:
+  case C166::FARLOAD8i:
+  case C166::FARSTORE16i:
+  case C166::FARSTORE8i: {
     // EXTS makes the address of the instruction that follows it a plain 16 bit
     // offset into the segment held by its register operand, and only covers
     // that one instruction, so the pair must not be broken up.  The hardware
     // locks interrupts for the sequence as well, so nothing observes the
     // partly extended state either.
-    bool IsStore =
-        MI.getOpcode() == C166::FARSTORE16 || MI.getOpcode() == C166::FARSTORE8;
+    bool IsStore = MI.getOpcode() == C166::FARSTORE16 ||
+                   MI.getOpcode() == C166::FARSTORE8 ||
+                   MI.getOpcode() == C166::FARSTORE16i ||
+                   MI.getOpcode() == C166::FARSTORE8i;
     bool IsByte =
-        MI.getOpcode() == C166::FARLOAD8 || MI.getOpcode() == C166::FARSTORE8;
+        MI.getOpcode() == C166::FARLOAD8 || MI.getOpcode() == C166::FARSTORE8 ||
+        MI.getOpcode() == C166::FARLOAD8i || MI.getOpcode() == C166::FARSTORE8i;
     unsigned Opc = IsStore ? (IsByte ? C166::MOVB8mr : C166::MOV16mr)
                            : (IsByte ? C166::MOVB8rm : C166::MOV16rm);
 
-    // The operands are (value, offset, segment) for a store and
-    // (value, offset, segment) with the value defined for a load.
+    // The operands are (value, offset, segment), with the value defined
+    // rather than used for a load.
     const MachineOperand &Value = MI.getOperand(0);
     const MachineOperand &Offset = MI.getOperand(1);
     const MachineOperand &Segment = MI.getOperand(2);
 
-    MachineInstrBuilder Exts =
-        Emit(C166::EXTSr)
-            .addReg(Segment.getReg(), getKillRegState(Segment.isKill()))
-            .addImm(1);
+    // A segment that is a symbol goes straight into the EXTS as an immediate;
+    // one that had to be computed is in a register.
+    MachineInstrBuilder Exts;
+    if (Segment.isReg())
+      Exts = Emit(C166::EXTSr)
+                 .addReg(Segment.getReg(), getKillRegState(Segment.isKill()))
+                 .addImm(1);
+    else
+      Exts = Emit(C166::EXTSi).add(Segment).addImm(1);
 
     MachineInstrBuilder Access = Emit(Opc);
     if (IsStore)
@@ -427,4 +439,20 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
   if (BytesAdded)
     *BytesAdded += getInstSizeInBytes(MI);
   return 2;
+}
+
+std::pair<unsigned, unsigned>
+C166InstrInfo::decomposeMachineOperandsTargetFlags(unsigned TF) const {
+  // Every C166 target flag is a plain value; none of them are bitmasks.
+  return {TF, 0u};
+}
+
+ArrayRef<std::pair<unsigned, const char *>>
+C166InstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
+  using namespace C166II;
+  static const std::pair<unsigned, const char *> Flags[] = {
+      {MO_SEG, "c166-seg"},
+      {MO_SOF, "c166-sof"},
+  };
+  return Flags;
 }

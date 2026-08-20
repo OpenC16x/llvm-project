@@ -52,6 +52,12 @@ public:
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
 
+  std::pair<unsigned, unsigned>
+  decomposeMachineOperandsTargetFlags(unsigned TF) const override;
+
+  ArrayRef<std::pair<unsigned, const char *>>
+  getSerializableDirectMachineOperandTargetFlags() const override;
+
   // Branch analysis.
   bool
   reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;

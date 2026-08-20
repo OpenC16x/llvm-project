@@ -74,16 +74,34 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &STI) const;
 
+  /// The 8 bit segment of an EXTS/EXTSR, in the second word.
+  unsigned getSeg8OpValue(const MCInst &MI, unsigned OpNo,
+                          SmallVectorImpl<MCFixup> &Fixups,
+                          const MCSubtargetInfo &STI) const;
+
+  /// The 8 bit segment of a JMPS/CALLS, which is the second byte of the
+  /// first word rather than part of the second.
+  unsigned getJumpSeg8OpValue(const MCInst &MI, unsigned OpNo,
+                              SmallVectorImpl<MCFixup> &Fixups,
+                              const MCSubtargetInfo &STI) const;
+
+  /// The 10 bit page of an EXTP/EXTPR.  It lives in the low ten bits of the
+  /// second word, so a word sized fixup covers it.
+  unsigned getPag10OpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
+
   /// An ATOMIC/EXTend instruction range, written as 1 to 4 and encoded as
   /// 0 to 3.
   unsigned getIrang2OpValue(const MCInst &MI, unsigned OpNo,
                             SmallVectorImpl<MCFixup> &Fixups,
                             const MCSubtargetInfo &STI) const;
 
-  /// Common helper: a field that is either a constant or a relocation against
-  /// the second word of the instruction.
+  /// Common helper: a field that is either a constant or a relocation at
+  /// byte Offset of the instruction.
   unsigned encodeRelocatable(const MCOperand &MO, MCFixupKind Kind,
-                             SmallVectorImpl<MCFixup> &Fixups) const;
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             uint32_t Offset = SecondWordOffset) const;
 
 public:
   C166MCCodeEmitter(MCContext &Ctx, const MCInstrInfo &MCII)
@@ -109,15 +127,16 @@ void C166MCCodeEmitter::encodeInstruction(const MCInst &MI,
                                     llvm::endianness::little);
 }
 
-unsigned
-C166MCCodeEmitter::encodeRelocatable(const MCOperand &MO, MCFixupKind Kind,
-                                     SmallVectorImpl<MCFixup> &Fixups) const {
+unsigned C166MCCodeEmitter::encodeRelocatable(const MCOperand &MO,
+                                              MCFixupKind Kind,
+                                              SmallVectorImpl<MCFixup> &Fixups,
+                                              uint32_t Offset) const {
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm());
 
   assert(MO.isExpr() && "Unexpected operand kind in a relocatable field");
-  Fixups.push_back(MCFixup::create(SecondWordOffset, MO.getExpr(), Kind,
-                                   /*PCRel=*/false));
+  Fixups.push_back(
+      MCFixup::create(Offset, MO.getExpr(), Kind, /*PCRel=*/false));
   return 0;
 }
 
@@ -170,6 +189,27 @@ unsigned C166MCCodeEmitter::getData8OpValue(const MCInst &MI, unsigned OpNo,
                                             SmallVectorImpl<MCFixup> &Fixups,
                                             const MCSubtargetInfo &STI) const {
   return encodeRelocatable(MI.getOperand(OpNo), FK_Data_1, Fixups) & 0xff;
+}
+
+unsigned C166MCCodeEmitter::getSeg8OpValue(const MCInst &MI, unsigned OpNo,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  return encodeRelocatable(MI.getOperand(OpNo), FK_Data_1, Fixups) & 0xff;
+}
+
+unsigned
+C166MCCodeEmitter::getJumpSeg8OpValue(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const {
+  return encodeRelocatable(MI.getOperand(OpNo), FK_Data_1, Fixups,
+                           /*Offset=*/1) &
+         0xff;
+}
+
+unsigned C166MCCodeEmitter::getPag10OpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  return encodeRelocatable(MI.getOperand(OpNo), FK_Data_2, Fixups) & 0x3ff;
 }
 
 unsigned C166MCCodeEmitter::getIrang2OpValue(const MCInst &MI, unsigned OpNo,

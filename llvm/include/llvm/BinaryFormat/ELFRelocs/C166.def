@@ -6,10 +6,21 @@
 // Infineon C166 relocations.
 //
 // There is no published psABI for C166 ELF, so this is the scheme LLVM's C166
-// backend defines for itself.  It only needs plain absolute and PC relative
-// data relocations: every address the backend emits is either a 16 bit near
-// pointer stored little endian in the second word of an instruction, or an
-// ordinary data word.
+// backend defines for itself.  Most addresses it emits are plain data: a 16
+// bit near pointer stored little endian in the second word of an instruction,
+// or an ordinary data word.
+//
+// The rest split a 24 bit address the way the segmented addressing modes need
+// it, and correspond to the seg/sof/pag/pof operators the assembler accepts.
+// Writing S for the symbol value and A for the addend:
+//
+//   R_C166_SEG8    ((S + A) >> 16) & 0xff, the segment for EXTS/JMPS/CALLS
+//   R_C166_SOF16   (S + A) & 0xffff, the offset within that segment
+//   R_C166_PAG10   ((S + A) >> 14) & 0x3ff, the page for EXTP
+//   R_C166_POF14   (S + A) & 0x3fff, the offset within that page
+//
+// Each is written into a field of exactly that width; the linker is expected
+// to check that the result fits.
 
 ELF_RELOC(R_C166_NONE,      0)
 ELF_RELOC(R_C166_ABS8,      1)
@@ -19,3 +30,7 @@ ELF_RELOC(R_C166_ABS64,     4)
 ELF_RELOC(R_C166_PCREL8,    5)
 ELF_RELOC(R_C166_PCREL16,   6)
 ELF_RELOC(R_C166_PCREL32,   7)
+ELF_RELOC(R_C166_SEG8,      8)
+ELF_RELOC(R_C166_SOF16,     9)
+ELF_RELOC(R_C166_PAG10,    10)
+ELF_RELOC(R_C166_POF14,    11)

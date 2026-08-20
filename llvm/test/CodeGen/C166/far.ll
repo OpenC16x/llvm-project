@@ -6,6 +6,7 @@
 ; exactly the instruction that follows, so the two must stay adjacent.
 
 @g = global i16 42
+@fg = addrspace(1) global i16 7
 
 define i16 @far_load(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load:
@@ -128,5 +129,56 @@ define i16 @far_load_global() {
 ; CHECK-NEXT:    ret
   %f = addrspacecast ptr @g to ptr addrspace(1)
   %v = load i16, ptr addrspace(1) %f
+  ret i16 %v
+}
+
+; An object declared in the far address space is built from two relocations,
+; and the segment goes straight into the EXTS rather than a register.
+define i16 @far_global() {
+; CHECK-LABEL: far_global:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r2, #sof(fg)
+; CHECK-NEXT:    exts #seg(fg), #1
+; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    ret
+  %v = load i16, ptr addrspace(1) @fg
+  ret i16 %v
+}
+
+define void @far_global_store(i16 %v) {
+; CHECK-LABEL: far_global_store:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r3, #sof(fg)
+; CHECK-NEXT:    exts #seg(fg), #1
+; CHECK-NEXT:    mov [r3], r2
+; CHECK-NEXT:    ret
+  store i16 %v, ptr addrspace(1) @fg
+  ret void
+}
+
+; The offset still has to be computed when it is not the symbol itself.
+define i16 @far_global_indexed(i16 %i) {
+; CHECK-LABEL: far_global_indexed:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r3, r2
+; CHECK-NEXT:    shl r3, #1
+; CHECK-NEXT:    mov r5, #sof(fg)
+; CHECK-NEXT:    add r3, r5
+; CHECK-NEXT:    mov r4, #1
+; CHECK-NEXT:    cmp r3, r5
+; CHECK-NEXT:    jmpa cc_ULT, .LBB11_2
+; CHECK-NEXT:  ; %bb.1:
+; CHECK-NEXT:    mov r4, #0
+; CHECK-NEXT:  .LBB11_2:
+; CHECK-NEXT:    shr r2, #15
+; CHECK-NEXT:    mov r5, #seg(fg)
+; CHECK-NEXT:    add r5, r2
+; CHECK-NEXT:    add r5, r4
+; CHECK-NEXT:    exts r5, #1
+; CHECK-NEXT:    mov r2, [r3]
+; CHECK-NEXT:    ret
+  %e = zext i16 %i to i32
+  %q = getelementptr i16, ptr addrspace(1) @fg, i32 %e
+  %v = load i16, ptr addrspace(1) %q
   ret i16 %v
 }

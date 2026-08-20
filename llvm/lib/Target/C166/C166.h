@@ -30,6 +30,17 @@ enum : unsigned {
 };
 } // end namespace C166AS
 
+namespace C166II {
+/// Target flags on a symbol operand, naming which field of the symbol's 24 bit
+/// address the operand wants.  These become the seg() and sof() operators the
+/// assembler understands, and the relocations behind them.
+enum TOF : unsigned {
+  MO_None = 0,
+  MO_SEG, ///< Bits 23-16 of the address, the segment.
+  MO_SOF, ///< Bits 15-0 of the address, the offset within that segment.
+};
+} // end namespace C166II
+
 namespace C166CC {
 /// C166 condition codes.  These are the values encoded in the 'cc' field of
 /// the conditional jump and call instructions.

@@ -13,6 +13,7 @@
 #include "C166TargetMachine.h"
 #include "C166.h"
 #include "C166MachineFunctionInfo.h"
+#include "C166TargetObjectFile.h"
 #include "TargetInfo/C166TargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -43,7 +44,7 @@ C166TargetMachine::C166TargetMachine(const Target &T, const Triple &TT,
     : CodeGenTargetMachineImpl(T, TT.computeDataLayout(), TT, CPU, FS, Options,
                                getEffectiveRelocModel(RM),
                                getEffectiveCodeModel(CM, CodeModel::Small), OL),
-      TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
+      TLOF(std::make_unique<C166TargetObjectFile>()),
       Subtarget(TT, std::string(CPU), std::string(FS), *this) {
   initAsmInfo();
 }

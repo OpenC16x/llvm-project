@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
@@ -16,6 +17,7 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/MC/MCValue.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -49,6 +51,13 @@ void C166AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
                                 const MCValue &Target, uint8_t *Data,
                                 uint64_t Value, bool IsResolved) {
   maybeAddReloc(F, Fixup, Target, Value, IsResolved);
+
+  // A seg/sof/pag/pof operator over something the assembler can already work
+  // out, such as an absolute address, is folded here; when it names a symbol
+  // the relocation above carries the whole address and the linker does the
+  // splitting instead.
+  Value = C166::applySpecifier(Target.getSpecifier(), Value);
+
   if (!Value)
     return; // Doesn't change encoding.
 

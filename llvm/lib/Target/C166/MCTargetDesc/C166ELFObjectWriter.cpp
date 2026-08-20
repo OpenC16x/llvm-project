@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCELFObjectWriter.h"
@@ -27,10 +28,26 @@ public:
   ~C166ELFObjectWriter() override = default;
 
 protected:
-  unsigned getRelocType(const MCFixup &Fixup, const MCValue &,
+  unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
-    // Every address the backend emits is plain data: a 16 bit near pointer in
-    // the second word of an instruction, or a data word.
+    // A seg/sof/pag/pof operator asks the linker to split a 24 bit address,
+    // so the relocation is decided by the specifier rather than the width of
+    // the field it lands in.
+    switch (Target.getSpecifier()) {
+    case C166::S_None:
+      break;
+    case C166::S_SEG:
+      return ELF::R_C166_SEG8;
+    case C166::S_SOF:
+      return ELF::R_C166_SOF16;
+    case C166::S_PAG:
+      return ELF::R_C166_PAG10;
+    case C166::S_POF:
+      return ELF::R_C166_POF14;
+    }
+
+    // Everything else is plain data: a 16 bit near pointer in the second word
+    // of an instruction, or a data word.
     switch (Fixup.getKind()) {
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
