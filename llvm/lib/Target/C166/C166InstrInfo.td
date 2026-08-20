@@ -55,10 +55,50 @@ def C166selectcc : SDNode<"C166ISD::SELECT_CC", SDT_C166SelectCC>;
 // Operand Definitions
 //===----------------------------------------------------------------------===//
 
+// Operand classes for the assembly parser.  The printed syntax is what tells
+// the three flavours of 16 bit operand apart: an immediate carries a '#', an
+// address does not, and a memory reference is bracketed.
+def CCAsmOperand : AsmOperandClass {
+  let Name = "CondCode";
+  let RenderMethod = "addImmOperands";
+}
+
+def AddrAsmOperand : AsmOperandClass {
+  let Name = "Addr";
+  let RenderMethod = "addImmOperands";
+}
+
+def MemRIAsmOperand : AsmOperandClass {
+  let Name = "MemRI";
+  let RenderMethod = "addMemRIOperands";
+}
+
+// Immediates are range checked so that an out of range value is rejected
+// rather than quietly truncated to the width of its field.  A symbol
+// reference is always accepted: the relocation sorts it out later.
+def Imm4AsmOperand : AsmOperandClass {
+  let Name = "Imm4";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an immediate in the range [0, 15]";
+}
+
+def Data8AsmOperand : AsmOperandClass {
+  let Name = "Data8";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an 8 bit immediate";
+}
+
+def Data16AsmOperand : AsmOperandClass {
+  let Name = "Data16";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected a 16 bit immediate";
+}
+
 // A condition code, printed as cc_XX and encoded in a 4 bit field.
 def cc : Operand<i8> {
   let PrintMethod = "printCCOperand";
   let DecoderMethod = "decodeCondCode";
+  let ParserMatchClass = CCAsmOperand;
 }
 
 // [Rw] / [Rw + #data16] addressing.  The encoder packs the two halves as
@@ -68,23 +108,27 @@ def memri : Operand<i16> {
   let MIOperandInfo = (ops GR16, i16imm);
   let EncoderMethod = "getMemRIOpValue";
   let DecoderMethod = "decodeMemRIOperand";
+  let ParserMatchClass = MemRIAsmOperand;
 }
 
 // A plain 16 bit data address ("mem" in the manual).
 def addr16 : Operand<i16> {
   let PrintMethod = "printAddr16Operand";
   let EncoderMethod = "getAddr16OpValue";
+  let ParserMatchClass = AddrAsmOperand;
 }
 
 // Branch and call destinations ("caddr") are printed bare (no '#' prefix).
 def brtarget : Operand<OtherVT> {
   let PrintMethod = "printBrTargetOperand";
   let EncoderMethod = "getAddr16OpValue";
+  let ParserMatchClass = AddrAsmOperand;
 }
 
 def calltarget : Operand<i16> {
   let PrintMethod = "printCallTargetOperand";
   let EncoderMethod = "getAddr16OpValue";
+  let ParserMatchClass = AddrAsmOperand;
 }
 
 // 16 and 8 bit immediates (#data16 / #data8).  These get their own operand
@@ -92,16 +136,20 @@ def calltarget : Operand<i16> {
 // out to be a symbol reference.
 def data16 : Operand<i16> {
   let EncoderMethod = "getData16OpValue";
+  let ParserMatchClass = Data16AsmOperand;
 }
 
 def data8 : Operand<i8> {
   let EncoderMethod = "getData8OpValue";
+  let ParserMatchClass = Data8AsmOperand;
 }
 
 // Shift and rotate counts are #data4.
 def imm4 : Operand<i16>, ImmLeaf<i16, [{
   return Imm >= 0 && Imm < 16;
-}]>;
+}]> {
+  let ParserMatchClass = Imm4AsmOperand;
+}
 
 //===----------------------------------------------------------------------===//
 // Complex Patterns
@@ -575,14 +623,16 @@ class MoveFromSFR<bits<16> addr, string name>
   let Inst{31-16} = addr;
 }
 
+// MDH sits at FE0CH and MDL at FE0EH (short register addresses 06H and 07H);
+// see the C166 User's Manual register table.
 let Defs = [MDL, MDC] in
-def MOVtoMDL : MoveToSFR<0xFE0C, "mdl">;
+def MOVtoMDL : MoveToSFR<0xFE0E, "mdl">;
 let Defs = [MDH, MDC] in
-def MOVtoMDH : MoveToSFR<0xFE0E, "mdh">;
+def MOVtoMDH : MoveToSFR<0xFE0C, "mdh">;
 let Uses = [MDL] in
-def MOVfromMDL : MoveFromSFR<0xFE0C, "mdl">;
+def MOVfromMDL : MoveFromSFR<0xFE0E, "mdl">;
 let Uses = [MDH] in
-def MOVfromMDH : MoveFromSFR<0xFE0E, "mdh">;
+def MOVfromMDH : MoveFromSFR<0xFE0C, "mdh">;
 
 //===----------------------------------------------------------------------===//
 // Control Flow Instructions
@@ -657,10 +707,11 @@ let isBranch = 1, isTerminator = 1 in {
   }
 
   let isBarrier = 1, isIndirectBranch = 1 in
-  def JMPI : InstS<0x9C, (outs), (ins GR16:$src), "jmpi\tcc_UC, [$src]",
-                   [(brind GR16:$src)]> {
+  def JMPI : InstS<0x9C, (outs), (ins cc:$cond, GR16:$src),
+                   "jmpi\t$cond, [$src]", []> {
+    bits<4> cond;
     bits<4> src;
-    let Inst{15-12} = 0b0000;   // cc_UC
+    let Inst{15-12} = cond;
     let Inst{11-8} = src;
   }
 }
@@ -670,17 +721,19 @@ let isCall = 1,
     Defs = [R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
             PSW, MDL, MDH, MDC, SYSSP],
     Uses = [R0, SYSSP] in {
-def CALLA : InstL<0xCA, (outs), (ins calltarget:$dst), "calla\tcc_UC, $dst",
-                  []> {
+def CALLA : InstL<0xCA, (outs), (ins cc:$cond, calltarget:$dst),
+                  "calla\t$cond, $dst", []> {
   bits<16> dst;
-  let Inst{15-12} = 0b0000;   // cc_UC
+  bits<4> cond;
+  let Inst{15-12} = cond;
   let Inst{11-8} = 0;
   let Inst{31-16} = dst;
 }
-def CALLI : InstS<0xAB, (outs), (ins GR16:$src), "calli\tcc_UC, [$src]",
-                  [(C166call GR16:$src)]> {
+def CALLI : InstS<0xAB, (outs), (ins cc:$cond, GR16:$src),
+                  "calli\t$cond, [$src]", []> {
+  bits<4> cond;
   bits<4> src;
-  let Inst{15-12} = 0b0000;   // cc_UC
+  let Inst{15-12} = cond;
   let Inst{11-8} = src;
 }
 }
@@ -727,9 +780,11 @@ def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
 // Non-Instruction Patterns
 //===----------------------------------------------------------------------===//
 
-// Direct calls.
-def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA tglobaladdr:$dst)>;
-def : Pat<(C166call (i16 texternalsym:$dst)), (CALLA texternalsym:$dst)>;
+// Direct and indirect calls, and indirect jumps, all with cc_UC (0).
+def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;
+def : Pat<(C166call (i16 texternalsym:$dst)), (CALLA 0, texternalsym:$dst)>;
+def : Pat<(C166call GR16:$src),               (CALLI 0, GR16:$src)>;
+def : Pat<(brind GR16:$src),                  (JMPI 0, GR16:$src)>;
 
 // Address materialisation.
 def : Pat<(i16 (C166Wrapper tglobaladdr:$dst)),   (MOV16ri tglobaladdr:$dst)>;

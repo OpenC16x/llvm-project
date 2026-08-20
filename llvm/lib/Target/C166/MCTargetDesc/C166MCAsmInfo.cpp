@@ -21,9 +21,6 @@ C166MCAsmInfo::C166MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   AlignmentIsInBytes = false;
   UsesELFSectionDirectiveForBSS = true;
 
-  // There is no assembly parser for C166 yet, so inline assembly has to be
-  // passed through to the output verbatim.
-  UseIntegratedAssembler = false;
 
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
