@@ -94,6 +94,24 @@ def Data16AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected a 16 bit immediate";
 }
 
+def Irang2AsmOperand : AsmOperandClass {
+  let Name = "Irang2";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an instruction range in [1, 4]";
+}
+
+def Seg8AsmOperand : AsmOperandClass {
+  let Name = "Seg8";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an 8 bit segment number";
+}
+
+def Pag10AsmOperand : AsmOperandClass {
+  let Name = "Pag10";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected a 10 bit page number";
+}
+
 // A condition code, printed as cc_XX and encoded in a 4 bit field.
 def cc : Operand<i8> {
   let PrintMethod = "printCCOperand";
@@ -142,6 +160,23 @@ def data16 : Operand<i16> {
 def data8 : Operand<i8> {
   let EncoderMethod = "getData8OpValue";
   let ParserMatchClass = Data8AsmOperand;
+}
+
+// The scope of an ATOMIC or EXTend sequence, written as 1 to 4 instructions
+// and encoded as 0 to 3.  The written value is what MCOperand carries.
+def irang2 : Operand<i8> {
+  let EncoderMethod = "getIrang2OpValue";
+  let DecoderMethod = "decodeIrang2Operand";
+  let ParserMatchClass = Irang2AsmOperand;
+}
+
+// An 8 bit segment number (#seg8) and a 10 bit page number (#pag10).
+def seg8 : Operand<i8> {
+  let ParserMatchClass = Seg8AsmOperand;
+}
+
+def pag10 : Operand<i16> {
+  let ParserMatchClass = Pag10AsmOperand;
 }
 
 // Shift and rotate counts are #data4.
@@ -774,6 +809,120 @@ def PWRDN  : ProtectedInst<0x97, 0x68, 0x97, 0x97, "pwrdn">;
 def DISWDT : ProtectedInst<0xA5, 0x5A, 0xA5, 0xA5, "diswdt">;
 def SRVWDT : ProtectedInst<0xA7, 0x58, 0xA7, 0xA7, "srvwdt">;
 def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
+}
+
+//===----------------------------------------------------------------------===//
+// Segmented Addressing
+//===----------------------------------------------------------------------===//
+//
+// A C166 in segmented mode addresses 16 MByte.  Data goes through the four
+// Data Page Pointers: the top two bits of a 16 bit long or indirect address
+// select a DPP, whose 10 bit page number supplies A23-A14.  The EXTend
+// instructions override that for the next 1 to 4 instructions, either with an
+// explicit page (EXTP) or by using the address as a plain 16 bit offset into
+// an explicit segment (EXTS).  Code crosses segments with JMPS and CALLS,
+// which name the target segment directly, and returns with RETS.
+//
+// These are MC level only for now: nothing generates them yet.
+//===----------------------------------------------------------------------===//
+
+// EXTS/EXTP and their combined-with-EXTR forms taking the page or segment
+// from a register.  Bits 7-6 select which of the four it is.
+class ExtendReg<bits<2> kind, string mnemonic>
+    : InstS<0xDC, (outs), (ins GR16:$src, irang2:$range),
+            !strconcat(mnemonic, "\t$src, $range"), []> {
+  bits<4> src;
+  bits<2> range;
+  let Inst{15-14} = kind;
+  let Inst{13-12} = range;
+  let Inst{11-8} = src;
+  let hasSideEffects = 1;
+}
+
+// The same four, taking an immediate page or segment.
+class ExtendImmSeg<bits<2> kind, string mnemonic>
+    : InstL<0xD7, (outs), (ins seg8:$seg, irang2:$range),
+            !strconcat(mnemonic, "\t$seg, $range"), []> {
+  bits<8> seg;
+  bits<2> range;
+  let Inst{15-14} = kind;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+  let Inst{23-16} = seg;
+  let Inst{31-24} = 0;
+  let hasSideEffects = 1;
+}
+
+class ExtendImmPage<bits<2> kind, string mnemonic>
+    : InstL<0xD7, (outs), (ins pag10:$pag, irang2:$range),
+            !strconcat(mnemonic, "\t$pag, $range"), []> {
+  bits<10> pag;
+  bits<2> range;
+  let Inst{15-14} = kind;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+  let Inst{23-16} = pag{7-0};
+  let Inst{25-24} = pag{9-8};
+  let Inst{31-26} = 0;
+  let hasSideEffects = 1;
+}
+
+def EXTSr  : ExtendReg<0b00, "exts">;
+def EXTPr  : ExtendReg<0b01, "extp">;
+def EXTSRr : ExtendReg<0b10, "extsr">;
+def EXTPRr : ExtendReg<0b11, "extpr">;
+
+def EXTSi  : ExtendImmSeg<0b00, "exts">;
+def EXTSRi : ExtendImmSeg<0b10, "extsr">;
+
+def EXTPi  : ExtendImmPage<0b01, "extp">;
+def EXTPRi : ExtendImmPage<0b11, "extpr">;
+
+// EXTR switches the short register addressing mode over to the ESFR space,
+// and ATOMIC locks interrupts; both share opcode D1.
+let hasSideEffects = 1 in {
+def EXTR : InstS<0xD1, (outs), (ins irang2:$range), "extr\t$range", []> {
+  bits<2> range;
+  let Inst{15-14} = 0b10;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+}
+def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
+  bits<2> range;
+  let Inst{15-14} = 0b00;
+  let Inst{13-12} = range;
+  let Inst{11-8} = 0;
+}
+}
+
+// Inter-segment control flow.
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def JMPS : InstL<0xFA, (outs), (ins seg8:$seg, brtarget:$dst),
+                 "jmps\t$seg, $dst", []> {
+  bits<8> seg;
+  bits<16> dst;
+  let Inst{15-8} = seg;
+  let Inst{31-16} = dst;
+}
+
+let isCall = 1,
+    Defs = [R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
+            PSW, MDL, MDH, MDC, SYSSP],
+    Uses = [R0, SYSSP] in
+def CALLS : InstL<0xDA, (outs), (ins seg8:$seg, calltarget:$dst),
+                  "calls\t$seg, $dst", []> {
+  bits<8> seg;
+  bits<16> dst;
+  let Inst{15-8} = seg;
+  let Inst{31-16} = dst;
+}
+
+// RETS pops the code segment pointer as well as the instruction pointer, so
+// it is the counterpart of CALLS.
+let isReturn = 1, isTerminator = 1, isBarrier = 1, hasCtrlDep = 1,
+    Defs = [SYSSP], Uses = [SYSSP] in
+def RETS : InstS<0xDB, (outs), (ins), "rets", []> {
+  let Inst{15-8} = 0x00;
 }
 
 //===----------------------------------------------------------------------===//

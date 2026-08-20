@@ -74,6 +74,12 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &STI) const;
 
+  /// An ATOMIC/EXTend instruction range, written as 1 to 4 and encoded as
+  /// 0 to 3.
+  unsigned getIrang2OpValue(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &STI) const;
+
   /// Common helper: a field that is either a constant or a relocation against
   /// the second word of the instruction.
   unsigned encodeRelocatable(const MCOperand &MO, MCFixupKind Kind,
@@ -164,6 +170,15 @@ unsigned C166MCCodeEmitter::getData8OpValue(const MCInst &MI, unsigned OpNo,
                                             SmallVectorImpl<MCFixup> &Fixups,
                                             const MCSubtargetInfo &STI) const {
   return encodeRelocatable(MI.getOperand(OpNo), FK_Data_1, Fixups) & 0xff;
+}
+
+unsigned C166MCCodeEmitter::getIrang2OpValue(const MCInst &MI, unsigned OpNo,
+                                             SmallVectorImpl<MCFixup> &Fixups,
+                                             const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  assert(MO.isImm() && MO.getImm() >= 1 && MO.getImm() <= 4 &&
+         "Instruction range must be a constant in [1, 4]");
+  return static_cast<unsigned>(MO.getImm()) - 1;
 }
 
 #include "C166GenMCCodeEmitter.inc"

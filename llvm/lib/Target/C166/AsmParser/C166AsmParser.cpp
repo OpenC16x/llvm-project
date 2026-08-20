@@ -96,6 +96,9 @@ public:
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
   }
+  bool isIrang2() const { return isImmInRange(1, 4, /*AllowSymbol=*/false); }
+  bool isSeg8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
+  bool isPag10() const { return isImmInRange(0, 1023, /*AllowSymbol=*/true); }
 
   MCRegister getReg() const override {
     assert(Kind == k_Register && "Not a register operand");
