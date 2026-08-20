@@ -119,9 +119,25 @@ void C166AsmPrinter::emitInstruction(const MachineInstr *MI) {
 
   C166MCInstLower MCInstLowering(OutContext, *this);
 
-  MCInst TmpInst;
-  MCInstLowering.Lower(MI, TmpInst);
-  EmitToStreamer(*OutStreamer, TmpInst);
+  auto Emit = [&](const MachineInstr *MI) {
+    MCInst TmpInst;
+    MCInstLowering.Lower(MI, TmpInst);
+    EmitToStreamer(*OutStreamer, TmpInst);
+  };
+
+  // A bundle is only ever a group of instructions that must not be separated,
+  // such as an EXTS and the far access it covers, so emit its contents in
+  // order and let the assembler see nothing unusual.
+  if (!MI->isBundle()) {
+    Emit(MI);
+    return;
+  }
+
+  const MachineBasicBlock &MBB = *MI->getParent();
+  for (auto I = std::next(MI->getIterator());
+       I != MBB.instr_end() && I->isInsideBundle(); ++I)
+    if (!I->isDebugInstr() && !I->isImplicitDef())
+      Emit(&*I);
 }
 
 char C166AsmPrinter::ID = 0;

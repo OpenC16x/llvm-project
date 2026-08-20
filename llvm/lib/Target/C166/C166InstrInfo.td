@@ -31,6 +31,15 @@ def SDT_C166SelectCC     : SDTypeProfile<1, 5, [SDTCisSameAs<0, 1>,
                                                 SDTCisSameAs<1, 2>,
                                                 SDTCisSameAs<3, 4>,
                                                 SDTCisVT<5, i8>]>;
+// A far access carries the two halves of the 24 bit address separately: the
+// 16 bit offset that the memory instruction itself uses, and the segment that
+// the EXTS in front of it names.
+def SDT_C166FarLoad      : SDTypeProfile<1, 2, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>]>;
+def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>]>;
 
 //===----------------------------------------------------------------------===//
 // C166 Specific Node Definitions
@@ -50,6 +59,10 @@ def C166callseq_end   : SDNode<"ISD::CALLSEQ_END", SDT_C166CallSeqEnd,
 def C166Wrapper  : SDNode<"C166ISD::Wrapper", SDT_C166Wrapper>;
 def C166brcc     : SDNode<"C166ISD::BR_CC", SDT_C166BrCC, [SDNPHasChain]>;
 def C166selectcc : SDNode<"C166ISD::SELECT_CC", SDT_C166SelectCC>;
+def C166farload  : SDNode<"C166ISD::FAR_LOAD", SDT_C166FarLoad,
+                          [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
+                          [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -230,6 +243,28 @@ def Select16_16 : SelectPseudo<GR16, GR16>;
 def Select16_8  : SelectPseudo<GR16, GR8>;
 def Select8_16  : SelectPseudo<GR8, GR16>;
 def Select8_8   : SelectPseudo<GR8, GR8>;
+
+// Far accesses.  The EXTS that names the segment only covers the instruction
+// that follows it, so the two have to stay adjacent all the way through the
+// register allocator; they are separated by expandPostRAPseudo() once nothing
+// can be inserted between them any more.
+let mayLoad = 1 in {
+def FARLOAD16 : Pseudo<(outs GR16:$dst), (ins GR16:$off, GR16:$seg),
+                       "#FARLOAD16",
+                       [(set GR16:$dst, (C166farload GR16:$off, GR16:$seg))]>;
+def FARLOAD8  : Pseudo<(outs GR8:$dst), (ins GR16:$off, GR16:$seg),
+                       "#FARLOAD8",
+                       [(set GR8:$dst, (C166farload GR16:$off, GR16:$seg))]>;
+}
+
+let mayStore = 1 in {
+def FARSTORE16 : Pseudo<(outs), (ins GR16:$src, GR16:$off, GR16:$seg),
+                        "#FARSTORE16",
+                        [(C166farstore GR16:$src, GR16:$off, GR16:$seg)]>;
+def FARSTORE8  : Pseudo<(outs), (ins GR8:$src, GR16:$off, GR16:$seg),
+                        "#FARSTORE8",
+                        [(C166farstore GR8:$src, GR16:$off, GR16:$seg)]>;
+}
 
 // Multiply and divide go through the MDL/MDH register pair.  These pseudos are
 // expanded by C166InstrInfo::expandPostRAPseudo().

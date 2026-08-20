@@ -19,6 +19,17 @@
 
 namespace llvm {
 
+namespace C166AS {
+/// C166 address spaces.  The default one holds the 16 bit near pointers the
+/// hardware addresses directly; address space 1 holds far pointers, a linear
+/// 24 bit address zero extended into 32 bits, which are accessed by naming
+/// their segment in an EXTS ahead of the access.
+enum : unsigned {
+  Near = 0,
+  Far = 1,
+};
+} // end namespace C166AS
+
 namespace C166CC {
 /// C166 condition codes.  These are the values encoded in the 'cc' field of
 /// the conditional jump and call instructions.

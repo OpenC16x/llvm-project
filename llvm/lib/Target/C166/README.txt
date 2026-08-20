@@ -53,6 +53,34 @@ boundary, which is why the moves and the ALU instructions are free to leave
 their PSW definition implicit.  Anything that starts consuming the flags
 somewhere else has to model them properly first.
 
+Segmented addressing
+--------------------
+
+A C166 in segmented mode reaches 16 MByte.  Data addressing normally goes
+through the four Data Page Pointers: the top two bits of a 16 bit long or
+indirect address select a DPP, whose 10 bit page number supplies A23-A14.  The
+EXTend instructions override that for the next 1 to 4 instructions, either with
+an explicit page (EXTP) or by treating the address as a plain 16 bit offset
+into an explicit segment (EXTS).  Code crosses segments with JMPS and CALLS and
+returns with RETS, which pops the code segment pointer along with the
+instruction pointer.  All of these can be assembled and disassembled.
+
+The compiler uses one of them: address space 1 holds far pointers.  A far
+pointer is a linear 24 bit address zero extended into 32 bits, so bits 15-0 are
+the offset within a segment, bits 23-16 are the segment, and pointer arithmetic
+is a plain 32 bit add that crosses segment boundaries correctly.  An access
+through one becomes an EXTS naming the segment followed by an ordinary 16 bit
+access.  Since EXTS only covers the single instruction after it, the pair is
+selected as one pseudo, split by expandPostRAPseudo(), and left bundled so the
+post-RA scheduler cannot put anything between them.  The hardware locks
+interrupts for the duration, so an interrupt handler never sees the sequence
+half done.
+
+An addrspacecast between the two widens or narrows the pointer, which assumes
+the reset configuration of the DPP registers, where a 16 bit address maps onto
+the identical physical address in segment 0.  Code that reprograms the DPPs has
+to avoid the cast and build far pointers itself.
+
 Encodings and the MC layer
 --------------------------
 
@@ -88,9 +116,18 @@ Known limitations / things to do
   disassembled.  The assembler does understand an SFR name used as an address.
 * The disassembler prints an SFR address numerically rather than by name, so
   "mov r2, mdl" comes back as "mov r2, 65038".
-* The segmented (24 bit) address model is not implemented; code and data are
-  addressed with 16 bit near pointers only.  EXTP/EXTS/EXTR and the DPP
-  registers are unused.
+* An object cannot be declared in the far address space: naming its segment
+  needs relocations that ELFRelocs/C166.def does not define yet, so a global
+  has to live in the default address space and have its pointer cast.  The
+  attempt is diagnosed rather than miscompiled.
+* llvm.memcpy and friends between far pointers are only expanded inline; a
+  variable length one wants a far aware runtime routine that does not exist.
+* Only EXTS is generated.  EXTP would be a better fit for an object known to
+  sit inside one 16 KByte page, and the DPP registers themselves are never
+  programmed or tracked.
+* Code is always addressed with 16 bit near pointers: there is no far code
+  model, so JMPS/CALLS/RETS are assembler only and a function pointer cannot
+  live in the far address space.
 * Interrupt handlers do not save MDL/MDH/MDC, so an interrupted multiply or
   divide can be corrupted by an ISR that itself multiplies or divides.
 * The ADDC/SUBC instructions are described but not used: wide integer
