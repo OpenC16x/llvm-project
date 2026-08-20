@@ -1,0 +1,21 @@
+
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+// Infineon C166 relocations.
+//
+// There is no published psABI for C166 ELF, so this is the scheme LLVM's C166
+// backend defines for itself.  It only needs plain absolute and PC relative
+// data relocations: every address the backend emits is either a 16 bit near
+// pointer stored little endian in the second word of an instruction, or an
+// ordinary data word.
+
+ELF_RELOC(R_C166_NONE,      0)
+ELF_RELOC(R_C166_ABS8,      1)
+ELF_RELOC(R_C166_ABS16,     2)
+ELF_RELOC(R_C166_ABS32,     3)
+ELF_RELOC(R_C166_ABS64,     4)
+ELF_RELOC(R_C166_PCREL8,    5)
+ELF_RELOC(R_C166_PCREL16,   6)
+ELF_RELOC(R_C166_PCREL32,   7)

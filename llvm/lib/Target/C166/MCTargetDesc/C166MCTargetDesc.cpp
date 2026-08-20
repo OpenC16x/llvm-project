@@ -83,4 +83,6 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166TargetMC() {
   TargetRegistry::RegisterMCRegInfo(T, createC166MCRegisterInfo);
   TargetRegistry::RegisterMCSubtargetInfo(T, createC166MCSubtargetInfo);
   TargetRegistry::RegisterMCInstPrinter(T, createC166MCInstPrinter);
+  TargetRegistry::RegisterMCCodeEmitter(T, createC166MCCodeEmitter);
+  TargetRegistry::RegisterMCAsmBackend(T, createC166MCAsmBackend);
 }
