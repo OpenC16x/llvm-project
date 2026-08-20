@@ -59,6 +59,7 @@ public:
     avr,         // AVR: Atmel AVR microcontroller
     bpfel,       // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,       // eBPF or extended BPF or 64-bit BPF (big endian)
+    c166,        // C166: Infineon C166 family 16-bit microcontroller
     csky,        // CSKY: csky
     dxil,        // DXIL 32-bit DirectX bytecode
     hexagon,     // Hexagon: hexagon
