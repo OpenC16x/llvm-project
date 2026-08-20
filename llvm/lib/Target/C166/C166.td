@@ -70,10 +70,26 @@ def C166AsmWriter : AsmWriter {
 }
 
 //===----------------------------------------------------------------------===//
+// Assembly Parser
+//===----------------------------------------------------------------------===//
+
+def C166AsmParser : AsmParser {
+  let ShouldEmitMatchRegisterName = 1;
+}
+
+def C166AsmParserVariant : AsmParserVariant {
+  // '#' introduces an immediate, not a comment.
+  let CommentDelimiter = ";";
+  let RegisterPrefix = "";
+}
+
+//===----------------------------------------------------------------------===//
 // Target Declaration
 //===----------------------------------------------------------------------===//
 
 def C166 : Target {
   let InstructionSet = C166InstrInfo;
   let AssemblyWriters = [C166AsmWriter];
+  let AssemblyParsers = [C166AsmParser];
+  let AssemblyParserVariants = [C166AsmParserVariant];
 }

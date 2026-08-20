@@ -1,0 +1,143 @@
+//===-- C166Disassembler.cpp - Disassembler for C166 ----------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the C166Disassembler class.
+//
+// The opcode byte alone decides whether an instruction is one or two words, so
+// decoding just means trying the single word table first and the double word
+// table second: no opcode appears in both.
+//
+//===----------------------------------------------------------------------===//
+
+#include "MCTargetDesc/C166MCTargetDesc.h"
+#include "TargetInfo/C166TargetInfo.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCDecoder.h"
+#include "llvm/MC/MCDecoderOps.h"
+#include "llvm/MC/MCDisassembler/MCDisassembler.h"
+#include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/Compiler.h"
+#include "llvm/Support/Endian.h"
+
+using namespace llvm;
+using namespace llvm::MCD;
+
+#define DEBUG_TYPE "c166-disassembler"
+
+using DecodeStatus = MCDisassembler::DecodeStatus;
+
+namespace {
+
+class C166Disassembler : public MCDisassembler {
+public:
+  C166Disassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
+      : MCDisassembler(STI, Ctx) {}
+
+  DecodeStatus getInstruction(MCInst &MI, uint64_t &Size,
+                              ArrayRef<uint8_t> Bytes, uint64_t Address,
+                              raw_ostream &CStream) const override;
+};
+
+} // end anonymous namespace
+
+static const MCPhysReg GR16DecoderTable[] = {
+    C166::R0,  C166::R1,  C166::R2,  C166::R3, C166::R4,  C166::R5,
+    C166::R6,  C166::R7,  C166::R8,  C166::R9, C166::R10, C166::R11,
+    C166::R12, C166::R13, C166::R14, C166::R15};
+
+static const MCPhysReg GR8DecoderTable[] = {
+    C166::RL0, C166::RH0, C166::RL1, C166::RH1, C166::RL2, C166::RH2,
+    C166::RL3, C166::RH3, C166::RL4, C166::RH4, C166::RL5, C166::RH5,
+    C166::RL6, C166::RH6, C166::RL7, C166::RH7};
+
+static DecodeStatus DecodeGR16RegisterClass(MCInst &MI, uint64_t RegNo,
+                                            uint64_t Address,
+                                            const MCDisassembler *Decoder) {
+  if (RegNo >= std::size(GR16DecoderTable))
+    return MCDisassembler::Fail;
+
+  MI.addOperand(MCOperand::createReg(GR16DecoderTable[RegNo]));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeGR8RegisterClass(MCInst &MI, uint64_t RegNo,
+                                           uint64_t Address,
+                                           const MCDisassembler *Decoder) {
+  if (RegNo >= std::size(GR8DecoderTable))
+    return MCDisassembler::Fail;
+
+  MI.addOperand(MCOperand::createReg(GR8DecoderTable[RegNo]));
+  return MCDisassembler::Success;
+}
+
+/// All sixteen condition code encodings are defined by the architecture.
+static DecodeStatus decodeCondCode(MCInst &MI, uint64_t Imm, uint64_t Address,
+                                   const MCDisassembler *Decoder) {
+  MI.addOperand(MCOperand::createImm(Imm & 0xf));
+  return MCDisassembler::Success;
+}
+
+/// [Rw + #data16], packed by the encoder as (disp << 4) | base.
+static DecodeStatus decodeMemRIOperand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  if (DecodeGR16RegisterClass(MI, Imm & 0xf, Address, Decoder) ==
+      MCDisassembler::Fail)
+    return MCDisassembler::Fail;
+
+  MI.addOperand(
+      MCOperand::createImm(static_cast<int16_t>((Imm >> 4) & 0xffff)));
+  return MCDisassembler::Success;
+}
+
+#include "C166GenDisassemblerTables.inc"
+
+DecodeStatus C166Disassembler::getInstruction(MCInst &MI, uint64_t &Size,
+                                              ArrayRef<uint8_t> Bytes,
+                                              uint64_t Address,
+                                              raw_ostream &CStream) const {
+  if (Bytes.size() >= 2) {
+    uint32_t Insn = support::endian::read16le(Bytes.data());
+    DecodeStatus Result =
+        decodeInstruction(DecoderTable16, MI, Insn, Address, this, STI);
+    if (Result != MCDisassembler::Fail) {
+      Size = 2;
+      return Result;
+    }
+    MI.clear();
+  }
+
+  if (Bytes.size() >= 4) {
+    uint32_t Insn = support::endian::read32le(Bytes.data());
+    DecodeStatus Result =
+        decodeInstruction(DecoderTable32, MI, Insn, Address, this, STI);
+    if (Result != MCDisassembler::Fail) {
+      Size = 4;
+      return Result;
+    }
+    MI.clear();
+  }
+
+  Size = 0;
+  return MCDisassembler::Fail;
+}
+
+static MCDisassembler *createC166Disassembler(const Target &T,
+                                              const MCSubtargetInfo &STI,
+                                              MCContext &Ctx) {
+  return new C166Disassembler(STI, Ctx);
+}
+
+extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
+LLVMInitializeC166Disassembler() {
+  TargetRegistry::RegisterMCDisassembler(getTheC166Target(),
+                                         createC166Disassembler);
+}

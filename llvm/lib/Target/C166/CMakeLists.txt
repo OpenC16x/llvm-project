@@ -3,9 +3,12 @@ add_llvm_component_group(C166)
 set(LLVM_TARGET_DEFINITIONS C166.td)
 
 tablegen(LLVM C166GenAsmWriter.inc -gen-asm-writer)
+tablegen(LLVM C166GenAsmMatcher.inc -gen-asm-matcher)
 tablegen(LLVM C166GenCallingConv.inc -gen-callingconv)
 tablegen(LLVM C166GenDAGISel.inc -gen-dag-isel)
+tablegen(LLVM C166GenDisassemblerTables.inc -gen-disassembler)
 tablegen(LLVM C166GenInstrInfo.inc -gen-instr-info)
+tablegen(LLVM C166GenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM C166GenRegisterInfo.inc -gen-register-info)
 tablegen(LLVM C166GenSDNodeInfo.inc -gen-sd-node-info)
 tablegen(LLVM C166GenSubtargetInfo.inc -gen-subtarget)
@@ -44,5 +47,7 @@ add_llvm_target(C166CodeGen
   C166
   )
 
+add_subdirectory(AsmParser)
+add_subdirectory(Disassembler)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)
