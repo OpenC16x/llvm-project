@@ -92,9 +92,7 @@ public:
   }
 
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
-  bool isData8() const {
-    return isImmInRange(-128, 255, /*AllowSymbol=*/true);
-  }
+  bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
   }
@@ -199,9 +197,8 @@ public:
     return Op;
   }
 
-  static std::unique_ptr<C166Operand> createMem(MCRegister Base,
-                                                const MCExpr *Disp, SMLoc S,
-                                                SMLoc E) {
+  static std::unique_ptr<C166Operand>
+  createMem(MCRegister Base, const MCExpr *Disp, SMLoc S, SMLoc E) {
     auto Op = std::make_unique<C166Operand>(k_Memory, S, E);
     Op->Mem.Base = Base;
     Op->Mem.Disp = Disp;
@@ -348,8 +345,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   return false;
 }
 
-bool C166AsmParser::parseOperand(OperandVector &Operands,
-                                 StringRef Mnemonic) {
+bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   SMLoc S = getLexer().getLoc();
 
   switch (getLexer().getKind()) {
@@ -408,9 +404,8 @@ bool C166AsmParser::parseOperand(OperandVector &Operands,
   return false;
 }
 
-bool C166AsmParser::parseInstruction(ParseInstructionInfo &Info,
-                                     StringRef Name, SMLoc NameLoc,
-                                     OperandVector &Operands) {
+bool C166AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
+                                     SMLoc NameLoc, OperandVector &Operands) {
   Operands.push_back(C166Operand::createToken(Name, NameLoc));
 
   if (getLexer().is(AsmToken::EndOfStatement))
@@ -501,6 +496,7 @@ bool C166AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   llvm_unreachable("Unknown match result");
 }
 
-extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166AsmParser() {
+extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
+LLVMInitializeC166AsmParser() {
   RegisterMCAsmParser<C166AsmParser> X(getTheC166Target());
 }

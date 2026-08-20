@@ -21,7 +21,6 @@ C166MCAsmInfo::C166MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
   AlignmentIsInBytes = false;
   UsesELFSectionDirectiveForBSS = true;
 
-
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
 }

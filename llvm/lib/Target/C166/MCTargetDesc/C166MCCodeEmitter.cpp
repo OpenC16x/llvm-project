@@ -103,9 +103,9 @@ void C166MCCodeEmitter::encodeInstruction(const MCInst &MI,
                                     llvm::endianness::little);
 }
 
-unsigned C166MCCodeEmitter::encodeRelocatable(
-    const MCOperand &MO, MCFixupKind Kind,
-    SmallVectorImpl<MCFixup> &Fixups) const {
+unsigned
+C166MCCodeEmitter::encodeRelocatable(const MCOperand &MO, MCFixupKind Kind,
+                                     SmallVectorImpl<MCFixup> &Fixups) const {
   if (MO.isImm())
     return static_cast<unsigned>(MO.getImm());
 
@@ -115,10 +115,10 @@ unsigned C166MCCodeEmitter::encodeRelocatable(
   return 0;
 }
 
-unsigned C166MCCodeEmitter::getMachineOpValue(const MCInst &MI,
-                                              const MCOperand &MO,
-                                              SmallVectorImpl<MCFixup> &Fixups,
-                                              const MCSubtargetInfo &STI) const {
+unsigned
+C166MCCodeEmitter::getMachineOpValue(const MCInst &MI, const MCOperand &MO,
+                                     SmallVectorImpl<MCFixup> &Fixups,
+                                     const MCSubtargetInfo &STI) const {
   if (MO.isReg())
     return Ctx.getRegisterInfo()->getEncodingValue(MO.getReg());
 
