@@ -559,19 +559,32 @@ C166TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
 MachineBasicBlock *
 C166TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
-  unsigned BranchOpc;
+  // The comparison is a word or a byte one depending on what is being
+  // compared, not on what is being selected, and its right hand side is
+  // either a register or a constant.
+  bool CompareIsByte;
   switch (MI.getOpcode()) {
   default:
     llvm_unreachable("Unexpected instruction for the custom inserter");
   case C166::Select16_16:
   case C166::Select8_16:
-    BranchOpc = C166::BRCC16rr;
+  case C166::Select16_16i:
+  case C166::Select8_16i:
+    CompareIsByte = false;
     break;
   case C166::Select16_8:
   case C166::Select8_8:
-    BranchOpc = C166::BRCC8rr;
+  case C166::Select16_8i:
+  case C166::Select8_8i:
+    CompareIsByte = true;
     break;
   }
+
+  unsigned BranchOpc;
+  if (MI.getOperand(4).isImm())
+    BranchOpc = CompareIsByte ? C166::BRCC8ri : C166::BRCC16ri;
+  else
+    BranchOpc = CompareIsByte ? C166::BRCC8rr : C166::BRCC16rr;
 
   const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
   DebugLoc DL = MI.getDebugLoc();
@@ -610,7 +623,7 @@ C166TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   BuildMI(BB, DL, TII.get(BranchOpc))
       .addMBB(SinkMBB)
       .addReg(MI.getOperand(3).getReg())
-      .addReg(MI.getOperand(4).getReg())
+      .add(MI.getOperand(4))
       .addImm(MI.getOperand(5).getImm());
 
   FalseMBB->addSuccessor(SinkMBB);

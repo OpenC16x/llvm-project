@@ -373,10 +373,28 @@ class SelectPseudo<RegisterClass VRC, RegisterClass CRC>
   let Defs = [PSW];
 }
 
+// The same again with a constant on the right of the comparison, so that a
+// select against one does not have to materialise it into a register first.
+class SelectPseudoImm<RegisterClass VRC, RegisterClass CRC, Operand ImmTy,
+                      ValueType ImmVT>
+    : Pseudo<(outs VRC:$dst),
+             (ins VRC:$t, VRC:$f, CRC:$lhs, ImmTy:$rhs, i8imm:$cond),
+             "#Select",
+             [(set VRC:$dst, (C166selectcc VRC:$t, VRC:$f, CRC:$lhs,
+                                           (ImmVT imm:$rhs), imm:$cond))]> {
+  let usesCustomInserter = 1;
+  let Defs = [PSW];
+}
+
 def Select16_16 : SelectPseudo<GR16, GR16>;
 def Select16_8  : SelectPseudo<GR16, GR8>;
 def Select8_16  : SelectPseudo<GR8, GR16>;
 def Select8_8   : SelectPseudo<GR8, GR8>;
+
+def Select16_16i : SelectPseudoImm<GR16, GR16, data16, i16>;
+def Select16_8i  : SelectPseudoImm<GR16, GR8, data8, i8>;
+def Select8_16i  : SelectPseudoImm<GR8, GR16, data16, i16>;
+def Select8_8i   : SelectPseudoImm<GR8, GR8, data8, i8>;
 
 // Far accesses.  The EXTS that names the segment only covers the instruction
 // that follows it, so the two have to stay adjacent all the way through the
