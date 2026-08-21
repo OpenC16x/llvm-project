@@ -181,32 +181,41 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case C166::FARLOAD16i:
   case C166::FARLOAD8i:
   case C166::FARSTORE16i:
-  case C166::FARSTORE8i: {
+  case C166::FARSTORE8i:
+  case C166::FARLOAD16a:
+  case C166::FARLOAD8a:
+  case C166::FARSTORE16a:
+  case C166::FARSTORE8a: {
     // EXTS makes the address of the instruction that follows it a plain 16 bit
     // offset into the segment held by its register operand, and only covers
     // that one instruction, so the pair must not be broken up.  The hardware
     // locks interrupts for the sequence as well, so nothing observes the
     // partly extended state either.
-    bool IsStore = MI.getOpcode() == C166::FARSTORE16 ||
-                   MI.getOpcode() == C166::FARSTORE8 ||
-                   MI.getOpcode() == C166::FARSTORE16i ||
-                   MI.getOpcode() == C166::FARSTORE8i;
+    bool IsStore = MI.mayStore();
     bool IsByte =
         MI.getOpcode() == C166::FARLOAD8 || MI.getOpcode() == C166::FARSTORE8 ||
-        MI.getOpcode() == C166::FARLOAD8i || MI.getOpcode() == C166::FARSTORE8i;
-    // The address is the offset register on its own, so this is the two byte
-    // [Rw] form rather than the four byte one with nothing added.
-    unsigned Opc = IsStore ? (IsByte ? C166::MOVB8pr : C166::MOV16pr)
-                           : (IsByte ? C166::MOVB8rp : C166::MOV16rp);
+        MI.getOpcode() == C166::FARLOAD8i ||
+        MI.getOpcode() == C166::FARSTORE8i ||
+        MI.getOpcode() == C166::FARLOAD8a || MI.getOpcode() == C166::FARSTORE8a;
 
     // The operands are (value, offset, segment), with the value defined
-    // rather than used for a load.
+    // rather than used for a load.  Either half of the address may already be
+    // settled at link time, in which case it is an immediate rather than a
+    // register and the access names it outright.
     const MachineOperand &Value = MI.getOperand(0);
     const MachineOperand &Offset = MI.getOperand(1);
     const MachineOperand &Segment = MI.getOperand(2);
 
-    // A segment that is a symbol goes straight into the EXTS as an immediate;
-    // one that had to be computed is in a register.
+    unsigned Opc;
+    if (Offset.isReg())
+      // The address is the offset register on its own, so this is the two byte
+      // [Rw] form rather than the four byte one with nothing added.
+      Opc = IsStore ? (IsByte ? C166::MOVB8pr : C166::MOV16pr)
+                    : (IsByte ? C166::MOVB8rp : C166::MOV16rp);
+    else
+      Opc = IsStore ? (IsByte ? C166::MOVB8ar : C166::MOV16ar)
+                    : (IsByte ? C166::MOVB8ra : C166::MOV16ra);
+
     MachineInstrBuilder Exts;
     if (Segment.isReg())
       Exts = Emit(C166::EXTSr)
@@ -215,13 +224,21 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     else
       Exts = Emit(C166::EXTSi).add(Segment).addImm(1);
 
+    auto AddOffset = [&](MachineInstrBuilder &MIB) {
+      if (Offset.isReg())
+        MIB.addReg(Offset.getReg(), getKillRegState(Offset.isKill()));
+      else
+        MIB.add(Offset);
+    };
+
     MachineInstrBuilder Access = Emit(Opc);
-    if (IsStore)
-      Access.addReg(Offset.getReg(), getKillRegState(Offset.isKill()))
-          .add(Value);
-    else
-      Access.add(Value).addReg(Offset.getReg(),
-                               getKillRegState(Offset.isKill()));
+    if (IsStore) {
+      AddOffset(Access);
+      Access.add(Value);
+    } else {
+      Access.add(Value);
+      AddOffset(Access);
+    }
     Access.cloneMemRefs(MI);
 
     // The post-RA scheduler runs straight after this pass and would happily

@@ -123,9 +123,8 @@ define i16 @far_load_global() {
 define i16 @far_global() {
 ; CHECK-LABEL: far_global:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r2, #sof(fg)
 ; CHECK-NEXT:    exts #seg(fg), #1
-; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    mov r2, sof(fg)
 ; CHECK-NEXT:    ret
   %v = load i16, ptr addrspace(1) @fg
   ret i16 %v
@@ -134,9 +133,8 @@ define i16 @far_global() {
 define void @far_global_store(i16 %v) {
 ; CHECK-LABEL: far_global_store:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r3, #sof(fg)
 ; CHECK-NEXT:    exts #seg(fg), #1
-; CHECK-NEXT:    mov [r3], r2
+; CHECK-NEXT:    mov sof(fg), r2
 ; CHECK-NEXT:    ret
   store i16 %v, ptr addrspace(1) @fg
   ret void
@@ -169,9 +167,8 @@ define i16 @far_global_indexed(i16 %i) {
 define i16 @far_global_field() {
 ; CHECK-LABEL: far_global_field:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r2, #sof(fa+4)
 ; CHECK-NEXT:    exts #seg(fa+4), #1
-; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    mov r2, sof(fa+4)
 ; CHECK-NEXT:    ret
   %v = load i16, ptr addrspace(1) getelementptr inbounds ([4 x i16], ptr addrspace(1) @fa, i32 0, i32 2)
   ret i16 %v

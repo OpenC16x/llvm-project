@@ -36,7 +36,7 @@ A call in tail position becomes a jump once the frame is down, so the callee's
 RET goes straight back to our caller and no return address is ever pushed onto
 the small hardware stack.  That needs both ends to agree about how returning
 works, so it is off for an interrupt handler, which comes back with RETI, and
-and for a mismatched pair of near and far functions, since a near callee's RET
+for a mismatched pair of near and far functions, since a near callee's RET
 would pop half of what a far caller left on the hardware stack.  Far to far is
 fine, but only through JMPS, which names the target segment: the JMPA a near
 tail call turns into stays inside the segment this function happens to have
@@ -124,6 +124,10 @@ the duration, so an interrupt handler never sees the sequence half done.  A
 displacement is deliberately never folded into a far access: [Rw + #data16]
 wraps inside the segment instead of carrying into it, so the fold would only be
 correct when the sum is known not to cross a 64 KByte boundary.
+
+Neither half of the address needs a register when both are settled at link
+time: EXTS covers a long (mem) address just as it covers an indirect one, so a
+far global is read with "exts #seg(g), #1" and then "mov r2, sof(g)" outright.
 
 A constant offset into a far object folds into its address rather than
 becoming arithmetic on it, since both relocations carry an addend.  That only
@@ -326,6 +330,10 @@ Known limitations / things to do
   scheme here: no linker implements them yet.
 * A far access always costs an EXTS, even for several accesses in a row to the
   same segment, which one EXTS covering up to four instructions could do.
+  Merging two is harder than it sounds: through a register the segment has to
+  be provably unchanged in between, and through a symbol the two immediates
+  are different relocations - seg(g) and seg(g+2) are the same segment in
+  practice but nothing says so until the linker has placed g.
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.

@@ -451,6 +451,23 @@ def FARSTORE8i  : Pseudo<(outs), (ins GR8:$src, GR16:$off, i16imm:$seg),
                          "#FARSTORE8i", []>;
 }
 
+// When the offset is settled at link time too, the access itself can name it:
+// EXTS covers a long (mem) address just as it covers an indirect one, so the
+// whole address stays out of registers.
+let mayLoad = 1 in {
+def FARLOAD16a : Pseudo<(outs GR16:$dst), (ins i16imm:$off, i16imm:$seg),
+                        "#FARLOAD16a", []>;
+def FARLOAD8a  : Pseudo<(outs GR8:$dst), (ins i16imm:$off, i16imm:$seg),
+                        "#FARLOAD8a", []>;
+}
+
+let mayStore = 1 in {
+def FARSTORE16a : Pseudo<(outs), (ins GR16:$src, i16imm:$off, i16imm:$seg),
+                         "#FARSTORE16a", []>;
+def FARSTORE8a  : Pseudo<(outs), (ins GR8:$src, i16imm:$off, i16imm:$seg),
+                         "#FARSTORE8a", []>;
+}
+
 // A tail call is a jump to the callee once this function's frame is gone, so
 // the callee's RET goes straight back to our caller.  They are pseudos so that
 // the prolog/epilog inserter treats them as returns and tears the frame down
@@ -1445,6 +1462,23 @@ def : Pat<(brind GR16:$src),                  (JMPI 0, GR16:$src)>;
 // Address materialisation.
 // A far access whose segment is a symbol lets the EXTS name it directly.
 multiclass FarSymbolAccess<SDPatternOperator sym> {
+  // Both halves of the address settled at link time: nothing goes in a
+  // register at all.
+  let AddedComplexity = 10 in {
+  def : Pat<(C166farload (i16 (C166Wrapper sym:$off)),
+                         (i16 (C166Wrapper sym:$seg))),
+            (FARLOAD16a sym:$off, sym:$seg)>;
+  def : Pat<(i8 (C166farload (i16 (C166Wrapper sym:$off)),
+                             (i16 (C166Wrapper sym:$seg)))),
+            (FARLOAD8a sym:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR16:$src, (i16 (C166Wrapper sym:$off)),
+                          (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE16a GR16:$src, sym:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR8:$src, (i16 (C166Wrapper sym:$off)),
+                          (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE8a GR8:$src, sym:$off, sym:$seg)>;
+  }
+
   def : Pat<(C166farload GR16:$off, (i16 (C166Wrapper sym:$seg))),
             (FARLOAD16i GR16:$off, sym:$seg)>;
   def : Pat<(i8 (C166farload GR16:$off, (i16 (C166Wrapper sym:$seg)))),
