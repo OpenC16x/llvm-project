@@ -24,3 +24,15 @@ __attribute((far, near)) void foo8(void); // expected-error {{'near' and 'far' a
 
 __attribute((short_call, long_call)) void foo12(void); // expected-error {{'long_call' and 'short_call' attributes are not compatible}} \
                                                    // expected-note {{conflicting attribute is here}}
+
+// The exclusion has to hold when the second attribute arrives on a
+// redeclaration too, which is a different path: the first one is inherited
+// onto the new declaration rather than being there when the second is parsed.
+__attribute((short_call)) void foo13(void); // expected-note {{conflicting attribute is here}}
+__attribute((long_call)) void foo13(void); // expected-error {{'long_call' and 'short_call' attributes are not compatible}}
+
+__attribute((long_call)) void foo14(void); // expected-note {{conflicting attribute is here}}
+__attribute((short_call)) void foo14(void); // expected-error {{'short_call' and 'long_call' attributes are not compatible}}
+
+__attribute((far)) void foo15(void); // expected-note {{conflicting attribute is here}}
+__attribute((short_call)) void foo15(void); // expected-error {{'short_call' and 'far' attributes are not compatible}}

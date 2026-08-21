@@ -2292,11 +2292,6 @@ def MipsShortCall : InheritableAttr, TargetSpecificAttr<TargetAnyMips> {
   let SimpleHandler = 1;
 }
 def : MutualExclusions<[MipsLongCall, MipsShortCall]>;
-// The 'long_call'/'far' parse kind is represented by whichever of the two
-// attributes sharing it sorts first, which is C166Far, so that is the record
-// the generated exclusion check hangs off.  Naming C166Far and MipsLongCall in
-// one list would make 'long_call, far' exclude itself, so they get one each.
-def : MutualExclusions<[C166Far, MipsShortCall]>;
 
 def M68kInterrupt : InheritableAttr, TargetSpecificAttr<TargetM68k> {
   // NOTE: If you add any additional spellings, ARMInterrupt's, MipsInterrupt's
