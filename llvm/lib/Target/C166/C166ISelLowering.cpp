@@ -92,8 +92,11 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::CTPOP, VT, Expand);
     setOperationAction(ISD::SDIVREM, VT, Expand);
     setOperationAction(ISD::UDIVREM, VT, Expand);
-    setOperationAction(ISD::SMUL_LOHI, VT, Expand);
-    setOperationAction(ISD::UMUL_LOHI, VT, Expand);
+    // A word multiply already produces both halves, so keeping MUL_LOHI whole
+    // is what stops a widening multiply issuing the MUL twice.  A byte one is
+    // promoted to a word before it gets here.
+    setOperationAction(ISD::SMUL_LOHI, VT, VT == MVT::i16 ? Legal : Expand);
+    setOperationAction(ISD::UMUL_LOHI, VT, VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::SHL_PARTS, VT, Expand);
     setOperationAction(ISD::SRL_PARTS, VT, Expand);
     setOperationAction(ISD::SRA_PARTS, VT, Expand);

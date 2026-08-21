@@ -137,19 +137,36 @@
 ; CHECK: mov r2, #16      ; encoding: [0xe6,0xf2,0x10,0x00]
         mov     r2, #16
 
-; An SFR name stands for its address, so this assembles as MOV reg, mem and
-; prints back with the address spelled out.  MDL is at FE0EH and MDH at FE0CH.
-; CHECK: mov r2, 65038    ; encoding: [0xf2,0xf2,0x0e,0xfe]
+; An SFR name stands for its address, so this assembles as MOV reg, mem, and
+; prints back by name because the two share one table.  MDL is at FE0EH and
+; MDH at FE0CH.
+; CHECK: mov r2, mdl      ; encoding: [0xf2,0xf2,0x0e,0xfe]
         mov     r2, mdl
-; CHECK: mov 65036, r3    ; encoding: [0xf6,0xf3,0x0c,0xfe]
+; CHECK: mov mdh, r3      ; encoding: [0xf6,0xf3,0x0c,0xfe]
         mov     mdh, r3
 
 ; The stack bounds registers, which a startup sequence has to write: STKOV is
 ; at FE14H and STKUN at FE16H.
-; CHECK: mov 65044, r1    ; encoding: [0xf6,0xf1,0x14,0xfe]
+; CHECK: mov stkov, r1    ; encoding: [0xf6,0xf1,0x14,0xfe]
         mov     stkov, r1
-; CHECK: mov 65046, r1    ; encoding: [0xf6,0xf1,0x16,0xfe]
+; CHECK: mov stkun, r1    ; encoding: [0xf6,0xf1,0x16,0xfe]
         mov     stkun, r1
+
+; An address that is not one of them is still a number.
+; CHECK: mov r2, 4660     ; encoding: [0xf2,0xf2,0x34,0x12]
+        mov     r2, 0x1234
+
+; JMPR is two bytes with the condition in the high nibble of the opcode: the
+; whole xD row of the opcode map is JMPR, one entry per condition.  The
+; displacement counts words from the instruction after it.
+; CHECK: jmpr cc_UC, -1   ; encoding: [0x0d,0xff]
+        jmpr    cc_UC, -1
+; CHECK: jmpr cc_EQ, 4    ; encoding: [0x2d,0x04]
+        jmpr    cc_EQ, 4
+; CHECK: jmpr cc_NE, -8   ; encoding: [0x3d,0xf8]
+        jmpr    cc_NE, -8
+; CHECK: jmpr cc_ULE, 127 ; encoding: [0xfd,0x7f]
+        jmpr    cc_ULE, 127
 
 ; Control flow.
 ; CHECK: ret              ; encoding: [0xcb,0x00]
@@ -263,9 +280,63 @@ bit_target:
 ; CHECK: push sp          ; encoding: [0xec,0x09]
         push    sp
 
-; The same name still stands for the register's address everywhere else.
-; CHECK: mov r2, 65038    ; encoding: [0xf2,0xf2,0x0e,0xfe]
+; The same name still stands for the register's address everywhere else, and
+; the two encode differently: as a "reg" field above, as an address here.
+; CHECK: mov r2, mdl      ; encoding: [0xf2,0xf2,0x0e,0xfe]
         mov     r2, mdl
+
+; The "reg" field of an arithmetic instruction reaches the special function
+; registers too: a general purpose register is F0H + n and an SFR is its short
+; address.
+; CHECK: add mdl, #1      ; encoding: [0x06,0x07,0x01,0x00]
+        add     mdl, #1
+; CHECK: add r2, #1234    ; encoding: [0x06,0xf2,0xd2,0x04]
+        add     r2, #1234
+; CHECK: sub stkov, #256  ; encoding: [0x26,0x0a,0x00,0x01]
+        sub     stkov, #0x100
+; CHECK: and psw, #65534  ; encoding: [0x66,0x88,0xfe,0xff]
+        and     psw, #0xFFFE
+; CHECK: or cp, 4660      ; encoding: [0x72,0x08,0x34,0x12]
+        or      cp, 0x1234
+; CHECK: addc mdh, #7     ; encoding: [0x16,0x06,0x07,0x00]
+        addc    mdh, #7
+; CHECK: cmp mdl, #0      ; encoding: [0x46,0x07,0x00,0x00]
+        cmp     mdl, #0
+
+; Which is what lets a startup sequence write one without a register to go
+; through.
+; CHECK: mov sp, #64512   ; encoding: [0xe6,0x09,0x00,0xfc]
+        mov     sp, #0xFC00
+; CHECK: mov dpp3, #3     ; encoding: [0xe6,0x03,0x03,0x00]
+        mov     dpp3, #3
+
+; Both operands of MOV reg, mem can be one.
+; CHECK: mov mdl, mdh     ; encoding: [0xf2,0x07,0x0c,0xfe]
+        mov     mdl, mdh
+
+; The byte instructions have the same field, only there F0H + n names a byte
+; register rather than a word one.  The special function registers are the
+; same in both, so a byte instruction writes the low half of one.
+; CHECK: addb mdl, #1     ; encoding: [0x07,0x07,0x01,0x00]
+        addb    mdl, #1
+; CHECK: addb rl2, #200   ; encoding: [0x07,0xf4,0xc8,0x00]
+        addb    rl2, #200
+; CHECK: subb stkov, #16  ; encoding: [0x27,0x0a,0x10,0x00]
+        subb    stkov, #16
+; CHECK: andb psw, #15    ; encoding: [0x67,0x88,0x0f,0x00]
+        andb    psw, #15
+; CHECK: orb mdh, 4660    ; encoding: [0x73,0x06,0x34,0x12]
+        orb     mdh, 0x1234
+; CHECK: xorb rh3, #170   ; encoding: [0x57,0xf7,0xaa,0x00]
+        xorb    rh3, #0xAA
+; CHECK: cmpb mdl, #0     ; encoding: [0x47,0x07,0x00,0x00]
+        cmpb    mdl, #0
+; CHECK: movb dpp0, #5    ; encoding: [0xe7,0x00,0x05,0x00]
+        movb    dpp0, #5
+; CHECK: movb rl4, 8192   ; encoding: [0xf3,0xf8,0x00,0x20]
+        movb    rl4, 0x2000
+; CHECK: movb mdl, mdh    ; encoding: [0xf3,0x07,0x0c,0xfe]
+        movb    mdl, mdh
 
 ; The protected instructions repeat their opcode in the second word.
 ; CHECK: srst             ; encoding: [0xb7,0x48,0xb7,0xb7]

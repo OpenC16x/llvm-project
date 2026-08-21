@@ -321,26 +321,12 @@ public:
   }
 };
 
-/// The special function registers are memory mapped, and an assembler is
-/// expected to know where.  Only PUSH and POP name one as a register; anywhere
-/// else an SFR name stands for its address.  Values are from the C166 User's
-/// Manual register table (and agree with the 8 bit short register addresses
-/// the registers carry as their hardware encoding).
+/// Only PUSH and POP name a special function register as a register; anywhere
+/// else the name stands for the address it is mapped at, which is the table
+/// C166MCTargetDesc holds so that the disassembler can print the same names
+/// back.
 static int64_t matchSpecialFunctionRegister(StringRef Name) {
-  return StringSwitch<int64_t>(Name.lower())
-      .Case("dpp0", 0xFE00)
-      .Case("dpp1", 0xFE02)
-      .Case("dpp2", 0xFE04)
-      .Case("dpp3", 0xFE06)
-      .Case("mdh", 0xFE0C)
-      .Case("mdl", 0xFE0E)
-      .Case("cp", 0xFE10)
-      .Case("sp", 0xFE12)
-      .Case("stkov", 0xFE14)
-      .Case("stkun", 0xFE16)
-      .Case("mdc", 0xFF0E)
-      .Case("psw", 0xFF10)
-      .Default(-1);
+  return C166::getSFRAddress(Name);
 }
 
 /// The 8 bit "bitoff" word address that names a word in the bit-addressable

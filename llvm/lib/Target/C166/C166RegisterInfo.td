@@ -96,6 +96,16 @@ def MDC   : C166Reg<0x87, "mdc">, DwarfRegNum<[35]>; // FF0EH
 def SYSSP : C166Reg<0x09, "sp">,  DwarfRegNum<[36]>; // FE12H
 // Context pointer.
 def CP    : C166Reg<0x08, "cp">,  DwarfRegNum<[37]>; // FE10H
+// The bounds the system stack is checked against.  Nothing the compiler emits
+// touches them, but a startup sequence has to set them.
+def STKOV : C166Reg<0x0A, "stkov">, DwarfRegNum<[38]>; // FE14H
+def STKUN : C166Reg<0x0B, "stkun">, DwarfRegNum<[39]>; // FE16H
+// The data page pointers, which map the top two bits of a 16 bit address onto
+// a ten bit page.  A startup sequence sets these too.
+def DPP0  : C166Reg<0x00, "dpp0">, DwarfRegNum<[40]>; // FE00H
+def DPP1  : C166Reg<0x01, "dpp1">, DwarfRegNum<[41]>; // FE02H
+def DPP2  : C166Reg<0x02, "dpp2">, DwarfRegNum<[42]>; // FE04H
+def DPP3  : C166Reg<0x03, "dpp3">, DwarfRegNum<[43]>; // FE06H
 
 //===----------------------------------------------------------------------===//
 // Register classes
@@ -116,15 +126,23 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
-  (add PSW, MDL, MDH, MDC, SYSSP, CP)> {
+  (add PSW, MDL, MDH, MDC, SYSSP, CP, STKOV, STKUN,
+       DPP0, DPP1, DPP2, DPP3)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
 
-// Everything the 8 bit "reg" field of PUSH and POP can name.  It exists only
-// to widen those two instructions past the general purpose registers, so it
-// is not an allocation class of its own.
+// Everything the 8 bit "reg" field can name.  There are two of these because
+// F0H + n is a word register in a word instruction and a byte register in a
+// byte one, and the special function registers are reachable from either.
+// They exist only to widen that field past the general purpose registers, so
+// neither is an allocation class of its own.
 def GR16orSFR : RegisterClass<"C166", [i16], 16, (add GR16, SFR)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+def GR8orSFR : RegisterClass<"C166", [i8], 8, (add GR8, SFR)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

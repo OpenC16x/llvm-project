@@ -52,6 +52,14 @@ protected:
     switch (Fixup.getKind()) {
     case C166::fixup_c166_rel8w:
       return ELF::R_C166_PCREL8W;
+    case C166::fixup_c166_rel8w_short:
+      // JMPR is the only thing that uses this, and it has a long form, so a
+      // target the assembler cannot place turns into a JMPA rather than
+      // arriving here.  There is deliberately no relocation for it.
+      reportError(Fixup.getLoc(),
+                  "a relative jump to a target this far away should have been "
+                  "relaxed");
+      return ELF::R_C166_NONE;
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
     case FK_Data_2:

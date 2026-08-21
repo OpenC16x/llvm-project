@@ -5,7 +5,7 @@ define i16 @select_umax(i16 %a, i16 %b) {
 ; CHECK-LABEL: select_umax:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmp r2, r3
-; CHECK-NEXT:    jmpa cc_UGT, .LBB0_2
+; CHECK-NEXT:    jmpr cc_UGT, .LBB0_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    mov r2, r3
 ; CHECK-NEXT:  .LBB0_2:
@@ -19,7 +19,7 @@ define i8 @select_byte(i8 %a, i8 %b, i16 %x) {
 ; CHECK-LABEL: select_byte:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmp r4, #0
-; CHECK-NEXT:    jmpa cc_EQ, .LBB1_2
+; CHECK-NEXT:    jmpr cc_EQ, .LBB1_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    movb rl2, rl3
 ; CHECK-NEXT:  .LBB1_2:
@@ -35,7 +35,7 @@ define i16 @setcc_sge(i16 %a, i16 %b) {
 ; CHECK-NEXT:    mov r4, r2
 ; CHECK-NEXT:    mov r2, #1
 ; CHECK-NEXT:    cmp r4, r3
-; CHECK-NEXT:    jmpa cc_SGE, .LBB2_2
+; CHECK-NEXT:    jmpr cc_SGE, .LBB2_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    mov r2, #0
 ; CHECK-NEXT:  .LBB2_2:
@@ -52,7 +52,7 @@ define i16 @select_against_small_constant(i16 %x, i16 %a, i16 %b) {
 ; CHECK-LABEL: select_against_small_constant:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmp r2, #3
-; CHECK-NEXT:    jmpa cc_ULT, .LBB3_2
+; CHECK-NEXT:    jmpr cc_ULT, .LBB3_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    mov r3, r4
 ; CHECK-NEXT:  .LBB3_2:
@@ -67,7 +67,7 @@ define i16 @select_against_big_constant(i16 %x, i16 %a, i16 %b) {
 ; CHECK-LABEL: select_against_big_constant:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmp r2, #1000
-; CHECK-NEXT:    jmpa cc_ULT, .LBB4_2
+; CHECK-NEXT:    jmpr cc_ULT, .LBB4_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    mov r3, r4
 ; CHECK-NEXT:  .LBB4_2:
@@ -82,7 +82,7 @@ define i8 @select_byte_against_constant(i8 %x, i8 %a, i8 %b) {
 ; CHECK-LABEL: select_byte_against_constant:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmpb rl2, #5
-; CHECK-NEXT:    jmpa cc_UGT, .LBB5_2
+; CHECK-NEXT:    jmpr cc_UGT, .LBB5_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    movb rl3, rl4
 ; CHECK-NEXT:  .LBB5_2:

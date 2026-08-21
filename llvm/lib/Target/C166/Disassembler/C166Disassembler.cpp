@@ -143,6 +143,24 @@ static DecodeStatus decodeReg8Operand(MCInst &MI, uint64_t Imm,
   return MCDisassembler::Fail;
 }
 
+/// The same field in a byte instruction, where F0H + n is a byte register.
+static DecodeStatus decodeReg8bOperand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  if (Imm >= 0xF0)
+    return DecodeGR8RegisterClass(MI, Imm - 0xF0, Address, Decoder);
+
+  const MCRegisterClass &SFRs = getC166MCRegisterClass(C166::SFRRegClassID);
+  const MCRegisterInfo *MRI = Decoder->getContext().getRegisterInfo();
+  for (MCPhysReg Reg : SFRs) {
+    if (MRI->getEncodingValue(Reg) == Imm) {
+      MI.addOperand(MCOperand::createReg(Reg));
+      return MCDisassembler::Success;
+    }
+  }
+  return MCDisassembler::Fail;
+}
+
 static DecodeStatus decodeIrang2Operand(MCInst &MI, uint64_t Imm,
                                         uint64_t Address,
                                         const MCDisassembler *Decoder) {

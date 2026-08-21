@@ -21,6 +21,8 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
 
+#include <string>
+
 using namespace llvm;
 
 #define GET_INSTRINFO_MC_DESC
@@ -73,6 +75,36 @@ static MCInstPrinter *createC166MCInstPrinter(const Triple &T,
   if (SyntaxVariant == 0)
     return new C166InstPrinter(MAI, MII, MRI);
   return nullptr;
+}
+
+namespace {
+struct SFR {
+  const char *Name;
+  uint16_t Addr;
+};
+// Kept in one place so that what the assembler accepts and what the
+// disassembler prints cannot drift apart.
+const SFR SFRs[] = {
+    {"dpp0", 0xFE00}, {"dpp1", 0xFE02},  {"dpp2", 0xFE04},
+    {"dpp3", 0xFE06}, {"mdh", 0xFE0C},   {"mdl", 0xFE0E},
+    {"cp", 0xFE10},   {"sp", 0xFE12},    {"stkov", 0xFE14},
+    {"stkun", 0xFE16}, {"mdc", 0xFF0E},  {"psw", 0xFF10},
+};
+} // namespace
+
+int64_t C166::getSFRAddress(StringRef Name) {
+  std::string Lowered = Name.lower();
+  for (const SFR &R : SFRs)
+    if (Lowered == R.Name)
+      return R.Addr;
+  return -1;
+}
+
+StringRef C166::getSFRName(uint64_t Addr) {
+  for (const SFR &R : SFRs)
+    if (R.Addr == Addr)
+      return R.Name;
+  return StringRef();
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166TargetMC() {

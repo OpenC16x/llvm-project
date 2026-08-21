@@ -143,3 +143,56 @@
 0x98 0x23
 # CHECK: movb rl2, [r3+]
 0x99 0x43
+
+# The two byte relative jump.  The condition is the high nibble of the opcode
+# and the displacement counts words from the instruction after it, so -1
+# branches to the instruction itself; that is what LLD writes as padding.
+# CHECK: jmpr cc_UC, -1
+0x0d 0xff
+# CHECK: jmpr cc_EQ, 4
+0x2d 0x04
+# CHECK: jmpr cc_ULE, -128
+0xfd 0x80
+
+# An address where one of the special function registers is mapped is named
+# rather than spelled out, and the assembler takes the name back as the same
+# address, so this still reassembles to the bytes it came from.
+# CHECK: mov r2, mdl
+0xf2 0xf2 0x0e 0xfe
+# CHECK: mov mdh, r3
+0xf6 0xf3 0x0c 0xfe
+# CHECK: mov r1, stkov
+0xf2 0xf1 0x14 0xfe
+# CHECK: mov psw, r5
+0xf6 0xf5 0x10 0xff
+# Anything else stays a number.
+# CHECK: mov r4, 4660
+0xf2 0xf4 0x34 0x12
+
+# The 8 bit "reg" field of an arithmetic instruction reaches the special
+# function registers, and comes back by name.
+# CHECK: add mdl, #1
+0x06 0x07 0x01 0x00
+# CHECK: add r2, #1234
+0x06 0xf2 0xd2 0x04
+# CHECK: sub stkov, #256
+0x26 0x0a 0x00 0x01
+# CHECK: mov sp, #64512
+0xe6 0x09 0x00 0xfc
+# CHECK: mov mdl, mdh
+0xf2 0x07 0x0c 0xfe
+
+# In a byte instruction the same field names a byte register instead, so these
+# opcodes come back with the byte mnemonic and the byte register name.
+# CHECK: addb mdl, #1
+0x07 0x07 0x01 0x00
+# CHECK: addb rl2, #200
+0x07 0xf4 0xc8 0x00
+# CHECK: subb stkov, #16
+0x27 0x0a 0x10 0x00
+# CHECK: cmpb mdl, #0
+0x47 0x07 0x00 0x00
+# CHECK: movb dpp0, #5
+0xe7 0x00 0x05 0x00
+# CHECK: movb mdl, mdh
+0xf3 0x07 0x0c 0xfe

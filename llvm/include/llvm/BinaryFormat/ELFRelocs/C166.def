@@ -32,7 +32,10 @@ ELF_RELOC(R_C166_PCREL16,   6)
 ELF_RELOC(R_C166_PCREL32,   7)
 
 // A relative branch displacement: (S + A - P) / 2 truncated to 8 bits, where
-// P is the address of the instruction following the one being relocated.
+// P is the address of the instruction following the one being relocated.  Only
+// the bit test branches need this.  JMPR counts words the same way but has a
+// long form, so an assembler that cannot work out the distance grows it into
+// that instead of leaving a relocation behind.
 ELF_RELOC(R_C166_PCREL8W,  12)
 ELF_RELOC(R_C166_SEG8,      8)
 ELF_RELOC(R_C166_SOF16,     9)

@@ -97,16 +97,26 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
 
+  /// The same in a two byte instruction, where it is the second byte.
+  unsigned getShortRel8OpValue(const MCInst &MI, unsigned OpNo,
+                               SmallVectorImpl<MCFixup> &Fixups,
+                               const MCSubtargetInfo &STI) const;
+
   /// A bit address, packed as (bitpos << 8) | bitoff so that one value can
   /// feed both fields of the instruction.
   unsigned getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const;
 
-  /// The 8 bit "reg" field of PUSH and POP.
+  /// The 8 bit "reg" field of a word instruction.
   unsigned getReg8OpValue(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
+
+  /// The same field in a byte instruction, where F0H + n is a byte register.
+  unsigned getReg8bOpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
 
   /// An ATOMIC/EXTend instruction range, written as 1 to 4 and encoded as
   /// 0 to 3.
@@ -252,6 +262,20 @@ unsigned C166MCCodeEmitter::getReg8OpValue(const MCInst &MI, unsigned OpNo,
   return Encoding;
 }
 
+unsigned C166MCCodeEmitter::getReg8bOpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  MCRegister Reg = MI.getOperand(OpNo).getReg();
+
+  // In a byte instruction F0H + n names a byte register, so the encoding is
+  // the byte register's own number; a special function register carries its
+  // short address either way.
+  unsigned Encoding = Ctx.getRegisterInfo()->getEncodingValue(Reg);
+  if (getC166MCRegisterClass(C166::GR8RegClassID).contains(Reg))
+    return 0xF0 + Encoding;
+  return Encoding;
+}
+
 unsigned
 C166MCCodeEmitter::getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
                                      SmallVectorImpl<MCFixup> &Fixups,
@@ -274,6 +298,21 @@ unsigned C166MCCodeEmitter::getRel8OpValue(const MCInst &MI, unsigned OpNo,
   // the distance to it into a word count from the instruction that follows.
   Fixups.push_back(MCFixup::create(SecondWordOffset, MO.getExpr(),
                                    C166::fixup_c166_rel8w, /*PCRel=*/true));
+  return 0;
+}
+
+unsigned
+C166MCCodeEmitter::getShortRel8OpValue(const MCInst &MI, unsigned OpNo,
+                                       SmallVectorImpl<MCFixup> &Fixups,
+                                       const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm())
+    return static_cast<unsigned>(MO.getImm()) & 0xff;
+
+  // JMPR is two bytes, so its displacement byte is the second one.
+  Fixups.push_back(MCFixup::create(1, MO.getExpr(),
+                                   C166::fixup_c166_rel8w_short,
+                                   /*PCRel=*/true));
   return 0;
 }
 

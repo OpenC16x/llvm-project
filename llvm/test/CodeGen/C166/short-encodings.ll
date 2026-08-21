@@ -73,7 +73,7 @@ define i16 @sum(ptr %a, i16 %n) {
 ; CHECK-NEXT:    add r2, r6
 ; CHECK-NEXT:    add r5, #1
 ; CHECK-NEXT:    cmp r5, r3
-; CHECK-NEXT:    jmpa cc_ULT, .LBB6_1
+; CHECK-NEXT:    jmpr cc_ULT, .LBB6_1
 ; CHECK-NEXT:  ; %bb.2: ; %done
 ; CHECK-NEXT:    ret
 entry:
@@ -105,7 +105,7 @@ define i8 @walk_bytes(ptr %a, i16 %n) {
 ; CHECK-NEXT:    addb rl2, rl6
 ; CHECK-NEXT:    add r5, #1
 ; CHECK-NEXT:    cmp r5, r3
-; CHECK-NEXT:    jmpa cc_ULT, .LBB7_1
+; CHECK-NEXT:    jmpr cc_ULT, .LBB7_1
 ; CHECK-NEXT:  ; %bb.2: ; %done
 ; CHECK-NEXT:    ret
 entry:

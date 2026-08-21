@@ -182,11 +182,17 @@ def Pag10AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected a 10 bit page number";
 }
 
-// The 8 bit "reg" field of PUSH and POP, which addresses a general purpose
-// register as F0H + n and a special function register by its short address.
+// The 8 bit "reg" field, which addresses a general purpose register as F0H + n
+// and a special function register by its short address.  Which kind of general
+// purpose register F0H + n means depends on the instruction, so there are two.
 def reg8 : RegisterOperand<GR16orSFR> {
   let EncoderMethod = "getReg8OpValue";
   let DecoderMethod = "decodeReg8Operand";
+}
+
+def reg8b : RegisterOperand<GR8orSFR> {
+  let EncoderMethod = "getReg8bOpValue";
+  let DecoderMethod = "decodeReg8bOperand";
 }
 
 // The 8 bit "bitoff" word address of the bit-addressable space, and a bit
@@ -207,7 +213,17 @@ def bitaddr : Operand<i16> {
   let ParserMatchClass = BitAddrAsmOperand;
 }
 
-// The target of a relative branch, an 8 bit signed count of words from the
+// The target of a relative branch in a two byte instruction, where the
+// displacement sits one byte in rather than two, so it needs its own encoder
+// and its own fixup.
+def reltarget8 : Operand<OtherVT> {
+  let PrintMethod = "printRelTargetOperand";
+  let EncoderMethod = "getShortRel8OpValue";
+  let ParserMatchClass = AddrAsmOperand;
+  let OperandType = "OPERAND_PCREL";
+}
+
+// The same in a four byte instruction: an 8 bit signed count of words from the
 // instruction that follows.
 def reltarget : Operand<OtherVT> {
   let PrintMethod = "printRelTargetOperand";
@@ -521,6 +537,21 @@ def MULHS16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
 def MULHU16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                        "#MULHU16rr",
                        [(set GR16:$dst, (mulhu GR16:$src1, GR16:$src2))]>;
+
+// One MUL leaves both halves of the product behind, in MDL and MDH, so a
+// widening multiply is one instruction and two moves rather than two of each.
+// These are what makes that happen: without them mul and mulhs are separate
+// nodes and each expands to a MUL of its own.
+def SMUL16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                          (ins GR16:$src1, GR16:$src2),
+                          "#SMUL16rrLOHI",
+                          [(set GR16:$lo, GR16:$hi,
+                                (smullohi GR16:$src1, GR16:$src2))]>;
+def UMUL16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                          (ins GR16:$src1, GR16:$src2),
+                          "#UMUL16rrLOHI",
+                          [(set GR16:$lo, GR16:$hi,
+                                (umullohi GR16:$src1, GR16:$src2))]>;
 def SDIV16rr  : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                        "#SDIV16rr",
                        [(set GR16:$dst, (sdiv GR16:$src1, GR16:$src2))]>;
@@ -579,6 +610,7 @@ def MOVB8ri4 : InstS<0xE1, (outs GR8:$dst), (ins imm4b:$src),
 }
 
 // MOV reg, #data16  /  MOVB reg, #data8
+let isCodeGenOnly = 1 in
 def MOV16ri : InstL<0xE6, (outs GR16:$dst), (ins data16:$src),
                     "mov\t$dst, $src", [(set GR16:$dst, imm:$src)]> {
   bits<4> dst;
@@ -587,6 +619,7 @@ def MOV16ri : InstL<0xE6, (outs GR16:$dst), (ins data16:$src),
   let Inst{11-8} = dst;
   let Inst{31-16} = src;
 }
+let isCodeGenOnly = 1 in
 def MOVB8ri : InstL<0xE7, (outs GR8:$dst), (ins data8:$src),
                     "movb\t$dst, $src", [(set GR8:$dst, imm:$src)]> {
   bits<4> dst;
@@ -676,6 +709,7 @@ def MOV16rm : InstL<0xD4, (outs GR16:$dst), (ins memri:$src),
   let Inst{31-16} = src{19-4};
 }
 // MOV reg, mem
+let isCodeGenOnly = 1 in
 def MOV16ra : InstL<0xF2, (outs GR16:$dst), (ins addr16:$src),
                     "mov\t$dst, $src", [(set GR16:$dst, (load addrabs:$src))]> {
   bits<4> dst;
@@ -694,6 +728,7 @@ def MOVB8rm : InstL<0xF4, (outs GR8:$dst), (ins memri:$src),
   let Inst{31-16} = src{19-4};
 }
 // MOVB reg, mem
+let isCodeGenOnly = 1 in
 def MOVB8ra : InstL<0xF3, (outs GR8:$dst), (ins addr16:$src),
                     "movb\t$dst, $src", [(set GR8:$dst, (load addrabs:$src))]> {
   bits<4> dst;
@@ -799,6 +834,7 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{15-12} = dst;
       let Inst{11-8} = src2;
     }
+    let isCodeGenOnly = 1 in
     def 16ri : InstL<opRI, (outs GR16:$dst), (ins GR16:$src1, data16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
                      [(set GR16:$dst, (opnode GR16:$src1, imm:$src2))]> {
@@ -808,7 +844,7 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{11-8} = dst;
       let Inst{31-16} = src2;
     }
-    let mayLoad = 1 in
+    let mayLoad = 1, isCodeGenOnly = 1 in
     def 16ra : InstL<opRA, (outs GR16:$dst), (ins GR16:$src1, addr16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
                      [(set GR16:$dst,
@@ -846,6 +882,7 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{15-12} = dst;
       let Inst{11-8} = src2;
     }
+    let isCodeGenOnly = 1 in
     def 8ri : InstL<opRI, (outs GR8:$dst), (ins GR8:$src1, data8:$src2),
                     !strconcat(mnemonic, "\t$dst, $src2"),
                     [(set GR8:$dst, (opnode GR8:$src1, imm:$src2))]> {
@@ -856,7 +893,7 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{23-16} = src2;
       let Inst{31-24} = 0;
     }
-    let mayLoad = 1 in
+    let mayLoad = 1, isCodeGenOnly = 1 in
     def 8ra : InstL<opRA, (outs GR8:$dst), (ins GR8:$src1, addr16:$src2),
                     !strconcat(mnemonic, "\t$dst, $src2"),
                     [(set GR8:$dst, (opnode GR8:$src1, (load addrabs:$src2)))]> {
@@ -868,6 +905,136 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
     }
   }
 }
+
+// The same two instructions with the whole 8 bit "reg" field, so that a
+// special function register can be named where the instruction allows one.
+//
+// They carry no pattern, and that is the point: reg8's register class holds
+// both kinds of register and is not allocatable, so it cannot be what a
+// pattern produces without the register allocator being told it may put a
+// result in an SFR.  The GPR-only forms above keep the patterns and are marked
+// codegen-only, which takes them out of the matcher and the decoder, so
+// "add r2, #1234" assembles as one of these and those bytes come back as it.
+multiclass ArithWReg<string mnemonic, bits<8> opRI, bits<8> opRA,
+                     list<Register> uses = []> {
+  let Defs = [PSW], Uses = uses in {
+    def 16regi : InstL<opRI, (outs), (ins reg8:$dst, data16:$src),
+                       !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<16> src;
+      let Inst{15-8} = dst;
+      let Inst{31-16} = src;
+    }
+    let mayLoad = 1 in
+    def 16rega : InstL<opRA, (outs), (ins reg8:$dst, addr16:$src),
+                       !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<16> src;
+      let Inst{15-8} = dst;
+      let Inst{31-16} = src;
+    }
+  }
+}
+
+// The compare and the two loading forms of MOV, widened the same way.  MOV
+// mem, reg is deliberately not: with both operands able to be an SFR name,
+// "mov mdl, mdh" would match it as well as MOV reg, mem, and the two are
+// different encodings of the same thing, so there would be nothing to choose
+// between them.
+def CMP16regi : InstL<0x46, (outs), (ins reg8:$src1, data16:$src2),
+                      "cmp\t$src1, $src2", []> {
+  bits<8> src1;
+  bits<16> src2;
+  let Defs = [PSW];
+  let Inst{15-8} = src1;
+  let Inst{31-16} = src2;
+}
+
+def MOV16regi : InstL<0xE6, (outs), (ins reg8:$dst, data16:$src),
+                      "mov\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+
+let mayLoad = 1 in
+def MOV16rega : InstL<0xF2, (outs), (ins reg8:$dst, addr16:$src),
+                      "mov\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+
+// The byte instructions the same way.  They need their own operand because
+// F0H + n names a byte register here.
+multiclass ArithBReg<string mnemonic, bits<8> opRI, bits<8> opRA> {
+  let Defs = [PSW] in {
+    def 8regi : InstL<opRI, (outs), (ins reg8b:$dst, data8:$src),
+                      !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<8> src;
+      let Inst{15-8} = dst;
+      let Inst{23-16} = src;
+      let Inst{31-24} = 0;
+    }
+    let mayLoad = 1 in
+    def 8rega : InstL<opRA, (outs), (ins reg8b:$dst, addr16:$src),
+                      !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<16> src;
+      let Inst{15-8} = dst;
+      let Inst{31-16} = src;
+    }
+  }
+}
+
+defm ADDB : ArithBReg<"addb", 0x07, 0x03>;
+defm SUBB : ArithBReg<"subb", 0x27, 0x23>;
+defm ANDB : ArithBReg<"andb", 0x67, 0x63>;
+defm ORB  : ArithBReg<"orb",  0x77, 0x73>;
+defm XORB : ArithBReg<"xorb", 0x57, 0x53>;
+
+def CMPB8regi : InstL<0x47, (outs), (ins reg8b:$src1, data8:$src2),
+                      "cmpb\t$src1, $src2", []> {
+  bits<8> src1;
+  bits<8> src2;
+  let Defs = [PSW];
+  let Inst{15-8} = src1;
+  let Inst{23-16} = src2;
+  let Inst{31-24} = 0;
+}
+
+def MOVB8regi : InstL<0xE7, (outs), (ins reg8b:$dst, data8:$src),
+                      "movb\t$dst, $src", []> {
+  bits<8> dst;
+  bits<8> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{23-16} = src;
+  let Inst{31-24} = 0;
+}
+
+let mayLoad = 1 in
+def MOVB8rega : InstL<0xF3, (outs), (ins reg8b:$dst, addr16:$src),
+                      "movb\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+
+defm ADD  : ArithWReg<"add",  0x06, 0x02>;
+defm SUB  : ArithWReg<"sub",  0x26, 0x22>;
+defm AND  : ArithWReg<"and",  0x66, 0x62>;
+defm OR   : ArithWReg<"or",   0x76, 0x72>;
+defm XOR  : ArithWReg<"xor",  0x56, 0x52>;
+defm ADDC : ArithWReg<"addc", 0x16, 0x12, [PSW]>;
+defm SUBC : ArithWReg<"subc", 0x36, 0x32, [PSW]>;
 
 defm ADD  : ArithW<"add",  0x00, 0x06, 0x02, add, 1>;
 defm SUB  : ArithW<"sub",  0x20, 0x26, 0x22, sub, 0>;
@@ -969,6 +1136,7 @@ class CompareImm3<bits<8> opcode, string mnemonic, RegisterClass RC,
 
 def CMP16ri3 : CompareImm3<0x48, "cmp", GR16, imm3>;
 def CMPB8ri3 : CompareImm3<0x49, "cmpb", GR8, imm3b>;
+let isCodeGenOnly = 1 in
 def CMP16ri : InstL<0x46, (outs), (ins GR16:$src1, data16:$src2),
                     "cmp\t$src1, $src2", []> {
   bits<4> src1;
@@ -984,6 +1152,7 @@ def CMPB8rr : InstS<0x41, (outs), (ins GR8:$src1, GR8:$src2),
   let Inst{15-12} = src1;
   let Inst{11-8} = src2;
 }
+let isCodeGenOnly = 1 in
 def CMPB8ri : InstL<0x47, (outs), (ins GR8:$src1, data8:$src2),
                     "cmpb\t$src1, $src2", []> {
   bits<4> src1;
@@ -1080,13 +1249,23 @@ def RETI : InstS<0xFB, (outs), (ins), "reti", [(C166retiglue)]> {
 }
 }
 
+// A two byte relative jump.  The low nibble of the opcode is fixed and the
+// high one is the condition.
+class JumpRel<dag ins, string asmstr, list<dag> pattern = []>
+    : C166Inst<(outs), ins, 2, asmstr, pattern> {
+  bits<8> dst;
+  let Inst{3-0} = 0b1101;
+  let Inst{15-8} = dst;
+  let Inst{31-16} = 0;
+}
+
 let isBranch = 1, isTerminator = 1 in {
   // A plain jump is JMPAcc with cc_UC hardwired.  It is marked codegen-only so
   // that it does not collide with JMPAcc in the decoder and the asm matcher;
   // both print the same text, so nothing is lost.
   let isBarrier = 1, isCodeGenOnly = 1 in
   def JMPA : InstL<0xEA, (outs), (ins brtarget:$dst), "jmpa\tcc_UC, $dst",
-                   [(br bb:$dst)]> {
+                   []> {
     bits<16> dst;
     let Inst{15-12} = 0b0000;   // cc_UC
     let Inst{11-8} = 0;
@@ -1103,6 +1282,25 @@ let isBranch = 1, isTerminator = 1 in {
     let Inst{15-12} = cond;
     let Inst{11-8} = 0;
     let Inst{31-16} = dst;
+  }
+
+  // JMPR is the two byte relative jump.  The condition is the high nibble of
+  // the opcode - the whole xD row of the opcode map is JMPR, one entry per
+  // condition, in the same order as the cc encoding - and the displacement
+  // counts words from the instruction after it, so it reaches 127 words either
+  // way.  This is what a branch is selected as; whether the target is close
+  // enough is not known until the layout is, so C166AsmBackend grows the ones
+  // that are not into JMPA.
+  let isBarrier = 1, isCodeGenOnly = 1 in
+  def JMPR : JumpRel<(ins reltarget8:$dst), "jmpr\tcc_UC, $dst",
+                     [(br bb:$dst)]> {
+    let Inst{7-4} = 0b0000;   // cc_UC
+  }
+
+  let Uses = [PSW] in
+  def JMPRcc : JumpRel<(ins reltarget8:$dst, cc:$cond), "jmpr\t$cond, $dst"> {
+    bits<4> cond;
+    let Inst{7-4} = cond;
   }
 
   // Fused compare-and-branch.  Expanded into a cmp/jmpa pair by

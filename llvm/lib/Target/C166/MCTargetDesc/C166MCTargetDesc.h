@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_C166_MCTARGETDESC_C166MCTARGETDESC_H
 #define LLVM_LIB_TARGET_C166_MCTARGETDESC_C166MCTARGETDESC_H
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
 #include <memory>
 
@@ -35,6 +36,23 @@ MCAsmBackend *createC166MCAsmBackend(const Target &T,
                                      const MCTargetOptions &Options);
 
 std::unique_ptr<MCObjectTargetWriter> createC166ELFObjectWriter(uint8_t OSABI);
+
+namespace C166 {
+
+// The special function registers are memory mapped, and both the assembler and
+// the disassembler are expected to know where.  Addresses are from the C166
+// User's Manual register table, and agree with the 8 bit short register
+// addresses the modelled registers carry as their hardware encoding.  Only the
+// registers the backend has a use for are here; the rest are peripheral state
+// that nothing in the compiler needs to name.
+
+/// The address the named register is mapped at, or -1 if the name is not one.
+int64_t getSFRAddress(StringRef Name);
+
+/// The name of the register mapped at \p Addr, or empty if nothing is.
+StringRef getSFRName(uint64_t Addr);
+
+} // end namespace C166
 
 } // namespace llvm
 

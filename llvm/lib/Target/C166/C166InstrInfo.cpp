@@ -155,7 +155,7 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
 
     Emit(CmpOpc).add(MI.getOperand(1)).add(MI.getOperand(2));
-    Emit(C166::JMPAcc)
+    Emit(C166::JMPRcc)
         .addMBB(MI.getOperand(0).getMBB())
         .addImm(MI.getOperand(3).getImm());
     break;
@@ -262,6 +262,20 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(High ? C166::MOVfromMDH : C166::MOVfromMDL).addDef(Dst);
     break;
   }
+  case C166::SMUL16rrLOHI:
+  case C166::UMUL16rrLOHI: {
+    // One MUL, then both halves out of the register pair it left them in.
+    Register Lo = MI.getOperand(0).getReg();
+    Register Hi = MI.getOperand(1).getReg();
+    Register Src1 = MI.getOperand(2).getReg();
+    Register Src2 = MI.getOperand(3).getReg();
+    bool Unsigned = MI.getOpcode() == C166::UMUL16rrLOHI;
+
+    Emit(Unsigned ? C166::MULUrr : C166::MULrr).addReg(Src1).addReg(Src2);
+    Emit(C166::MOVfromMDL).addDef(Lo);
+    Emit(C166::MOVfromMDH).addDef(Hi);
+    break;
+  }
   case C166::SDIV16rr:
   case C166::UDIV16rr:
   case C166::SREM16rr:
@@ -308,6 +322,7 @@ static bool isCondBranchOpcode(unsigned Opc) {
   case C166::BRCC8rr:
   case C166::BRCC8ri:
   case C166::JMPAcc:
+  case C166::JMPRcc:
     return true;
   default:
     return false;
@@ -321,7 +336,7 @@ static void parseCondBranch(MachineInstr &MI, MachineBasicBlock *&Target,
   Target = MI.getOperand(0).getMBB();
   Cond.push_back(MachineOperand::CreateImm(MI.getOpcode()));
 
-  if (MI.getOpcode() == C166::JMPAcc) {
+  if (MI.getOpcode() == C166::JMPAcc || MI.getOpcode() == C166::JMPRcc) {
     Cond.push_back(MI.getOperand(1));
     return;
   }
@@ -425,7 +440,8 @@ unsigned C166InstrInfo::removeBranch(MachineBasicBlock &MBB,
   if (I == MBB.end())
     return 0;
 
-  if (I->getOpcode() != C166::JMPA && !isCondBranchOpcode(I->getOpcode()))
+  if (I->getOpcode() != C166::JMPA && I->getOpcode() != C166::JMPR &&
+      !isCondBranchOpcode(I->getOpcode()))
     return 0;
 
   if (BytesRemoved)
@@ -456,7 +472,7 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   if (Cond.empty()) {
     assert(!FBB && "Unconditional branch with multiple successors!");
-    MachineInstr &MI = *BuildMI(&MBB, DL, get(C166::JMPA)).addMBB(TBB);
+    MachineInstr &MI = *BuildMI(&MBB, DL, get(C166::JMPR)).addMBB(TBB);
     if (BytesAdded)
       *BytesAdded += getInstSizeInBytes(MI);
     return 1;
@@ -464,7 +480,7 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   unsigned Opc = Cond[0].getImm();
   MachineInstrBuilder MIB = BuildMI(&MBB, DL, get(Opc)).addMBB(TBB);
-  if (Opc != C166::JMPAcc) {
+  if (Opc != C166::JMPAcc && Opc != C166::JMPRcc) {
     MIB.add(Cond[2]);
     MIB.add(Cond[3]);
   }
@@ -476,7 +492,7 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
   if (!FBB)
     return 1;
 
-  MachineInstr &MI = *BuildMI(&MBB, DL, get(C166::JMPA)).addMBB(FBB);
+  MachineInstr &MI = *BuildMI(&MBB, DL, get(C166::JMPR)).addMBB(FBB);
   if (BytesAdded)
     *BytesAdded += getInstSizeInBytes(MI);
   return 2;

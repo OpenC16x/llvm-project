@@ -73,6 +73,11 @@ every pass that could have inserted an instruction in between has run.
 Multiply and divide go through the MDL/MDH register pair and are expanded from
 pseudos at the same point.
 
+One MUL leaves both halves of the product behind, so SMUL_LOHI and UMUL_LOHI
+are kept whole rather than expanded: a widening multiply is one MUL and two
+moves.  Splitting them would make mul and mulhs separate nodes again, and each
+would issue a MUL of its own.
+
 The carry is different, and the difference is what makes wide arithmetic
 cheap.  MOV, MOVB, MOVBZ, MOVBS, PUSH and POP are all documented as leaving V
 and C alone, and those - plus the branches, the calls and the EXTend
@@ -228,9 +233,15 @@ swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
 
 The bit test branches JB, JNB, JBC and JNBS take a target that is a signed 8
 bit count of words from the instruction after them, which reaches 127 words
-either way.  That is the one relative field in the instruction set, so it has
-the one target fixup kind, fixup_c166_rel8w, and the one relocation that is not
-plain data, R_C166_PCREL8W.  A disassembly names the target address, but only
+either way.  JMPR counts the same way, and there are two fixup kinds because
+how far the displacement byte is from the end of the instruction differs: two
+bytes in the four byte bit test branches, one in the two byte JMPR.
+
+There is only one relocation for the two, though, because only one of them can
+need it.  A bit test branch has no long form, so a target the assembler cannot
+place has to become R_C166_PCREL8W and let the linker check the range.  JMPR
+does have one, so the same target grows it into a JMPA instead and no
+relocation is left behind.  A disassembly names the target address, but only
 llvm-objdump asks for that; left to itself the printer gives the distance,
 which is what can be handed back to the assembler.
 
@@ -244,6 +255,13 @@ Short encodings
 Several addressing modes exist in both a two byte and a four byte form, and
 the short one is picked wherever it fits, which is worth about a tenth of the
 code the backend emits.
+
+A branch is selected as the two byte JMPR.  Whether the target is within the
+127 words it reaches is not known until the layout is, so C166AsmBackend grows
+the ones that are not into the four byte JMPA; the two take their operands in
+the same order, so that is only a change of opcode.  A displacement written as
+a number rather than a label is left alone, since it is a distance and the
+long form takes an address.
 
 Every arithmetic instruction also has a two byte form taking a three bit
 constant, whose opcode is the register/register one plus eight, and that is
@@ -317,8 +335,7 @@ name is "elf32-c166", and the OS/ABI is ELFOSABI_STANDALONE, which is what the
 assembler writes.  Padding between functions is "jmpr cc_UC, -1", which
 branches to itself: padding is not meant to be reached, and hanging where the
 mistake happened is more use on a bare part than sliding into whatever comes
-next.  (JMPR itself is not modelled here, so a disassembly shows the padding
-as unknown bytes.)
+next.
 
 The compiler-rt builtins build for c166.  Everything in GENERIC_SOURCES
 already compiles, since int_types.h is written in fixed width types; what is
@@ -391,24 +408,40 @@ for the address it is mapped to (MDL is FE0EH, MDH is FE0CH).  The parser
 produces one operand that can be either and lets the matcher decide, since
 which one is meant is a property of the instruction rather than of the name.
 
+The wide field is not confined to PUSH and POP.  The arithmetic and compare
+instructions, and the two loading forms of MOV, have it too, so "add mdl, #1"
+assembles and a startup sequence can write SP or a DPP without a register to go
+through.  Those forms carry no pattern, which is what makes them safe: the
+register class behind the field holds both kinds of register and is not
+allocatable, so it cannot be what a pattern produces without the register
+allocator being told it may leave a result in an SFR.  The general purpose
+register forms keep the patterns and are marked codegen-only, which takes them
+out of the matcher and the decoder, so "add r2, #1234" assembles as the wide
+form and those bytes come back as it.
+
+There are two such classes rather than one, because F0H + n names a word
+register in a word instruction and a byte register in a byte one, while the
+special function registers are reachable from either.  So "addb mdl, #1"
+writes the low half of MDL and "add mdl, #1" writes all of it, and "addb
+rl2, #200" and "add r2, #200" name different registers with the same field
+value.
+
+Where those addresses are written down is C166MCTargetDesc, so that what the
+assembler accepts and what the disassembler prints back cannot drift apart:
+"mov r2, mdl" disassembles as itself rather than as "mov r2, 65038", and still
+assembles to the bytes it came from.  An address with no register at it stays
+a number.
+
 Known limitations / things to do
 --------------------------------
 
-* PUSH and POP are the only instructions whose 8 bit "reg" field reaches the
-  special function registers.  Everything else that could put an SFR there -
-  "ADD MDL, #1" and friends - can be neither assembled nor disassembled.
-  Widening them means the operand class has to hold both kinds of register,
-  which PUSH and POP can do because they have no pattern to satisfy: a class
-  covering GPRs and SFRs cannot be the result of a codegen pattern without
-  becoming what the register allocator constrains those results to.  Word and
-  byte forms would need one such class each, since "reg" F0H + n names a word
-  register in a word instruction and a byte register in a byte one.
-* Only the handful of special function registers the backend has a use for are
-  modelled, so "push t0" is not understood and its encoding does not decode.
-  The assembler does know the address of a few more, which is enough to name
-  them where an address is what is wanted.
-* Outside the "reg" field an SFR is just an address, and the disassembler
-  prints it numerically: "mov r2, mdl" comes back as "mov r2, 65038".
+* MOV mem, reg keeps its narrow field, because widening it would make
+  "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
+  encodings of the same thing and there would be nothing to choose between
+  them.
+* Only the special function registers the backend has a use for, plus the ones
+  a startup sequence writes, are modelled; "push t0" is not understood and its
+  encoding does not decode.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * A far access always costs an EXTS, even for several accesses in a row to the
@@ -417,19 +450,10 @@ Known limitations / things to do
   be provably unchanged in between, and through a symbol the two immediates
   are different relocations - seg(g) and seg(g+2) are the same segment in
   practice but nothing says so until the linker has placed g.
-* A widening multiply does the multiply twice.  MUL leaves both halves of the
-  product in MDL and MDH, but mul and mulhs are separate nodes here and each
-  expands to a MUL and one move, so "(long)a * b" issues two.  Custom lowering
-  SMUL_LOHI and UMUL_LOHI would let one MUL feed both halves.
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * No support for the XC16x MAC unit.
-* JMPR, the two byte relative unconditional jump, is not modelled, so an
-  unconditional branch is always the four byte JMPA.  Selecting it would need
-  branch relaxation, since it only reaches 127 words; the fixup kind and the
-  relocation for a relative branch already exist, because the bit test
-  branches use them.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

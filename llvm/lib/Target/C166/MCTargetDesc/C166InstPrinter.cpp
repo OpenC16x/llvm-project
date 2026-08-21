@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "C166InstPrinter.h"
+#include "C166MCTargetDesc.h"
 #include "C166.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
@@ -73,8 +74,15 @@ void C166InstPrinter::printAddr16Operand(const MCInst *MI, unsigned OpNo,
                                          raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm()) {
-    // A data address is an unsigned 16 bit quantity.
-    O << (static_cast<uint64_t>(Op.getImm()) & 0xffff);
+    // A data address is an unsigned 16 bit quantity.  Where one of the special
+    // function registers is mapped, name it: the assembler takes the name back
+    // as the same address, so this still reassembles to the bytes it came
+    // from, and "mov r2, mdl" says what it is doing.
+    uint64_t Addr = static_cast<uint64_t>(Op.getImm()) & 0xffff;
+    if (StringRef Name = C166::getSFRName(Addr); !Name.empty())
+      O << Name;
+    else
+      O << Addr;
   } else {
     assert(Op.isExpr() && "unknown operand kind in printAddr16Operand");
     MAI.printExpr(O, *Op.getExpr());
@@ -100,15 +108,18 @@ void C166InstPrinter::printRelTargetOperand(const MCInst *MI, uint64_t Address,
     return;
   }
 
-  // The displacement counts words from the instruction after this one, which
-  // is four bytes on: every relative branch here is a long one.  Naming the
-  // target instead is what a disassembly wants, but only the distance can be
-  // fed back to the assembler, so it stays the default.
+  // The displacement counts words from the instruction after this one, so
+  // naming the target means knowing how long this one is: the bit test
+  // branches are four bytes and JMPR is two.  Naming it is what a disassembly
+  // wants, but only the distance can be fed back to the assembler, so the
+  // distance stays the default.
   int64_t Words = SignExtend64<8>(Op.getImm());
-  if (PrintBranchImmAsAddress)
-    O << formatHex((Address + 4 + 2 * Words) & 0xffff);
-  else
+  if (PrintBranchImmAsAddress) {
+    uint64_t Size = MII.get(MI->getOpcode()).getSize();
+    O << formatHex((Address + Size + 2 * Words) & 0xffff);
+  } else {
     O << Words;
+  }
 }
 
 void C166InstPrinter::printMemRPostIncOperand(const MCInst *MI, unsigned OpNo,
