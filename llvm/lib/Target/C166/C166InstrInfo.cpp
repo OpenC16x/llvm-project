@@ -194,8 +194,10 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     bool IsByte =
         MI.getOpcode() == C166::FARLOAD8 || MI.getOpcode() == C166::FARSTORE8 ||
         MI.getOpcode() == C166::FARLOAD8i || MI.getOpcode() == C166::FARSTORE8i;
-    unsigned Opc = IsStore ? (IsByte ? C166::MOVB8mr : C166::MOV16mr)
-                           : (IsByte ? C166::MOVB8rm : C166::MOV16rm);
+    // The address is the offset register on its own, so this is the two byte
+    // [Rw] form rather than the four byte one with nothing added.
+    unsigned Opc = IsStore ? (IsByte ? C166::MOVB8pr : C166::MOV16pr)
+                           : (IsByte ? C166::MOVB8rp : C166::MOV16rp);
 
     // The operands are (value, offset, segment), with the value defined
     // rather than used for a load.
@@ -216,12 +218,10 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MachineInstrBuilder Access = Emit(Opc);
     if (IsStore)
       Access.addReg(Offset.getReg(), getKillRegState(Offset.isKill()))
-          .addImm(0)
           .add(Value);
     else
-      Access.add(Value)
-          .addReg(Offset.getReg(), getKillRegState(Offset.isKill()))
-          .addImm(0);
+      Access.add(Value).addReg(Offset.getReg(),
+                               getKillRegState(Offset.isKill()));
     Access.cloneMemRefs(MI);
 
     // The post-RA scheduler runs straight after this pass and would happily
