@@ -38,6 +38,8 @@ public:
   void printBrTargetOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printCallTargetOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printCCOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printBitOffOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printBitAddrOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 };
 
 } // namespace llvm

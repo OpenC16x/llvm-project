@@ -86,6 +86,30 @@ void C166InstPrinter::printCallTargetOperand(const MCInst *MI, unsigned OpNo,
   printAddr16Operand(MI, OpNo, O);
 }
 
+void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
+                                         raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (!Op.isImm()) {
+    assert(Op.isExpr() && "unknown operand kind in printBitOffOperand");
+    MAI.printExpr(O, *Op.getExpr());
+    return;
+  }
+
+  // F0H to FFH is the general purpose register window, which reads better by
+  // name; the rest of the bit-addressable space has no names to give it.
+  uint64_t Off = static_cast<uint64_t>(Op.getImm()) & 0xff;
+  if (Off >= 0xf0)
+    O << "r" << (Off - 0xf0);
+  else
+    O << Off;
+}
+
+void C166InstPrinter::printBitAddrOperand(const MCInst *MI, unsigned OpNo,
+                                          raw_ostream &O) {
+  printBitOffOperand(MI, OpNo, O);
+  O << '.' << (MI->getOperand(OpNo + 1).getImm() & 0xf);
+}
+
 void C166InstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo,
                                      raw_ostream &O) {
   auto CC = static_cast<C166CC::CondCode>(MI->getOperand(OpNo).getImm());

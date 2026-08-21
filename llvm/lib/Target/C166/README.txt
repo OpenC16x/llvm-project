@@ -168,6 +168,35 @@ one will read the wrong place.  There is also only one instruction counter, so
 inline assembly must not wrap a far access in an ATOMIC or EXTend sequence of
 its own.
 
+Bit addressing
+--------------
+
+The bit-addressable space is named by an 8 bit "bitoff" word address rather
+than by a full address: 00H to 7FH is internal RAM at FD00H + 2*bitoff, 80H to
+EFH is the special function registers at FF00H + 2*(bitoff - 80H), and F0H to
+FFH is R0 to R15.  An SFR's short register address is therefore also its
+bitoff, since reg and bitoff land on the same word; but only FF00H to FFDEH is
+bit addressable, so MDL, MDH, CP, SP and the DPPs, which live at FE00H and up,
+have a short address and no bitoff.
+
+BSET, BCLR, BAND, BOR, BXOR, BMOV, BMOVN, BCMP, BFLDL and BFLDH are assembled
+and disassembled.  A bit address is written <word>.<bit>, where the word is a
+register name, a bit-addressable SFR name, or the bitoff number itself.  The
+assembly lexer counts '.' as part of an identifier, so "psw.3" arrives as a
+single token and the bit instructions take their operands apart themselves;
+that also means a hexadecimal word has to be spaced away from its bit, as
+"0x88 . 15", while a decimal one can close up.
+
+Two encoding details are easy to get backwards.  The two operand instructions
+name the destination first and encode the source first, and pack the source
+bit position into the high nibble of the last byte.  BFLDL and BFLDH are byte
+swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
+"1A QQ ## @@", so the mask and the value change places.
+
+Nothing generates these: whether an address is bit addressable is not
+something the compiler can see from the IR, so it would take an intrinsic or
+an address-space to express it.
+
 Encodings and the MC layer
 --------------------------
 
@@ -221,5 +250,7 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * Jump tables are disabled; switches become compare and branch chains.
-* No tail calls, and no support for the C166 bit addressing instructions
-  (BSET/BCLR/BAND/...) or the XC16x MAC unit.
+* The bit test branches JB, JNB, JBC and JNBS are not implemented yet: their
+  relative target is an 8 bit signed word offset, which needs a fixup kind and
+  a relocation that do not exist.
+* No tail calls, and no support for the XC16x MAC unit.

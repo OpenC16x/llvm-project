@@ -128,6 +128,24 @@ def Seg8AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected an 8 bit segment number";
 }
 
+def BitOffAsmOperand : AsmOperandClass {
+  let Name = "BitOff";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected a bit-addressable word";
+}
+
+def BitAddrAsmOperand : AsmOperandClass {
+  let Name = "BitAddr";
+  let RenderMethod = "addBitAddrOperands";
+  let DiagnosticString = "expected a bit address of the form <word>.<bit>";
+}
+
+def Mask8AsmOperand : AsmOperandClass {
+  let Name = "Mask8";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an 8 bit mask";
+}
+
 def Pag10AsmOperand : AsmOperandClass {
   let Name = "Pag10";
   let RenderMethod = "addImmOperands";
@@ -139,6 +157,28 @@ def Pag10AsmOperand : AsmOperandClass {
 def reg8 : RegisterOperand<GR16orSFR> {
   let EncoderMethod = "getReg8OpValue";
   let DecoderMethod = "decodeReg8Operand";
+}
+
+// The 8 bit "bitoff" word address of the bit-addressable space, and a bit
+// address within it.  A bit address is printed <word>.<bit> and carried as two
+// operands; the encoder packs them as (bitpos << 8) | bitoff so that one value
+// can feed both instruction fields.
+def bitoff : Operand<i16> {
+  let PrintMethod = "printBitOffOperand";
+  let DecoderMethod = "decodeBitOffOperand";
+  let ParserMatchClass = BitOffAsmOperand;
+}
+
+def bitaddr : Operand<i16> {
+  let PrintMethod = "printBitAddrOperand";
+  let MIOperandInfo = (ops i16imm, i16imm);
+  let EncoderMethod = "getBitAddrOpValue";
+  let DecoderMethod = "decodeBitAddrOperand";
+  let ParserMatchClass = BitAddrAsmOperand;
+}
+
+def mask8 : Operand<i8> {
+  let ParserMatchClass = Mask8AsmOperand;
 }
 
 // A condition code, printed as cc_XX and encoded in a 4 bit field.
@@ -877,6 +917,81 @@ def PWRDN  : ProtectedInst<0x97, 0x68, 0x97, 0x97, "pwrdn">;
 def DISWDT : ProtectedInst<0xA5, 0x5A, 0xA5, 0xA5, "diswdt">;
 def SRVWDT : ProtectedInst<0xA7, 0x58, 0xA7, 0xA7, "srvwdt">;
 def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
+}
+
+//===----------------------------------------------------------------------===//
+// Bit Instructions
+//===----------------------------------------------------------------------===//
+//
+// The bit-addressable space is named by an 8 bit "bitoff" word address: 00H to
+// 7FH is internal RAM at FD00H + 2*bitoff, 80H to EFH is the SFR area at
+// FF00H + 2*(bitoff - 80H), and F0H to FFH is R0 to R15.  An SFR's short
+// register address is therefore also its bitoff, since both land on the same
+// word.  A bit address adds a position 0 to 15 within that word.
+//
+// These are MC level only: knowing that an address is bit-addressable is
+// beyond what the compiler can see, so nothing generates them yet.
+//===----------------------------------------------------------------------===//
+
+// BCLR and BSET put the bit position in the high nibble of the opcode byte.
+class BitSetClear<bits<4> op, string mnemonic>
+    : C166Inst<(outs), (ins bitaddr:$addr), 2,
+               !strconcat(mnemonic, "\t$addr"), []> {
+  bits<12> addr;
+  let Inst{3-0} = op;
+  let Inst{7-4} = addr{11-8};
+  let Inst{15-8} = addr{7-0};
+  let Inst{31-16} = 0;
+  let Defs = [PSW];
+}
+
+def BCLR : BitSetClear<0xE, "bclr">;
+def BSET : BitSetClear<0xF, "bset">;
+
+// The two operand bit instructions name the destination first but encode the
+// source first, and pack the two bit positions into the last byte as the
+// source in the high nibble and the destination in the low one.
+class BitBinary<bits<8> op, string mnemonic>
+    : InstL<op, (outs), (ins bitaddr:$dst, bitaddr:$src),
+            !strconcat(mnemonic, "\t$dst, $src"), []> {
+  bits<12> dst;
+  bits<12> src;
+  let Inst{15-8} = src{7-0};
+  let Inst{23-16} = dst{7-0};
+  let Inst{27-24} = dst{11-8};
+  let Inst{31-28} = src{11-8};
+  let Defs = [PSW];
+}
+
+def BCMP  : BitBinary<0x2A, "bcmp">;
+def BMOVN : BitBinary<0x3A, "bmovn">;
+def BMOV  : BitBinary<0x4A, "bmov">;
+def BOR   : BitBinary<0x5A, "bor">;
+def BAND  : BitBinary<0x6A, "band">;
+def BXOR  : BitBinary<0x7A, "bxor">;
+
+// BFLDL and BFLDH replace the masked bits of one byte of a word.  The two are
+// byte-swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
+// "1A QQ ## @@", so the mask and the value change places.
+let Defs = [PSW] in {
+def BFLDL : InstL<0x0A, (outs), (ins bitoff:$addr, mask8:$mask, data8:$value),
+                  "bfldl\t$addr, $mask, $value", []> {
+  bits<8> addr;
+  bits<8> mask;
+  bits<8> value;
+  let Inst{15-8} = addr;
+  let Inst{23-16} = mask;
+  let Inst{31-24} = value;
+}
+def BFLDH : InstL<0x1A, (outs), (ins bitoff:$addr, mask8:$mask, data8:$value),
+                  "bfldh\t$addr, $mask, $value", []> {
+  bits<8> addr;
+  bits<8> mask;
+  bits<8> value;
+  let Inst{15-8} = addr;
+  let Inst{23-16} = value;
+  let Inst{31-24} = mask;
+}
 }
 
 //===----------------------------------------------------------------------===//

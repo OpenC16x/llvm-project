@@ -107,6 +107,50 @@
 ; CHECK: pop r4           ; encoding: [0xfc,0xf4]
         pop     r4
 
+; The bit-addressable space is named by an 8 bit word offset: F0H to FFH are
+; R0 to R15, and a special function register in FF00H to FFDEH keeps the short
+; address it already has.  BSET and BCLR put the bit position in the high
+; nibble of the opcode byte.
+; CHECK: bset r5.3        ; encoding: [0x3f,0xf5]
+        bset    r5.3
+; CHECK: bclr r5.3        ; encoding: [0x3e,0xf5]
+        bclr    r5.3
+; CHECK: bset 136.10      ; encoding: [0xaf,0x88]
+        bset    psw.10
+; CHECK: bclr 135.0       ; encoding: [0x0e,0x87]
+        bclr    mdc.0
+
+; A word written as a number closes up with its bit position in decimal, but a
+; hexadecimal one has to be spaced out: the lexer reads "0x88.15" as a broken
+; floating point literal before the target ever sees it.
+; CHECK: bset 136.10      ; encoding: [0xaf,0x88]
+        bset    136.10
+; CHECK: bset 136.15      ; encoding: [0xff,0x88]
+        bset    0x88 . 15
+
+; The two operand bit instructions name the destination first but encode the
+; source first, and pack the source bit position into the high nibble of the
+; last byte.
+; CHECK: band r2.1, r3.2  ; encoding: [0x6a,0xf3,0xf2,0x21]
+        band    r2.1, r3.2
+; CHECK: bor r2.1, r3.2   ; encoding: [0x5a,0xf3,0xf2,0x21]
+        bor     r2.1, r3.2
+; CHECK: bxor r2.1, r3.2  ; encoding: [0x7a,0xf3,0xf2,0x21]
+        bxor    r2.1, r3.2
+; CHECK: bmov r2.1, r3.2  ; encoding: [0x4a,0xf3,0xf2,0x21]
+        bmov    r2.1, r3.2
+; CHECK: bmovn r2.1, r3.2 ; encoding: [0x3a,0xf3,0xf2,0x21]
+        bmovn   r2.1, r3.2
+; CHECK: bcmp r2.1, r3.2  ; encoding: [0x2a,0xf3,0xf2,0x21]
+        bcmp    r2.1, r3.2
+
+; BFLDL and BFLDH are byte-swapped with respect to each other: the mask and the
+; value change places.
+; CHECK: bfldl r4, #15, #5 ; encoding: [0x0a,0xf4,0x0f,0x05]
+        bfldl   r4, #0x0f, #0x05
+; CHECK: bfldh r4, #240, #80 ; encoding: [0x1a,0xf4,0x50,0xf0]
+        bfldh   r4, #0xf0, #0x50
+
 ; Add and subtract with carry: the plain opcodes plus 10H.
 ; CHECK: addc r3, r5      ; encoding: [0x10,0x35]
         addc    r3, r5

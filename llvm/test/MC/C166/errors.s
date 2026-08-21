@@ -32,3 +32,19 @@
         exts    #256, #1
 ; CHECK: [[@LINE+1]]:{{[0-9]+}}: error: expected a 10 bit page number
         extp    #1024, #1
+
+; A bit address is a bit-addressable word and a position within it.
+; CHECK: [[@LINE+1]]:{{[0-9]+}}: error: expected a bit position in [0, 15]
+        bset    r5.16
+
+; Only FF00H to FFDEH of the SFR area is bit addressable, so MDL (FE0EH) is
+; not, however well the assembler knows the name.
+; CHECK: [[@LINE+1]]:{{[0-9]+}}: error: not a bit-addressable word
+        bset    mdl.3
+
+; CHECK: [[@LINE+1]]:{{[0-9]+}}: error: expected '.' and a bit position
+        bset    r5
+
+; BFLDL takes the word, not a bit in it.
+; CHECK: [[@LINE+1]]:{{[0-9]+}}: error: expected a bit-addressable word, not a bit address
+        bfldl   r4.2, #1, #1

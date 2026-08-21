@@ -99,6 +99,23 @@ static DecodeStatus decodeMemRIOperand(MCInst &MI, uint64_t Imm,
 }
 
 /// An instruction range is encoded as 0 to 3 and written as 1 to 4.
+static DecodeStatus decodeBitOffOperand(MCInst &MI, uint64_t Imm,
+                                        uint64_t Address,
+                                        const MCDisassembler *Decoder) {
+  MI.addOperand(MCOperand::createImm(Imm & 0xff));
+  return MCDisassembler::Success;
+}
+
+/// A bit address arrives packed as (bitpos << 8) | bitoff; see
+/// C166MCCodeEmitter::getBitAddrOpValue().
+static DecodeStatus decodeBitAddrOperand(MCInst &MI, uint64_t Imm,
+                                         uint64_t Address,
+                                         const MCDisassembler *Decoder) {
+  MI.addOperand(MCOperand::createImm(Imm & 0xff));
+  MI.addOperand(MCOperand::createImm((Imm >> 8) & 0xf));
+  return MCDisassembler::Success;
+}
+
 /// The 8 bit "reg" field of PUSH and POP: F0H + n is a general purpose
 /// register, anything else is the short address of a special function
 /// register.  Only the special function registers the backend models can be

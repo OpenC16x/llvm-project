@@ -91,6 +91,12 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &STI) const;
 
+  /// A bit address, packed as (bitpos << 8) | bitoff so that one value can
+  /// feed both fields of the instruction.
+  unsigned getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const;
+
   /// The 8 bit "reg" field of PUSH and POP.
   unsigned getReg8OpValue(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
@@ -238,6 +244,17 @@ unsigned C166MCCodeEmitter::getReg8OpValue(const MCInst &MI, unsigned OpNo,
   if (getC166MCRegisterClass(C166::GR16RegClassID).contains(Reg))
     return 0xF0 + Encoding;
   return Encoding;
+}
+
+unsigned
+C166MCCodeEmitter::getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
+                                     SmallVectorImpl<MCFixup> &Fixups,
+                                     const MCSubtargetInfo &STI) const {
+  const MCOperand &Off = MI.getOperand(OpNo);
+  const MCOperand &Pos = MI.getOperand(OpNo + 1);
+  assert(Off.isImm() && Pos.isImm() && "Bit address must be constant");
+  return ((static_cast<unsigned>(Pos.getImm()) & 0xf) << 8) |
+         (static_cast<unsigned>(Off.getImm()) & 0xff);
 }
 
 #include "C166GenMCCodeEmitter.inc"
