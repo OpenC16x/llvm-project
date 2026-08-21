@@ -50,20 +50,30 @@ along on the PSW the hardware stacks on entry and RETI restores.
 Condition flags
 ---------------
 
-Nearly every C166 instruction updates the condition flags, MOV included, so
-nothing at all may be scheduled between a compare and the jump that reads its
-result.  Conditional branches and selects are therefore selected as fused
-pseudo instructions that carry the comparison operands, and only get split
-into a real cmp/jmpa pair by C166InstrInfo::expandPostRAPseudo(), once every
-pass that could have inserted an instruction in between has run.
+Nearly every C166 instruction updates the zero and negative flags, MOV
+included, so nothing at all may be scheduled between a compare and the jump
+that reads its result.  Conditional branches and selects are therefore selected
+as fused pseudo instructions that carry the comparison operands, and only get
+split into a real cmp/jmpa pair by C166InstrInfo::expandPostRAPseudo(), once
+every pass that could have inserted an instruction in between has run.
 
 Multiply and divide go through the MDL/MDH register pair and are expanded from
 pseudos at the same point.
 
-Because of that structure the flags are never live across an instruction
-boundary, which is why the moves and the ALU instructions are free to leave
-their PSW definition implicit.  Anything that starts consuming the flags
-somewhere else has to model them properly first.
+The carry is different, and the difference is what makes wide arithmetic
+cheap.  MOV, MOVB, MOVBZ, MOVBS, PUSH and POP are all documented as leaving V
+and C alone, and those - plus the branches, the calls and the EXTend
+instructions - are the only things the register allocator and the frame code
+insert.  So a carry can survive being spilled, reloaded, copied or
+two-address-copied, and a wider addition can be a real ADD/ADDC chain instead
+of recomputing the carry with a compare.  The chain is held together by glue
+through instruction selection and by the PSW def/use pair afterwards.
+
+The PSW register is therefore modelled exactly to the extent of the carry:
+every instruction that changes C says so, and the instructions above, which do
+not, say nothing.  That is sound only because the fused pseudos mean no other
+flag is ever live across an instruction boundary.  Anything that starts
+consuming Z, N, E or V somewhere else has to model them separately first.
 
 Segmented addressing
 --------------------
@@ -210,8 +220,6 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* The ADDC/SUBC instructions are described but not used: wide integer
-  arithmetic is expanded with explicit compares instead of a carry chain.
 * Jump tables are disabled; switches become compare and branch chains.
 * No tail calls, and no support for the C166 bit addressing instructions
   (BSET/BCLR/BAND/...) or the XC16x MAC unit.

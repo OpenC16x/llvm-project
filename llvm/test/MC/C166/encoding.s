@@ -107,6 +107,20 @@
 ; CHECK: pop r4           ; encoding: [0xfc,0xf4]
         pop     r4
 
+; Add and subtract with carry: the plain opcodes plus 10H.
+; CHECK: addc r3, r5      ; encoding: [0x10,0x35]
+        addc    r3, r5
+; CHECK: addc r3, #1234   ; encoding: [0x16,0xf3,0xd2,0x04]
+        addc    r3, #1234
+; CHECK: addc r3, total   ; encoding: [0x12,0xf3,A,A]
+        addc    r3, total
+; CHECK: subc r3, r5      ; encoding: [0x30,0x35]
+        subc    r3, r5
+; CHECK: subc r3, #1234   ; encoding: [0x36,0xf3,0xd2,0x04]
+        subc    r3, #1234
+; CHECK: subc r3, total   ; encoding: [0x32,0xf3,A,A]
+        subc    r3, total
+
 ; The 8 bit "reg" field addresses a GPR as F0H + n and a special function
 ; register by its short address, so PUSH and POP reach both.
 ; CHECK: push mdc         ; encoding: [0xec,0x87]

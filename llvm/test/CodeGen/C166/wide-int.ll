@@ -3,20 +3,15 @@
 
 ; Anything wider than a word is split into 16 bit pieces; 32 bit multiplies use
 ; the hardware multiplier, division becomes a library call.
+;
+; Addition and subtraction carry from one word to the next through the PSW,
+; with ADDC and SUBC, rather than recomputing the carry with a compare.
 
 define i32 @add32(i32 %a, i32 %b) {
 ; CHECK-LABEL: add32:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    add r4, r2
-; CHECK-NEXT:    mov r6, #1
-; CHECK-NEXT:    cmp r4, r2
-; CHECK-NEXT:    jmpa cc_ULT, .LBB0_2
-; CHECK-NEXT:  ; %bb.1:
-; CHECK-NEXT:    mov r6, #0
-; CHECK-NEXT:  .LBB0_2:
-; CHECK-NEXT:    add r3, r5
-; CHECK-NEXT:    add r3, r6
-; CHECK-NEXT:    mov r2, r4
+; CHECK-NEXT:    add r2, r4
+; CHECK-NEXT:    addc r3, r5
 ; CHECK-NEXT:    ret
   %r = add i32 %a, %b
   ret i32 %r
@@ -60,4 +55,78 @@ define i32 @shl32(i32 %a) {
 ; CHECK-NEXT:    ret
   %r = shl i32 %a, 1
   ret i32 %r
+}
+
+define i32 @sub32(i32 %a, i32 %b) {
+; CHECK-LABEL: sub32:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    sub r2, r4
+; CHECK-NEXT:    subc r3, r5
+; CHECK-NEXT:    ret
+  %r = sub i32 %a, %b
+  ret i32 %r
+}
+
+; The high word of a constant is usually small, so it lands in the immediate
+; form of ADDC.
+define i32 @add32_imm(i32 %a) {
+; CHECK-LABEL: add32_imm:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    add r2, #-31072
+; CHECK-NEXT:    addc r3, #1
+; CHECK-NEXT:    ret
+  %r = add i32 %a, 100000
+  ret i32 %r
+}
+
+; The chain keeps going for as many words as the type has.
+define i64 @add64(i64 %a, i64 %b) {
+; CHECK-LABEL: add64:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r6, [r0]
+; CHECK-NEXT:    mov r7, [r0+#2]
+; CHECK-NEXT:    mov r8, [r0+#4]
+; CHECK-NEXT:    mov r9, [r0+#6]
+; CHECK-NEXT:    add r2, r6
+; CHECK-NEXT:    addc r3, r7
+; CHECK-NEXT:    addc r4, r8
+; CHECK-NEXT:    addc r5, r9
+; CHECK-NEXT:    ret
+  %r = add i64 %a, %b
+  ret i64 %r
+}
+
+define i64 @sub64(i64 %a, i64 %b) {
+; CHECK-LABEL: sub64:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r6, [r0]
+; CHECK-NEXT:    mov r7, [r0+#2]
+; CHECK-NEXT:    mov r8, [r0+#4]
+; CHECK-NEXT:    mov r9, [r0+#6]
+; CHECK-NEXT:    sub r2, r6
+; CHECK-NEXT:    subc r3, r7
+; CHECK-NEXT:    subc r4, r8
+; CHECK-NEXT:    subc r5, r9
+; CHECK-NEXT:    ret
+  %r = sub i64 %a, %b
+  ret i64 %r
+}
+
+; Keeping an operand live past the addition makes the two address pass copy
+; into the destination, which puts a MOV between the ADD and the ADDC.  That is
+; only safe because a MOV leaves the carry alone.
+define i32 @add32_operand_still_live(i32 %a, i32 %b, ptr %out) {
+; CHECK-LABEL: add32_operand_still_live:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    add r4, r2
+; CHECK-NEXT:    addc r5, r3
+; CHECK-NEXT:    mov r6, [r0]
+; CHECK-NEXT:    mov [r6+#2], r3
+; CHECK-NEXT:    mov [r6], r2
+; CHECK-NEXT:    mov r2, r4
+; CHECK-NEXT:    mov r3, r5
+; CHECK-NEXT:    ret
+  %s = add i32 %a, %b
+  store i32 %a, ptr %out
+  ret i32 %s
 }

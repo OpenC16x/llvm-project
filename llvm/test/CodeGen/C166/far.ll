@@ -54,20 +54,13 @@ define void @far_store_byte(ptr addrspace(1) %p, i8 %v) {
 define i32 @far_load_i32(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load_i32:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r4, r2
-; CHECK-NEXT:    add r4, #2
-; CHECK-NEXT:    mov r5, #1
-; CHECK-NEXT:    cmp r4, r2
-; CHECK-NEXT:    jmpa cc_ULT, .LBB4_2
-; CHECK-NEXT:  ; %bb.1:
-; CHECK-NEXT:    mov r5, #0
-; CHECK-NEXT:  .LBB4_2:
-; CHECK-NEXT:    add r5, r3
-; CHECK-NEXT:    exts r5, #1
-; CHECK-NEXT:    mov r4, [r4]
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r2, [r2]
-; CHECK-NEXT:    mov r3, r4
+; CHECK-NEXT:    mov r4, [r2]
+; CHECK-NEXT:    add r2, #2
+; CHECK-NEXT:    addc r3, #0
+; CHECK-NEXT:    exts r3, #1
+; CHECK-NEXT:    mov r3, [r2]
+; CHECK-NEXT:    mov r2, r4
 ; CHECK-NEXT:    ret
   %v = load i32, ptr addrspace(1) %p
   ret i32 %v
@@ -79,17 +72,10 @@ define i16 @far_index(ptr addrspace(1) %p, i16 %i) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    mov r5, r4
 ; CHECK-NEXT:    shl r5, #1
-; CHECK-NEXT:    add r5, r2
-; CHECK-NEXT:    mov r6, #1
-; CHECK-NEXT:    cmp r5, r2
-; CHECK-NEXT:    jmpa cc_ULT, .LBB5_2
-; CHECK-NEXT:  ; %bb.1:
-; CHECK-NEXT:    mov r6, #0
-; CHECK-NEXT:  .LBB5_2:
 ; CHECK-NEXT:    shr r4, #15
-; CHECK-NEXT:    add r3, r4
-; CHECK-NEXT:    add r3, r6
-; CHECK-NEXT:    exts r3, #1
+; CHECK-NEXT:    add r5, r2
+; CHECK-NEXT:    addc r4, r3
+; CHECK-NEXT:    exts r4, #1
 ; CHECK-NEXT:    mov r2, [r5]
 ; CHECK-NEXT:    ret
   %e = zext i16 %i to i32
@@ -162,20 +148,13 @@ define i16 @far_global_indexed(i16 %i) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    mov r3, r2
 ; CHECK-NEXT:    shl r3, #1
-; CHECK-NEXT:    mov r5, #sof(fg)
-; CHECK-NEXT:    add r3, r5
-; CHECK-NEXT:    mov r4, #1
-; CHECK-NEXT:    cmp r3, r5
-; CHECK-NEXT:    jmpa cc_ULT, .LBB11_2
-; CHECK-NEXT:  ; %bb.1:
-; CHECK-NEXT:    mov r4, #0
-; CHECK-NEXT:  .LBB11_2:
 ; CHECK-NEXT:    shr r2, #15
+; CHECK-NEXT:    mov r4, #sof(fg)
 ; CHECK-NEXT:    mov r5, #seg(fg)
-; CHECK-NEXT:    add r5, r2
-; CHECK-NEXT:    add r5, r4
+; CHECK-NEXT:    add r4, r3
+; CHECK-NEXT:    addc r5, r2
 ; CHECK-NEXT:    exts r5, #1
-; CHECK-NEXT:    mov r2, [r3]
+; CHECK-NEXT:    mov r2, [r4]
 ; CHECK-NEXT:    ret
   %e = zext i16 %i to i32
   %q = getelementptr i16, ptr addrspace(1) @fg, i32 %e

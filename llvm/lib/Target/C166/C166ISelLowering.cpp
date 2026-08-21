@@ -97,10 +97,15 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::SHL_PARTS, VT, Expand);
     setOperationAction(ISD::SRL_PARTS, VT, Expand);
     setOperationAction(ISD::SRA_PARTS, VT, Expand);
-    setOperationAction(ISD::ADDC, VT, Expand);
-    setOperationAction(ISD::ADDE, VT, Expand);
-    setOperationAction(ISD::SUBC, VT, Expand);
-    setOperationAction(ISD::SUBE, VT, Expand);
+    // A word add or subtract leaves its carry in the PSW and ADDC/SUBC read
+    // it back, so wider arithmetic is a carry chain rather than a sequence of
+    // compares.  Only the word forms exist; a byte carry has nowhere to go
+    // because nothing wider than a byte is built out of bytes.
+    LegalizeAction Action = VT == MVT::i16 ? Legal : Expand;
+    setOperationAction(ISD::ADDC, VT, Action);
+    setOperationAction(ISD::ADDE, VT, Action);
+    setOperationAction(ISD::SUBC, VT, Action);
+    setOperationAction(ISD::SUBE, VT, Action);
 
     setOperationAction(ISD::SETCC, VT, Custom);
     setOperationAction(ISD::SELECT, VT, Expand);
