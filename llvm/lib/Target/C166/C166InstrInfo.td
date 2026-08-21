@@ -182,11 +182,17 @@ def Pag10AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected a 10 bit page number";
 }
 
-// The 8 bit "reg" field of PUSH and POP, which addresses a general purpose
-// register as F0H + n and a special function register by its short address.
+// The 8 bit "reg" field, which addresses a general purpose register as F0H + n
+// and a special function register by its short address.  Which kind of general
+// purpose register F0H + n means depends on the instruction, so there are two.
 def reg8 : RegisterOperand<GR16orSFR> {
   let EncoderMethod = "getReg8OpValue";
   let DecoderMethod = "decodeReg8Operand";
+}
+
+def reg8b : RegisterOperand<GR8orSFR> {
+  let EncoderMethod = "getReg8bOpValue";
+  let DecoderMethod = "decodeReg8bOperand";
 }
 
 // The 8 bit "bitoff" word address of the bit-addressable space, and a bit
@@ -613,6 +619,7 @@ def MOV16ri : InstL<0xE6, (outs GR16:$dst), (ins data16:$src),
   let Inst{11-8} = dst;
   let Inst{31-16} = src;
 }
+let isCodeGenOnly = 1 in
 def MOVB8ri : InstL<0xE7, (outs GR8:$dst), (ins data8:$src),
                     "movb\t$dst, $src", [(set GR8:$dst, imm:$src)]> {
   bits<4> dst;
@@ -721,6 +728,7 @@ def MOVB8rm : InstL<0xF4, (outs GR8:$dst), (ins memri:$src),
   let Inst{31-16} = src{19-4};
 }
 // MOVB reg, mem
+let isCodeGenOnly = 1 in
 def MOVB8ra : InstL<0xF3, (outs GR8:$dst), (ins addr16:$src),
                     "movb\t$dst, $src", [(set GR8:$dst, (load addrabs:$src))]> {
   bits<4> dst;
@@ -874,6 +882,7 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{15-12} = dst;
       let Inst{11-8} = src2;
     }
+    let isCodeGenOnly = 1 in
     def 8ri : InstL<opRI, (outs GR8:$dst), (ins GR8:$src1, data8:$src2),
                     !strconcat(mnemonic, "\t$dst, $src2"),
                     [(set GR8:$dst, (opnode GR8:$src1, imm:$src2))]> {
@@ -884,7 +893,7 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{23-16} = src2;
       let Inst{31-24} = 0;
     }
-    let mayLoad = 1 in
+    let mayLoad = 1, isCodeGenOnly = 1 in
     def 8ra : InstL<opRA, (outs GR8:$dst), (ins GR8:$src1, addr16:$src2),
                     !strconcat(mnemonic, "\t$dst, $src2"),
                     [(set GR8:$dst, (opnode GR8:$src1, (load addrabs:$src2)))]> {
@@ -953,6 +962,65 @@ def MOV16regi : InstL<0xE6, (outs), (ins reg8:$dst, data16:$src),
 let mayLoad = 1 in
 def MOV16rega : InstL<0xF2, (outs), (ins reg8:$dst, addr16:$src),
                       "mov\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+
+// The byte instructions the same way.  They need their own operand because
+// F0H + n names a byte register here.
+multiclass ArithBReg<string mnemonic, bits<8> opRI, bits<8> opRA> {
+  let Defs = [PSW] in {
+    def 8regi : InstL<opRI, (outs), (ins reg8b:$dst, data8:$src),
+                      !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<8> src;
+      let Inst{15-8} = dst;
+      let Inst{23-16} = src;
+      let Inst{31-24} = 0;
+    }
+    let mayLoad = 1 in
+    def 8rega : InstL<opRA, (outs), (ins reg8b:$dst, addr16:$src),
+                      !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<16> src;
+      let Inst{15-8} = dst;
+      let Inst{31-16} = src;
+    }
+  }
+}
+
+defm ADDB : ArithBReg<"addb", 0x07, 0x03>;
+defm SUBB : ArithBReg<"subb", 0x27, 0x23>;
+defm ANDB : ArithBReg<"andb", 0x67, 0x63>;
+defm ORB  : ArithBReg<"orb",  0x77, 0x73>;
+defm XORB : ArithBReg<"xorb", 0x57, 0x53>;
+
+def CMPB8regi : InstL<0x47, (outs), (ins reg8b:$src1, data8:$src2),
+                      "cmpb\t$src1, $src2", []> {
+  bits<8> src1;
+  bits<8> src2;
+  let Defs = [PSW];
+  let Inst{15-8} = src1;
+  let Inst{23-16} = src2;
+  let Inst{31-24} = 0;
+}
+
+def MOVB8regi : InstL<0xE7, (outs), (ins reg8b:$dst, data8:$src),
+                      "movb\t$dst, $src", []> {
+  bits<8> dst;
+  bits<8> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{23-16} = src;
+  let Inst{31-24} = 0;
+}
+
+let mayLoad = 1 in
+def MOVB8rega : InstL<0xF3, (outs), (ins reg8b:$dst, addr16:$src),
+                      "movb\t$dst, $src", []> {
   bits<8> dst;
   bits<16> src;
   let Defs = [PSW];
@@ -1084,6 +1152,7 @@ def CMPB8rr : InstS<0x41, (outs), (ins GR8:$src1, GR8:$src2),
   let Inst{15-12} = src1;
   let Inst{11-8} = src2;
 }
+let isCodeGenOnly = 1 in
 def CMPB8ri : InstL<0x47, (outs), (ins GR8:$src1, data8:$src2),
                     "cmpb\t$src1, $src2", []> {
   bits<4> src1;

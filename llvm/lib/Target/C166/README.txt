@@ -408,16 +408,23 @@ for the address it is mapped to (MDL is FE0EH, MDH is FE0CH).  The parser
 produces one operand that can be either and lets the matcher decide, since
 which one is meant is a property of the instruction rather than of the name.
 
-The wide field is not confined to PUSH and POP.  The word arithmetic and
-compare instructions, and the two loading forms of MOV, have it too, so
-"add mdl, #1" assembles and a startup sequence can write SP or a DPP without a
-register to go through.  Those forms carry no pattern, which is what makes
-them safe: reg8's register class holds both kinds of register and is not
+The wide field is not confined to PUSH and POP.  The arithmetic and compare
+instructions, and the two loading forms of MOV, have it too, so "add mdl, #1"
+assembles and a startup sequence can write SP or a DPP without a register to go
+through.  Those forms carry no pattern, which is what makes them safe: the
+register class behind the field holds both kinds of register and is not
 allocatable, so it cannot be what a pattern produces without the register
 allocator being told it may leave a result in an SFR.  The general purpose
 register forms keep the patterns and are marked codegen-only, which takes them
 out of the matcher and the decoder, so "add r2, #1234" assembles as the wide
 form and those bytes come back as it.
+
+There are two such classes rather than one, because F0H + n names a word
+register in a word instruction and a byte register in a byte one, while the
+special function registers are reachable from either.  So "addb mdl, #1"
+writes the low half of MDL and "add mdl, #1" writes all of it, and "addb
+rl2, #200" and "add r2, #200" name different registers with the same field
+value.
 
 Where those addresses are written down is C166MCTargetDesc, so that what the
 assembler accepts and what the disassembler prints back cannot drift apart:
@@ -428,11 +435,6 @@ a number.
 Known limitations / things to do
 --------------------------------
 
-* Only the word instructions have the wide "reg" field; the byte ones are
-  still general purpose registers only, so "ADDB MDL, #1" is not understood.
-  It needs a second operand class holding byte registers and SFRs together,
-  since "reg" F0H + n names a word register in a word instruction and a byte
-  register in a byte one.
 * MOV mem, reg keeps its narrow field, because widening it would make
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between

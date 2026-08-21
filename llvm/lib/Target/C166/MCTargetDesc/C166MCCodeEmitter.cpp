@@ -108,10 +108,15 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const;
 
-  /// The 8 bit "reg" field of PUSH and POP.
+  /// The 8 bit "reg" field of a word instruction.
   unsigned getReg8OpValue(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
+
+  /// The same field in a byte instruction, where F0H + n is a byte register.
+  unsigned getReg8bOpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
 
   /// An ATOMIC/EXTend instruction range, written as 1 to 4 and encoded as
   /// 0 to 3.
@@ -253,6 +258,20 @@ unsigned C166MCCodeEmitter::getReg8OpValue(const MCInst &MI, unsigned OpNo,
   // address as its encoding.
   unsigned Encoding = Ctx.getRegisterInfo()->getEncodingValue(Reg);
   if (getC166MCRegisterClass(C166::GR16RegClassID).contains(Reg))
+    return 0xF0 + Encoding;
+  return Encoding;
+}
+
+unsigned C166MCCodeEmitter::getReg8bOpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  MCRegister Reg = MI.getOperand(OpNo).getReg();
+
+  // In a byte instruction F0H + n names a byte register, so the encoding is
+  // the byte register's own number; a special function register carries its
+  // short address either way.
+  unsigned Encoding = Ctx.getRegisterInfo()->getEncodingValue(Reg);
+  if (getC166MCRegisterClass(C166::GR8RegClassID).contains(Reg))
     return 0xF0 + Encoding;
   return Encoding;
 }

@@ -152,11 +152,15 @@ void Machine::write8(uint32_t Phys, uint8_t V) {
       *ConsoleOS << char(V);
     return;
   }
+  // A byte written to a word wide special function register does not leave the
+  // other half alone: "byte write operations to word wide SFRs via indirect or
+  // direct 16-bit (mem) addressing or byte transfers via the PEC force zeros in
+  // the non-addressed byte.  Byte write operations via short 8-bit (reg)
+  // addressing can only access the low byte of an SFR and force zeros in the
+  // high byte."  Both cases come out the same here: the half not written reads
+  // back as zero.
   if (isCPUSFR(Phys & ~1u)) {
-    uint16_t W = read16(Phys & ~1u);
-    unsigned Sh = (Phys & 1) * 8;
-    W = (W & ~(uint16_t(0xFF) << Sh)) | (uint16_t(V) << Sh);
-    write16(Phys & ~1u, W);
+    write16(Phys & ~1u, uint16_t(V) << ((Phys & 1) * 8));
     return;
   }
   Mem[Phys] = V;

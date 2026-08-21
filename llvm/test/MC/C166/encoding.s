@@ -314,6 +314,30 @@ bit_target:
 ; CHECK: mov mdl, mdh     ; encoding: [0xf2,0x07,0x0c,0xfe]
         mov     mdl, mdh
 
+; The byte instructions have the same field, only there F0H + n names a byte
+; register rather than a word one.  The special function registers are the
+; same in both, so a byte instruction writes the low half of one.
+; CHECK: addb mdl, #1     ; encoding: [0x07,0x07,0x01,0x00]
+        addb    mdl, #1
+; CHECK: addb rl2, #200   ; encoding: [0x07,0xf4,0xc8,0x00]
+        addb    rl2, #200
+; CHECK: subb stkov, #16  ; encoding: [0x27,0x0a,0x10,0x00]
+        subb    stkov, #16
+; CHECK: andb psw, #15    ; encoding: [0x67,0x88,0x0f,0x00]
+        andb    psw, #15
+; CHECK: orb mdh, 4660    ; encoding: [0x73,0x06,0x34,0x12]
+        orb     mdh, 0x1234
+; CHECK: xorb rh3, #170   ; encoding: [0x57,0xf7,0xaa,0x00]
+        xorb    rh3, #0xAA
+; CHECK: cmpb mdl, #0     ; encoding: [0x47,0x07,0x00,0x00]
+        cmpb    mdl, #0
+; CHECK: movb dpp0, #5    ; encoding: [0xe7,0x00,0x05,0x00]
+        movb    dpp0, #5
+; CHECK: movb rl4, 8192   ; encoding: [0xf3,0xf8,0x00,0x20]
+        movb    rl4, 0x2000
+; CHECK: movb mdl, mdh    ; encoding: [0xf3,0x07,0x0c,0xfe]
+        movb    mdl, mdh
+
 ; The protected instructions repeat their opcode in the second word.
 ; CHECK: srst             ; encoding: [0xb7,0x48,0xb7,0xb7]
         srst

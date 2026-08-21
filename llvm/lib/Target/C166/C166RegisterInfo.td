@@ -132,10 +132,17 @@ def SFR : RegisterClass<"C166", [i16], 16,
   let CopyCost = -1;
 }
 
-// Everything the 8 bit "reg" field of PUSH and POP can name.  It exists only
-// to widen those two instructions past the general purpose registers, so it
-// is not an allocation class of its own.
+// Everything the 8 bit "reg" field can name.  There are two of these because
+// F0H + n is a word register in a word instruction and a byte register in a
+// byte one, and the special function registers are reachable from either.
+// They exist only to widen that field past the general purpose registers, so
+// neither is an allocation class of its own.
 def GR16orSFR : RegisterClass<"C166", [i16], 16, (add GR16, SFR)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+def GR8orSFR : RegisterClass<"C166", [i8], 8, (add GR8, SFR)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

@@ -48,50 +48,53 @@ namespace {
 /// in C166InstrInfo.td.
 enum class Op {
   Unknown,
-#define OPS(X)                                                                                  \
-  X(ADD16rr)                                                                                    \
-  X(ADD16ri)                                                                                    \
-  X(ADD16ri3)                                                                                   \
-  X(ADD16ra) X(ADDB8rr) X(ADDB8ri) X(ADDB8ri3) X(ADDB8ra) X(ADDC16rr) X(                        \
-      ADDC16ri) X(ADDC16ri3) X(ADDC16ra) X(SUB16rr) X(SUB16ri) X(SUB16ri3)                      \
-      X(SUB16ra) X(SUBB8rr) X(SUBB8ri) X(SUBB8ri3) X(SUBB8ra) X(SUBC16rr) X(                    \
-          SUBC16ri) X(SUBC16ri3) X(SUBC16ra) X(AND16rr) X(AND16ri) X(AND16ri3)                  \
-          X(AND16ra) X(ANDB8rr) X(ANDB8ri) X(ANDB8ri3) X(ANDB8ra) X(OR16rr) X(                  \
-              OR16ri) X(OR16ri3) X(OR16ra) X(ORB8rr) X(ORB8ri) X(ORB8ri3)                       \
-              X(ORB8ra) X(XOR16rr) X(XOR16ri) X(XOR16ri3) X(XOR16ra) X(XORB8rr) X(              \
-                  XORB8ri) X(XORB8ri3) X(XORB8ra) X(CMP16rr) X(CMP16ri) X(CMP16ri3)             \
-                  X(ADD16regi) X(ADD16rega) X(SUB16regi) X(SUB16rega) X(                        \
-                      ADDC16regi) X(ADDC16rega) X(SUBC16regi) X(SUBC16rega)                     \
-                      X(AND16regi) X(AND16rega) X(OR16regi) X(OR16rega) X(XOR16regi) X(         \
-                          XOR16rega) X(CMP16regi) X(MOV16regi) X(MOV16rega) X(CMPB8rr)          \
-                          X(CMPB8ri) X(CMPB8ri3) X(SHL16rr) X(SHL16ri) X(                       \
-                              SHR16rr) X(SHR16ri) X(ASHR16rr) X(ASHR16ri) X(ROL16rr)            \
-                              X(ROL16ri) X(ROR16rr) X(ROR16ri) X(CPL16r) X(CPLB8r) X(NEG16r) X( \
-                                  NEGB8r) X(MULrr) X(MULUrr) X(DIVr) X(DIVUr) X(MOVfromMDL)     \
-                                  X(MOVfromMDH) X(MOVtoMDL) X(MOVtoMDH) X(MOV16rr) X(           \
-                                      MOV16ri) X(MOV16ri4) X(MOV16ra) X(MOV16ar) X(MOV16rm)     \
-                                      X(MOV16mr) X(MOV16rp) X(MOV16pr) X(MOV16rpi) X(           \
-                                          MOVB8rr) X(MOVB8ri) X(MOVB8ri4) X(MOVB8ra)            \
-                                          X(MOVB8ar) X(MOVB8rm) X(MOVB8mr) X(                   \
-                                              MOVB8rp) X(MOVB8pr) X(MOVB8rpi) X(MOVBS16r8)      \
-                                              X(MOVBZ16r8) X(JMPA) X(JMPAcc) X(JMPR) X(         \
-                                                  JMPRcc) X(JMPI) X(JMPS)                       \
-                                                  X(CALLA) X(CALLI) X(CALLS) X(                 \
-                                                      RET) X(RETI) X(RETS) X(PUSH) X(POP)       \
-                                                      X(JB) X(JNB) X(                           \
-                                                          JBC) X(JNBS) X(BSET) X(BCLR) X(BAND)  \
-                                                          X(BOR) X(BXOR) X(BMOV) X(             \
-                                                              BMOVN) X(BCMP) X(BFLDL)           \
-                                                              X(BFLDH) X(EXTSi) X(EXTSr) X(     \
-                                                                  EXTSRi) X(EXTSRr) X(EXTPi)    \
-                                                                  X(EXTPr) X(EXTPRi) X(         \
-                                                                      EXTPRr) X(EXTR)           \
-                                                                      X(ATOMIC) X(              \
-                                                                          NOP) X(DISWDT)        \
-                                                                          X(EINIT) X(           \
-                                                                              SRVWDT) X(SRST)   \
-                                                                              X(IDLE)           \
-                                                                                  X(PWRDN)
+#define OPS(X)                                                                                      \
+  X(ADD16rr)                                                                                        \
+  X(ADD16ri)                                                                                        \
+  X(ADD16ri3)                                                                                       \
+  X(ADD16ra)                                                                                        \
+  X(ADDB8rr) X(ADDB8ri) X(ADDB8ri3) X(ADDB8ra) X(ADDC16rr) X(ADDC16ri) X(                           \
+      ADDC16ri3) X(ADDC16ra) X(SUB16rr) X(SUB16ri) X(SUB16ri3) X(SUB16ra) X(SUBB8rr)                \
+      X(SUBB8ri) X(SUBB8ri3) X(SUBB8ra) X(SUBC16rr) X(SUBC16ri) X(SUBC16ri3) X(                     \
+          SUBC16ra) X(AND16rr) X(AND16ri) X(AND16ri3) X(AND16ra) X(ANDB8rr)                         \
+          X(ANDB8ri) X(ANDB8ri3) X(ANDB8ra) X(OR16rr) X(OR16ri) X(OR16ri3) X(                       \
+              OR16ra) X(ORB8rr) X(ORB8ri) X(ORB8ri3) X(ORB8ra) X(XOR16rr) X(XOR16ri)                \
+              X(XOR16ri3) X(XOR16ra) X(XORB8rr) X(XORB8ri) X(XORB8ri3) X(                           \
+                  XORB8ra) X(CMP16rr) X(CMP16ri) X(CMP16ri3) X(ADD16regi) X(ADD16rega) X(SUB16regi) \
+                  X(SUB16rega) X(ADDC16regi) X(ADDC16rega) X(SUBC16regi) X(SUBC16rega) X(           \
+                      AND16regi) X(AND16rega) X(OR16regi) X(OR16rega) X(XOR16regi)                  \
+                      X(XOR16rega) X(CMP16regi) X(MOV16regi) X(                                     \
+                          MOV16rega) X(ADDB8regi) X(ADDB8rega) X(SUBB8regi) X(SUBB8rega)            \
+                          X(ANDB8regi) X(ANDB8rega) X(ORB8regi) X(ORB8rega) X(XORB8regi) X(         \
+                              XORB8rega) X(CMPB8regi) X(MOVB8regi) X(MOVB8rega) X(CMPB8rr)          \
+                              X(CMPB8ri) X(CMPB8ri3) X(SHL16rr) X(SHL16ri) X(                       \
+                                  SHR16rr) X(SHR16ri) X(ASHR16rr) X(ASHR16ri) X(ROL16rr)            \
+                                  X(ROL16ri) X(ROR16rr) X(ROR16ri) X(CPL16r) X(CPLB8r) X(NEG16r) X( \
+                                      NEGB8r) X(MULrr) X(MULUrr) X(DIVr) X(DIVUr) X(MOVfromMDL)     \
+                                      X(MOVfromMDH) X(MOVtoMDL) X(MOVtoMDH) X(MOV16rr) X(           \
+                                          MOV16ri) X(MOV16ri4) X(MOV16ra) X(MOV16ar) X(MOV16rm)     \
+                                          X(MOV16mr) X(MOV16rp) X(MOV16pr) X(MOV16rpi) X(           \
+                                              MOVB8rr) X(MOVB8ri) X(MOVB8ri4) X(MOVB8ra)            \
+                                              X(MOVB8ar) X(MOVB8rm) X(MOVB8mr) X(                   \
+                                                  MOVB8rp) X(MOVB8pr) X(MOVB8rpi) X(MOVBS16r8)      \
+                                                  X(MOVBZ16r8) X(JMPA) X(JMPAcc) X(JMPR) X(         \
+                                                      JMPRcc) X(JMPI) X(JMPS)                       \
+                                                      X(CALLA) X(CALLI) X(CALLS) X(                 \
+                                                          RET) X(RETI) X(RETS) X(PUSH) X(POP)       \
+                                                          X(JB) X(JNB) X(                           \
+                                                              JBC) X(JNBS) X(BSET) X(BCLR) X(BAND)  \
+                                                              X(BOR) X(BXOR) X(BMOV) X(             \
+                                                                  BMOVN) X(BCMP) X(BFLDL)           \
+                                                                  X(BFLDH) X(EXTSi) X(EXTSr) X(     \
+                                                                      EXTSRi) X(EXTSRr) X(EXTPi)    \
+                                                                      X(EXTPr) X(EXTPRi) X(         \
+                                                                          EXTPRr) X(EXTR)           \
+                                                                          X(ATOMIC) X(              \
+                                                                              NOP) X(DISWDT)        \
+                                                                              X(EINIT) X(           \
+                                                                                  SRVWDT) X(SRST)   \
+                                                                                  X(IDLE)           \
+                                                                                      X(PWRDN)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -505,6 +508,18 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   auto W8 = [&](unsigned I, uint16_t V) {
     M.write16(reg8Address(M, MRI, Reg(I)), V);
   };
+  // The same field in a byte instruction, where it names one byte.  A byte
+  // register n lives at CP + n; a special function register is at its own
+  // address, and the byte meant is the low one.
+  auto ByteReg8Address = [&](unsigned I) -> uint32_t {
+    MCRegister R = Reg(I);
+    unsigned B = byteRegIndex(MRI, R);
+    if (B != ~0u)
+      return uint16_t(M.CP + B);
+    return M.regFieldAddress(MRI.getEncodingValue(R));
+  };
+  auto RB8 = [&](unsigned I) { return M.read8(ByteReg8Address(I)); };
+  auto WB8 = [&](unsigned I, uint8_t V) { M.write8(ByteReg8Address(I), V); };
   auto LastB = [&]() { return B(NumOps - 1); };
 
   // A "mem" operand and an indirect address both go through the DPP window
@@ -660,6 +675,56 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     E.setE(V, false);
     E.setZN(V, false);
     W8(0, V);
+    break;
+  }
+
+  // The byte instructions with the wide field.  F0H + n is a byte register
+  // here, so the location is one byte wide wherever it is.
+  case Op::ADDB8regi:
+    WB8(0, E.doAdd(RB8(0), Imm(1), true, false));
+    break;
+  case Op::ADDB8rega:
+    WB8(0, E.doAdd(RB8(0), Load8At(Imm(1)), true, false));
+    break;
+  case Op::SUBB8regi:
+    WB8(0, E.doSub(RB8(0), Imm(1), true, false));
+    break;
+  case Op::SUBB8rega:
+    WB8(0, E.doSub(RB8(0), Load8At(Imm(1)), true, false));
+    break;
+  case Op::ANDB8regi:
+    WB8(0, E.doLogic(RB8(0), Imm(1), true, '&'));
+    break;
+  case Op::ANDB8rega:
+    WB8(0, E.doLogic(RB8(0), Load8At(Imm(1)), true, '&'));
+    break;
+  case Op::ORB8regi:
+    WB8(0, E.doLogic(RB8(0), Imm(1), true, '|'));
+    break;
+  case Op::ORB8rega:
+    WB8(0, E.doLogic(RB8(0), Load8At(Imm(1)), true, '|'));
+    break;
+  case Op::XORB8regi:
+    WB8(0, E.doLogic(RB8(0), Imm(1), true, '^'));
+    break;
+  case Op::XORB8rega:
+    WB8(0, E.doLogic(RB8(0), Load8At(Imm(1)), true, '^'));
+    break;
+  case Op::CMPB8regi:
+    E.doSub(RB8(0), Imm(1), true, false);
+    break;
+  case Op::MOVB8regi: {
+    uint8_t V = uint8_t(Imm(1));
+    E.setE(V, true);
+    E.setZN(V, true);
+    WB8(0, V);
+    break;
+  }
+  case Op::MOVB8rega: {
+    uint8_t V = Load8At(uint16_t(Imm(1)));
+    E.setE(V, true);
+    E.setZN(V, true);
+    WB8(0, V);
     break;
   }
 
