@@ -177,6 +177,18 @@ def bitaddr : Operand<i16> {
   let ParserMatchClass = BitAddrAsmOperand;
 }
 
+// The target of a relative branch, an 8 bit signed count of words from the
+// instruction that follows.
+def reltarget : Operand<OtherVT> {
+  let PrintMethod = "printRelTargetOperand";
+  let EncoderMethod = "getRel8OpValue";
+  let ParserMatchClass = AddrAsmOperand;
+  // Marking it PC relative is what gets the instruction's own address handed
+  // to the print method, so a disassembly can name the target rather than the
+  // distance to it.
+  let OperandType = "OPERAND_PCREL";
+}
+
 def mask8 : Operand<i8> {
   let ParserMatchClass = Mask8AsmOperand;
 }
@@ -993,6 +1005,27 @@ def BFLDH : InstL<0x1A, (outs), (ins bitoff:$addr, mask8:$mask, data8:$value),
   let Inst{31-24} = mask;
 }
 }
+
+// The bit test branches.  The bit position goes in the high nibble of the last
+// byte, with the low one left clear.
+let isBranch = 1, isTerminator = 1 in
+class BitBranch<bits<8> op, string mnemonic, bit setsFlags>
+    : InstL<op, (outs), (ins bitaddr:$addr, reltarget:$dst),
+            !strconcat(mnemonic, "\t$addr, $dst"), []> {
+  bits<12> addr;
+  bits<8> dst;
+  let Inst{15-8} = addr{7-0};
+  let Inst{23-16} = dst;
+  let Inst{27-24} = 0;
+  let Inst{31-28} = addr{11-8};
+  let Defs = !if(setsFlags, [PSW], []);
+}
+
+def JB   : BitBranch<0x8A, "jb",   0>;
+def JNB  : BitBranch<0x9A, "jnb",  0>;
+// JBC and JNBS also change the bit they tested.
+def JBC  : BitBranch<0xAA, "jbc",  1>;
+def JNBS : BitBranch<0xBA, "jnbs", 1>;
 
 //===----------------------------------------------------------------------===//
 // Segmented Addressing

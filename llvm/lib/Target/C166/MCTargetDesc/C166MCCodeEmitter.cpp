@@ -16,6 +16,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/C166FixupKinds.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCCodeEmitter.h"
@@ -90,6 +91,11 @@ class C166MCCodeEmitter : public MCCodeEmitter {
   unsigned getPag10OpValue(const MCInst &MI, unsigned OpNo,
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &STI) const;
+
+  /// The signed 8 bit word displacement of a relative branch.
+  unsigned getRel8OpValue(const MCInst &MI, unsigned OpNo,
+                          SmallVectorImpl<MCFixup> &Fixups,
+                          const MCSubtargetInfo &STI) const;
 
   /// A bit address, packed as (bitpos << 8) | bitoff so that one value can
   /// feed both fields of the instruction.
@@ -255,6 +261,20 @@ C166MCCodeEmitter::getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
   assert(Off.isImm() && Pos.isImm() && "Bit address must be constant");
   return ((static_cast<unsigned>(Pos.getImm()) & 0xf) << 8) |
          (static_cast<unsigned>(Off.getImm()) & 0xff);
+}
+
+unsigned C166MCCodeEmitter::getRel8OpValue(const MCInst &MI, unsigned OpNo,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm())
+    return static_cast<unsigned>(MO.getImm()) & 0xff;
+
+  // The displacement byte is the third of the instruction; the backend turns
+  // the distance to it into a word count from the instruction that follows.
+  Fixups.push_back(MCFixup::create(SecondWordOffset, MO.getExpr(),
+                                   C166::fixup_c166_rel8w, /*PCRel=*/true));
+  return 0;
 }
 
 #include "C166GenMCCodeEmitter.inc"

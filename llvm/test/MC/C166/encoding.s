@@ -151,6 +151,23 @@
 ; CHECK: bfldh r4, #240, #80 ; encoding: [0x1a,0xf4,0x50,0xf0]
         bfldh   r4, #0xf0, #0x50
 
+; The bit test branches take a target that is a signed count of words from the
+; instruction after them, which is what the disassembler prints back.
+; CHECK: jb r5.3, -3      ; encoding: [0x8a,0xf5,0xfd,0x30]
+        jb      r5.3, -3
+; CHECK: jnb 136.10, 4    ; encoding: [0x9a,0x88,0x04,0xa0]
+        jnb     psw.10, 4
+; CHECK: jbc r5.3, 2      ; encoding: [0xaa,0xf5,0x02,0x30]
+        jbc     r5.3, 2
+; CHECK: jnbs r5.3, 0     ; encoding: [0xba,0xf5,0x00,0x30]
+        jnbs    r5.3, 0
+
+; A label leaves a relocatable displacement behind instead.
+; CHECK: jb r5.3, bit_target ; encoding: [0x8a,0xf5,A,0x30]
+; CHECK: fixup A - offset: 2, value: bit_target, kind: fixup_c166_rel8w
+        jb      r5.3, bit_target
+bit_target:
+
 ; Add and subtract with carry: the plain opcodes plus 10H.
 ; CHECK: addc r3, r5      ; encoding: [0x10,0x35]
         addc    r3, r5

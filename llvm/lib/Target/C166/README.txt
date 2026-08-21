@@ -179,8 +179,8 @@ bitoff, since reg and bitoff land on the same word; but only FF00H to FFDEH is
 bit addressable, so MDL, MDH, CP, SP and the DPPs, which live at FE00H and up,
 have a short address and no bitoff.
 
-BSET, BCLR, BAND, BOR, BXOR, BMOV, BMOVN, BCMP, BFLDL and BFLDH are assembled
-and disassembled.  A bit address is written <word>.<bit>, where the word is a
+BSET, BCLR, BAND, BOR, BXOR, BMOV, BMOVN, BCMP, BFLDL, BFLDH and the four bit
+test branches are assembled and disassembled.  A bit address is written <word>.<bit>, where the word is a
 register name, a bit-addressable SFR name, or the bitoff number itself.  The
 assembly lexer counts '.' as part of an identifier, so "psw.3" arrives as a
 single token and the bit instructions take their operands apart themselves;
@@ -193,9 +193,17 @@ bit position into the high nibble of the last byte.  BFLDL and BFLDH are byte
 swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
 "1A QQ ## @@", so the mask and the value change places.
 
-Nothing generates these: whether an address is bit addressable is not
+The bit test branches JB, JNB, JBC and JNBS take a target that is a signed 8
+bit count of words from the instruction after them, which reaches 127 words
+either way.  That is the one relative field in the instruction set, so it has
+the one target fixup kind, fixup_c166_rel8w, and the one relocation that is not
+plain data, R_C166_PCREL8W.  A disassembly names the target address, but only
+llvm-objdump asks for that; left to itself the printer gives the distance,
+which is what can be handed back to the assembler.
+
+Nothing generates any of these: whether an address is bit addressable is not
 something the compiler can see from the IR, so it would take an intrinsic or
-an address-space to express it.
+an address space to express it.
 
 Encodings and the MC layer
 --------------------------
@@ -250,7 +258,4 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * Jump tables are disabled; switches become compare and branch chains.
-* The bit test branches JB, JNB, JBC and JNBS are not implemented yet: their
-  relative target is an 8 bit signed word offset, which needs a fixup kind and
-  a relocation that do not exist.
 * No tail calls, and no support for the XC16x MAC unit.

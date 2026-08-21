@@ -13,6 +13,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -84,6 +85,26 @@ void C166InstPrinter::printBrTargetOperand(const MCInst *MI, unsigned OpNo,
 void C166InstPrinter::printCallTargetOperand(const MCInst *MI, unsigned OpNo,
                                              raw_ostream &O) {
   printAddr16Operand(MI, OpNo, O);
+}
+
+void C166InstPrinter::printRelTargetOperand(const MCInst *MI, uint64_t Address,
+                                            unsigned OpNo, raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (!Op.isImm()) {
+    assert(Op.isExpr() && "unknown operand kind in printRelTargetOperand");
+    MAI.printExpr(O, *Op.getExpr());
+    return;
+  }
+
+  // The displacement counts words from the instruction after this one, which
+  // is four bytes on: every relative branch here is a long one.  Naming the
+  // target instead is what a disassembly wants, but only the distance can be
+  // fed back to the assembler, so it stays the default.
+  int64_t Words = SignExtend64<8>(Op.getImm());
+  if (PrintBranchImmAsAddress)
+    O << formatHex((Address + 4 + 2 * Words) & 0xffff);
+  else
+    O << Words;
 }
 
 void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
