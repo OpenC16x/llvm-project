@@ -1,0 +1,234 @@
+//===-- Machine.cpp - C166 memory, registers and addressing ---------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#include "Machine.h"
+#include "llvm/Support/Format.h"
+
+using namespace c166sim;
+using namespace llvm;
+
+Machine::Machine() : Mem(AddressSpaceSize, 0) {}
+
+// The SFRs that this simulator models are the CPU's own; a peripheral register
+// reads back what was written to it and does nothing else, which is enough to
+// run code that configures peripherals it then never waits on.
+static constexpr uint32_t SFR_DPP0 = 0xFE00, SFR_DPP1 = 0xFE02;
+static constexpr uint32_t SFR_DPP2 = 0xFE04, SFR_DPP3 = 0xFE06;
+static constexpr uint32_t SFR_CSP = 0xFE08;
+static constexpr uint32_t SFR_MDH = 0xFE0C, SFR_MDL = 0xFE0E;
+static constexpr uint32_t SFR_CP = 0xFE10, SFR_SP = 0xFE12;
+static constexpr uint32_t SFR_STKOV = 0xFE14, SFR_STKUN = 0xFE16;
+static constexpr uint32_t SFR_MDC = 0xFF0E, SFR_PSW = 0xFF10;
+
+/// True when Phys names one of the CPU registers rather than storage.
+static bool isCPUSFR(uint32_t Phys) {
+  switch (Phys) {
+  case SFR_DPP0:
+  case SFR_DPP1:
+  case SFR_DPP2:
+  case SFR_DPP3:
+  case SFR_CSP:
+  case SFR_MDH:
+  case SFR_MDL:
+  case SFR_CP:
+  case SFR_SP:
+  case SFR_STKOV:
+  case SFR_STKUN:
+  case SFR_MDC:
+  case SFR_PSW:
+    return true;
+  default:
+    return false;
+  }
+}
+
+uint16_t Machine::read16(uint32_t Phys) {
+  Phys &= AddressMask;
+  if (isCPUSFR(Phys)) {
+    switch (Phys) {
+    case SFR_DPP0:
+      return DPP[0];
+    case SFR_DPP1:
+      return DPP[1];
+    case SFR_DPP2:
+      return DPP[2];
+    case SFR_DPP3:
+      return DPP[3];
+    case SFR_CSP:
+      return CSP;
+    case SFR_MDH:
+      return MDH;
+    case SFR_MDL:
+      return MDL;
+    case SFR_CP:
+      return CP;
+    case SFR_SP:
+      return SP;
+    case SFR_STKOV:
+      return STKOV;
+    case SFR_STKUN:
+      return STKUN;
+    case SFR_MDC:
+      return MDC;
+    case SFR_PSW:
+      return PSW;
+    }
+  }
+  return uint16_t(Mem[Phys]) | (uint16_t(Mem[(Phys + 1) & AddressMask]) << 8);
+}
+
+void Machine::write16(uint32_t Phys, uint16_t V) {
+  Phys &= AddressMask;
+  if (isCPUSFR(Phys)) {
+    switch (Phys) {
+    case SFR_DPP0:
+      DPP[0] = V & 0x3FF;
+      return;
+    case SFR_DPP1:
+      DPP[1] = V & 0x3FF;
+      return;
+    case SFR_DPP2:
+      DPP[2] = V & 0x3FF;
+      return;
+    case SFR_DPP3:
+      DPP[3] = V & 0x3FF;
+      return;
+    case SFR_CSP:
+      CSP = V;
+      return;
+    case SFR_MDH:
+      MDH = V;
+      return;
+    case SFR_MDL:
+      MDL = V;
+      return;
+    case SFR_CP:
+      CP = V;
+      return;
+    case SFR_SP:
+      SP = V;
+      return;
+    case SFR_STKOV:
+      STKOV = V;
+      return;
+    case SFR_STKUN:
+      STKUN = V;
+      return;
+    case SFR_MDC:
+      MDC = V;
+      return;
+    case SFR_PSW:
+      PSW = V;
+      return;
+    }
+  }
+  if (Phys == ExitPort) {
+    Stop = StopReason::Exited;
+    ExitCode = V;
+    return;
+  }
+  Mem[Phys] = V & 0xFF;
+  Mem[(Phys + 1) & AddressMask] = V >> 8;
+}
+
+uint8_t Machine::read8(uint32_t Phys) {
+  Phys &= AddressMask;
+  if (isCPUSFR(Phys & ~1u))
+    return (read16(Phys & ~1u) >> ((Phys & 1) * 8)) & 0xFF;
+  return Mem[Phys];
+}
+
+void Machine::write8(uint32_t Phys, uint8_t V) {
+  Phys &= AddressMask;
+  // A byte written to the console port is output rather than storage.  It is
+  // the one thing in this simulator that a program can observe from outside.
+  if (Phys == ConsolePort) {
+    if (ConsoleOS)
+      *ConsoleOS << char(V);
+    return;
+  }
+  if (isCPUSFR(Phys & ~1u)) {
+    uint16_t W = read16(Phys & ~1u);
+    unsigned Sh = (Phys & 1) * 8;
+    W = (W & ~(uint16_t(0xFF) << Sh)) | (uint16_t(V) << Sh);
+    write16(Phys & ~1u, W);
+    return;
+  }
+  Mem[Phys] = V;
+}
+
+uint32_t Machine::mapData(uint16_t Addr) const {
+  switch (Extend) {
+  case ExtendKind::Page:
+    // EXTP: address bits 23..14 are op1, 13..0 come from the address.
+    return ((ExtendValue & 0x3FF) << 14) | (Addr & 0x3FFF);
+  case ExtendKind::Segment:
+    // EXTS: the address is a 16 bit offset into the named segment.
+    return ((ExtendValue & 0xFF) << 16) | Addr;
+  case ExtendKind::None:
+    break;
+  }
+  // The standard scheme: the top two bits pick a DPP, whose ten bits are
+  // address bits 23..14.
+  return (uint32_t(DPP[(Addr >> 14) & 3] & 0x3FF) << 14) | (Addr & 0x3FFF);
+}
+
+uint16_t Machine::getWordReg(unsigned N) const {
+  uint32_t A = uint16_t(CP + 2 * N);
+  return uint16_t(Mem[A]) | (uint16_t(Mem[A + 1]) << 8);
+}
+
+void Machine::setWordReg(unsigned N, uint16_t V) {
+  uint32_t A = uint16_t(CP + 2 * N);
+  Mem[A] = V & 0xFF;
+  Mem[A + 1] = V >> 8;
+}
+
+uint8_t Machine::getByteReg(unsigned N) const {
+  // RL0, RH0, RL1, RH1 ... are consecutive bytes of the same window.
+  return Mem[uint16_t(CP + N)];
+}
+
+void Machine::setByteReg(unsigned N, uint8_t V) { Mem[uint16_t(CP + N)] = V; }
+
+uint32_t Machine::regFieldAddress(unsigned Reg) const {
+  Reg &= 0xFF;
+  if (Reg >= 0xF0)
+    return uint16_t(CP + 2 * (Reg - 0xF0));
+  if (Reg < 0x80)
+    return 0xFE00 + 2 * Reg;
+  return 0xFF00 + 2 * (Reg - 0x80);
+}
+
+void Machine::push(uint16_t V) {
+  SP -= 2;
+  if (SP < STKOV) {
+    Stop = StopReason::StackFault;
+    StopDetail = "system stack overflow: SP below STKOV";
+    return;
+  }
+  write16(SP, V);
+}
+
+uint16_t Machine::pop() {
+  if (SP >= STKUN) {
+    Stop = StopReason::StackFault;
+    StopDetail = "system stack underflow: SP at or above STKUN";
+    return 0;
+  }
+  uint16_t V = read16(SP);
+  SP += 2;
+  return V;
+}
+
+void Machine::retireExtend() {
+  if (Extend == ExtendKind::None && ExtendCount == 0)
+    return;
+  if (ExtendCount > 0 && --ExtendCount == 0)
+    Extend = ExtendKind::None;
+}

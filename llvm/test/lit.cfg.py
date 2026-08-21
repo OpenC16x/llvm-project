@@ -238,6 +238,8 @@ tools = [
     ToolSubst("%llvm-bitcode-strip", FindTool("llvm-bitcode-strip")),
     ToolSubst("%llvm-extract-bundle-entry", FindTool("llvm-extract-bundle-entry")),
     ToolSubst("%split-file", FindTool("split-file")),
+    # Only built when the C166 target is; its tests all say REQUIRES: c166.
+    ToolSubst("%c166_sim", FindTool("c166-sim"), unresolved="ignore"),
 ]
 
 # FIXME: Why do we have both `lli` and `%lli` that do slightly different things?
