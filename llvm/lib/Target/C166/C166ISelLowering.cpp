@@ -146,6 +146,8 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setIndexedLoadAction(ISD::POST_INC, MVT::i8, Legal);
   setIndexedLoadAction(ISD::POST_INC, MVT::i16, Legal);
 
+  setTargetDAGCombine(ISD::ADD);
+
   // A far pointer is an i32, which is not a legal type, so an access through
   // one is caught while the type legalizer is expanding the pointer operand.
   // Ordinary i32 loads and stores come through the same hook and are handed
@@ -483,6 +485,25 @@ SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getMemIntrinsicNode(C166ISD::FAR_STORE, DL,
                                  DAG.getVTList(MVT::Other), Ops,
                                  ST->getMemoryVT(), ST->getMemOperand());
+}
+
+/// A constant added to the address of a far object is part of that address
+/// rather than arithmetic on it: the relocations carry an addend, so the
+/// linker can do the adding.  Without this the offset survives to become a
+/// real 32 bit add, since the near path only folds one at selection time and
+/// by then a far address has been split into its two halves.
+SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() != ISD::ADD)
+    return SDValue();
+
+  auto *GA = dyn_cast<GlobalAddressSDNode>(N->getOperand(0));
+  auto *Offset = dyn_cast<ConstantSDNode>(N->getOperand(1));
+  if (!GA || !Offset || GA->getAddressSpace() != C166AS::Far)
+    return SDValue();
+
+  return DCI.DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N), N->getValueType(0),
+                                  GA->getOffset() + Offset->getSExtValue());
 }
 
 // The address of a symbol in the far address space is only known once the

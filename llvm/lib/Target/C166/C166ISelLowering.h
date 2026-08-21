@@ -64,6 +64,8 @@ public:
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+  SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
+
   bool getPostIndexedAddressParts(SDNode *N, SDNode *Op, SDValue &Base,
                                   SDValue &Offset, ISD::MemIndexedMode &AM,
                                   SelectionDAG &DAG) const override;

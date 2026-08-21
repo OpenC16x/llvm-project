@@ -161,3 +161,39 @@ define i16 @far_global_indexed(i16 %i) {
   %v = load i16, ptr addrspace(1) %q
   ret i16 %v
 }
+
+; A constant offset into a far object belongs to its address rather than being
+; arithmetic on it, since both relocations carry an addend.
+@fa = addrspace(1) global [4 x i16] zeroinitializer
+
+define i16 @far_global_field() {
+; CHECK-LABEL: far_global_field:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r2, #sof(fa+4)
+; CHECK-NEXT:    exts #seg(fa+4), #1
+; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    ret
+  %v = load i16, ptr addrspace(1) getelementptr inbounds ([4 x i16], ptr addrspace(1) @fa, i32 0, i32 2)
+  ret i16 %v
+}
+
+; A near global reached through a cast is a different thing: the offset is
+; added to the 16 bit address, which the cast then widens, and folding it into
+; the symbol would only be right if that addition could not wrap.
+@na = global [4 x i16] zeroinitializer
+
+define i16 @cast_global_field() {
+; CHECK-LABEL: cast_global_field:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r2, #na
+; CHECK-NEXT:    mov r3, #0
+; CHECK-NEXT:    add r2, #4
+; CHECK-NEXT:    addc r3, #0
+; CHECK-NEXT:    exts r3, #1
+; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    ret
+  %f = addrspacecast ptr @na to ptr addrspace(1)
+  %p = getelementptr [4 x i16], ptr addrspace(1) %f, i32 0, i32 2
+  %v = load i16, ptr addrspace(1) %p
+  ret i16 %v
+}
