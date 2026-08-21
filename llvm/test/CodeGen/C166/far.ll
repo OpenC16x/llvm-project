@@ -12,7 +12,7 @@ define i16 @far_load(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    mov r2, [r2+#0]
 ; CHECK-NEXT:    ret
   %v = load i16, ptr addrspace(1) %p
   ret i16 %v
@@ -22,7 +22,7 @@ define void @far_store(ptr addrspace(1) %p, i16 %v) {
 ; CHECK-LABEL: far_store:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov [r2], r4
+; CHECK-NEXT:    mov [r2+#0], r4
 ; CHECK-NEXT:    ret
   store i16 %v, ptr addrspace(1) %p
   ret void
@@ -32,7 +32,7 @@ define zeroext i8 @far_load_byte(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load_byte:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    movb rl2, [r2]
+; CHECK-NEXT:    movb rl2, [r2+#0]
 ; CHECK-NEXT:    movbz r2, rl2
 ; CHECK-NEXT:    ret
   %v = load i8, ptr addrspace(1) %p
@@ -43,7 +43,7 @@ define void @far_store_byte(ptr addrspace(1) %p, i8 %v) {
 ; CHECK-LABEL: far_store_byte:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    movb [r2], rl4
+; CHECK-NEXT:    movb [r2+#0], rl4
 ; CHECK-NEXT:    ret
   store i8 %v, ptr addrspace(1) %p
   ret void
@@ -55,11 +55,11 @@ define i32 @far_load_i32(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load_i32:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r4, [r2]
+; CHECK-NEXT:    mov r4, [r2+#0]
 ; CHECK-NEXT:    add r2, #2
 ; CHECK-NEXT:    addc r3, #0
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r3, [r2]
+; CHECK-NEXT:    mov r3, [r2+#0]
 ; CHECK-NEXT:    mov r2, r4
 ; CHECK-NEXT:    ret
   %v = load i32, ptr addrspace(1) %p
@@ -76,7 +76,7 @@ define i16 @far_index(ptr addrspace(1) %p, i16 %i) {
 ; CHECK-NEXT:    add r5, r2
 ; CHECK-NEXT:    addc r4, r3
 ; CHECK-NEXT:    exts r4, #1
-; CHECK-NEXT:    mov r2, [r5]
+; CHECK-NEXT:    mov r2, [r5+#0]
 ; CHECK-NEXT:    ret
   %e = zext i16 %i to i32
   %q = getelementptr i16, ptr addrspace(1) %p, i32 %e
@@ -111,7 +111,7 @@ define i16 @far_load_global() {
 ; CHECK-NEXT:    mov r2, #0
 ; CHECK-NEXT:    mov r3, #g
 ; CHECK-NEXT:    exts r2, #1
-; CHECK-NEXT:    mov r2, [r3]
+; CHECK-NEXT:    mov r2, [r3+#0]
 ; CHECK-NEXT:    ret
   %f = addrspacecast ptr @g to ptr addrspace(1)
   %v = load i16, ptr addrspace(1) %f
@@ -125,7 +125,7 @@ define i16 @far_global() {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    mov r2, #sof(fg)
 ; CHECK-NEXT:    exts #seg(fg), #1
-; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    mov r2, [r2+#0]
 ; CHECK-NEXT:    ret
   %v = load i16, ptr addrspace(1) @fg
   ret i16 %v
@@ -136,7 +136,7 @@ define void @far_global_store(i16 %v) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    mov r3, #sof(fg)
 ; CHECK-NEXT:    exts #seg(fg), #1
-; CHECK-NEXT:    mov [r3], r2
+; CHECK-NEXT:    mov [r3+#0], r2
 ; CHECK-NEXT:    ret
   store i16 %v, ptr addrspace(1) @fg
   ret void
@@ -154,7 +154,7 @@ define i16 @far_global_indexed(i16 %i) {
 ; CHECK-NEXT:    add r4, r3
 ; CHECK-NEXT:    addc r5, r2
 ; CHECK-NEXT:    exts r5, #1
-; CHECK-NEXT:    mov r2, [r4]
+; CHECK-NEXT:    mov r2, [r4+#0]
 ; CHECK-NEXT:    ret
   %e = zext i16 %i to i32
   %q = getelementptr i16, ptr addrspace(1) @fg, i32 %e

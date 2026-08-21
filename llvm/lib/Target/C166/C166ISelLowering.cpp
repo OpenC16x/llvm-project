@@ -116,9 +116,9 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
-  // Jump tables would need a 16 bit indirect jump through a table in code
-  // memory; plain compare-and-branch chains are used instead.
-  setMinimumJumpTableEntries(std::numeric_limits<unsigned>::max());
+  // A jump table is a run of 16 bit block addresses that BR_JT indexes into
+  // and jumps through; the generic expansion produces exactly the shift, add,
+  // load and JMPI the machine wants.
 
   setOperationAction(ISD::GlobalAddress, MVT::i16, Custom);
   setOperationAction(ISD::BlockAddress, MVT::i16, Custom);
@@ -643,17 +643,53 @@ SDValue C166TargetLowering::LowerFormalArguments(
   }
 }
 
+/// A tail call jumps to the callee with this function's frame already gone, so
+/// the callee's RET returns to our caller.  That only works when the two ends
+/// agree about how a return happens and when nothing of ours has to survive
+/// the jump.
+bool C166TargetLowering::isEligibleForTailCall(
+    const TargetLowering::CallLoweringInfo &CLI,
+    const SmallVectorImpl<CCValAssign> &ArgLocs, unsigned StackSize) const {
+  const Function &Caller = CLI.DAG.getMachineFunction().getFunction();
+
+  // An interrupt handler comes back with RETI, which restores the PSW the
+  // hardware stacked; a plain RET in the callee would leave it there.
+  if (Caller.hasFnAttribute("interrupt"))
+    return false;
+
+  // A far function was entered with CALLS and has a code segment on the
+  // hardware stack waiting for RETS, so jumping to a near callee would leave
+  // a RET to pop half of it.  Far to far would be sound, but only through
+  // JMPS: JMPA stays inside the current segment, and nothing promises the
+  // linker put both functions in the same one.
+  const auto *Callee = dyn_cast<GlobalAddressSDNode>(CLI.Callee);
+  if (Caller.hasFnAttribute("far") ||
+      (Callee && isFarFunction(Callee->getGlobal())))
+    return false;
+
+  if (CLI.IsVarArg || Caller.isVarArg())
+    return false;
+
+  // Outgoing arguments would go where this function's frame is about to stop
+  // being, and anything passed by reference into that frame would outlive it.
+  if (StackSize != 0)
+    return false;
+  for (const CCValAssign &VA : ArgLocs)
+    if (!VA.isRegLoc())
+      return false;
+  for (const ISD::OutputArg &Out : CLI.Outs)
+    if (Out.Flags.isByVal() || Out.Flags.isSRet() || Out.Flags.isInAlloca())
+      return false;
+
+  return true;
+}
+
 SDValue C166TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                       SmallVectorImpl<SDValue> &InVals) const {
-  // Tail calls are not implemented yet.
-  CLI.IsTailCall = false;
-
   switch (CLI.CallConv) {
   case CallingConv::C:
   case CallingConv::Fast:
-    return LowerCCCCallTo(CLI.Chain, CLI.Callee, CLI.CallConv, CLI.IsVarArg,
-                          CLI.IsTailCall, CLI.Outs, CLI.OutVals, CLI.Ins,
-                          CLI.DL, CLI.DAG, InVals);
+    return LowerCCCCallTo(CLI, InVals);
   default:
     report_fatal_error("Unsupported calling convention for C166");
   }
@@ -744,12 +780,18 @@ SDValue C166TargetLowering::LowerCCCArguments(
   return Chain;
 }
 
-SDValue C166TargetLowering::LowerCCCCallTo(
-    SDValue Chain, SDValue Callee, CallingConv::ID CallConv, bool IsVarArg,
-    bool IsTailCall, const SmallVectorImpl<ISD::OutputArg> &Outs,
-    const SmallVectorImpl<SDValue> &OutVals,
-    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
-    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
+SDValue
+C166TargetLowering::LowerCCCCallTo(TargetLowering::CallLoweringInfo &CLI,
+                                   SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  const SDLoc &DL = CLI.DL;
+  SDValue Chain = CLI.Chain;
+  SDValue Callee = CLI.Callee;
+  CallingConv::ID CallConv = CLI.CallConv;
+  bool IsVarArg = CLI.IsVarArg;
+  const SmallVectorImpl<ISD::OutputArg> &Outs = CLI.Outs;
+  const SmallVectorImpl<SDValue> &OutVals = CLI.OutVals;
+  const SmallVectorImpl<ISD::InputArg> &Ins = CLI.Ins;
   MachineFunction &MF = DAG.getMachineFunction();
 
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -759,7 +801,11 @@ SDValue C166TargetLowering::LowerCCCCallTo(
   unsigned NumBytes = CCInfo.getStackSize();
   MVT PtrVT = getFrameIndexTy(DAG.getDataLayout());
 
-  Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
+  if (CLI.IsTailCall && !isEligibleForTailCall(CLI, ArgLocs, NumBytes))
+    CLI.IsTailCall = false;
+
+  if (!CLI.IsTailCall)
+    Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, DL);
 
   SmallVector<std::pair<unsigned, SDValue>, 4> RegsToPass;
   SmallVector<SDValue, 8> MemOpChains;
@@ -841,7 +887,7 @@ SDValue C166TargetLowering::LowerCCCCallTo(
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   SmallVector<SDValue, 8> Ops;
   Ops.push_back(Chain);
-  if (IsFarCall)
+  if (IsFarCall && !CLI.IsTailCall)
     Ops.push_back(CalleeSeg);
   Ops.push_back(Callee);
 
@@ -855,6 +901,13 @@ SDValue C166TargetLowering::LowerCCCCallTo(
 
   if (InGlue.getNode())
     Ops.push_back(InGlue);
+
+  // A tail call is a jump, so it produces no chain for anything to hang off
+  // and returns whatever the callee returns straight to our caller.  A far one
+  // needs no segment: it stays in the segment this function was called into,
+  // which is where its own caller expects RETS to come back from.
+  if (CLI.IsTailCall)
+    return DAG.getNode(C166ISD::TC_RETURN, DL, MVT::Other, Ops);
 
   Chain = DAG.getNode(IsFarCall ? C166ISD::CALL_SEG : C166ISD::CALL, DL,
                       NodeTys, Ops);

@@ -32,6 +32,16 @@ promoted to a full word.  Variadic functions receive every argument on the
 stack so that the callee can walk the list with a plain pointer.  R1 and
 R12-R15 are callee saved, R2-R11 are caller saved.
 
+A call in tail position becomes a jump once the frame is down, so the callee's
+RET goes straight back to our caller and no return address is ever pushed onto
+the small hardware stack.  That needs both ends to agree about how returning
+works, so it is off for an interrupt handler, which comes back with RETI, and
+for a far function at either end, which has a code segment stacked that only
+RETS pops.  Far to far would be sound through JMPS, but not through the JMPA a
+tail call turns into, since nothing promises the linker put both functions in
+the same segment.  Arguments that do not fit in registers rule it out as well:
+they would be written where the frame is about to stop being.
+
 A function carrying the "interrupt" attribute returns with RETI and saves
 every general purpose register it modifies.  That includes the registers
 arguments arrive in, so unlike a normal function it can be saving a register
@@ -168,6 +178,84 @@ one will read the wrong place.  There is also only one instruction counter, so
 inline assembly must not wrap a far access in an ATOMIC or EXTend sequence of
 its own.
 
+Switches
+--------
+
+A dense switch becomes a table of 16 bit block addresses in .rodata, indexed
+by the scaled selector and jumped through with JMPI.  The table's address is a
+relocatable constant, so the lookup folds into the displacement of a single
+[Rw + #data16] load rather than building the address in a register first.
+Sparse switches still become chains of compares.
+
+Bit addressing
+--------------
+
+The bit-addressable space is named by an 8 bit "bitoff" word address rather
+than by a full address: 00H to 7FH is internal RAM at FD00H + 2*bitoff, 80H to
+EFH is the special function registers at FF00H + 2*(bitoff - 80H), and F0H to
+FFH is R0 to R15.  An SFR's short register address is therefore also its
+bitoff, since reg and bitoff land on the same word; but only FF00H to FFDEH is
+bit addressable, so MDL, MDH, CP, SP and the DPPs, which live at FE00H and up,
+have a short address and no bitoff.
+
+BSET, BCLR, BAND, BOR, BXOR, BMOV, BMOVN, BCMP, BFLDL, BFLDH and the four bit
+test branches are assembled and disassembled.  A bit address is written <word>.<bit>, where the word is a
+register name, a bit-addressable SFR name, or the bitoff number itself.  The
+assembly lexer counts '.' as part of an identifier, so "psw.3" arrives as a
+single token and the bit instructions take their operands apart themselves;
+that also means a hexadecimal word has to be spaced away from its bit, as
+"0x88 . 15", while a decimal one can close up.
+
+Two encoding details are easy to get backwards.  The two operand instructions
+name the destination first and encode the source first, and pack the source
+bit position into the high nibble of the last byte.  BFLDL and BFLDH are byte
+swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
+"1A QQ ## @@", so the mask and the value change places.
+
+The bit test branches JB, JNB, JBC and JNBS take a target that is a signed 8
+bit count of words from the instruction after them, which reaches 127 words
+either way.  That is the one relative field in the instruction set, so it has
+the one target fixup kind, fixup_c166_rel8w, and the one relocation that is not
+plain data, R_C166_PCREL8W.  A disassembly names the target address, but only
+llvm-objdump asks for that; left to itself the printer gives the distance,
+which is what can be handed back to the assembler.
+
+Nothing generates any of these: whether an address is bit addressable is not
+something the compiler can see from the IR, so it would take an intrinsic or
+an address space to express it.
+
+Short encodings
+---------------
+
+Several addressing modes exist in both a two byte and a four byte form, and
+the short one is picked wherever it fits, which is worth about a tenth of the
+code the backend emits.
+
+Every arithmetic instruction also has a two byte form taking a three bit
+constant, whose opcode is the register/register one plus eight, and that is
+what a loop counter or a pointer step of two turns into.  The places that
+build one of these by hand rather than selecting it - the frame adjustment,
+the frame address expansion in eliminateFrameIndex(), and the compare that
+expandPostRAPseudo() splits out of a fused branch - have to make the same
+choice, or a disassembly stops assembling back to the bytes it came from.
+That is what the soak test catches.
+
+"[Rw]" is a two byte instruction of its own rather than "[Rw + #data16]" with
+nothing added, so the two are separate instructions here and the displacement
+of the long one is always printed, zero included.  A frame slot that turns out
+to sit at offset zero is switched over by eliminateFrameIndex() once the
+offset is known.  Likewise a constant of 0 to 15 goes in a two byte MOV with
+the value in the high nibble of the second byte; short constants are always
+zero extended (manual 6.5), so that is the whole range.
+
+The assembler has to agree with the compiler about which form a given piece of
+text means, otherwise a disassembly would not assemble back to the bytes it
+came from.  For "[Rw]" the syntax settles it.  For a constant it does not, so
+the immediate operand classes are chained narrowest last - Imm4 inside Data8
+inside Data16 - which is what makes the matcher rank the short encoding first.
+Only the first entry of SuperClasses counts towards that ranking, so it has to
+be a chain and not a list.
+
 Encodings and the MC layer
 --------------------------
 
@@ -207,6 +295,12 @@ Known limitations / things to do
 * PUSH and POP are the only instructions whose 8 bit "reg" field reaches the
   special function registers.  Everything else that could put an SFR there -
   "ADD MDL, #1" and friends - can be neither assembled nor disassembled.
+  Widening them means the operand class has to hold both kinds of register,
+  which PUSH and POP can do because they have no pattern to satisfy: a class
+  covering GPRs and SFRs cannot be the result of a codegen pattern without
+  becoming what the register allocator constrains those results to.  Word and
+  byte forms would need one such class each, since "reg" F0H + n names a word
+  register in a word instruction and a byte register in a byte one.
 * Only the handful of special function registers the backend has a use for are
   modelled, so "push t0" is not understood and its encoding does not decode.
   The assembler does know the address of a few more, which is enough to name
@@ -220,6 +314,5 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* Jump tables are disabled; switches become compare and branch chains.
-* No tail calls, and no support for the C166 bit addressing instructions
-  (BSET/BCLR/BAND/...) or the XC16x MAC unit.
+* A far function neither makes nor receives a tail call, which JMPS would fix.
+* No support for the XC16x MAC unit.

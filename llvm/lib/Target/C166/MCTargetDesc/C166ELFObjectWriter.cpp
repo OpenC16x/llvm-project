@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/C166FixupKinds.h"
 #include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -49,6 +50,8 @@ protected:
     // Everything else is plain data: a 16 bit near pointer in the second word
     // of an instruction, or a data word.
     switch (Fixup.getKind()) {
+    case C166::fixup_c166_rel8w:
+      return ELF::R_C166_PCREL8W;
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
     case FK_Data_2:

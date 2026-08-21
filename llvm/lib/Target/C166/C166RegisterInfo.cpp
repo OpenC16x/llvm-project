@@ -133,14 +133,50 @@ bool C166RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     bool IsDead = Dst.isDead();
     Dst.setIsDead(false);
 
-    unsigned Opc = Offset < 0 ? C166::SUB16ri : C166::ADD16ri;
-    MachineInstrBuilder MIB = BuildMI(MBB, std::next(II), DL, TII.get(Opc))
-                                  .addReg(DstReg, RegState::Define |
-                                                      getDeadRegState(IsDead))
-                                  .addReg(DstReg)
-                                  .addImm(Offset < 0 ? -Offset : Offset);
+    // Seven or less fits the two byte #data3 form, which is also what the
+    // assembler picks when it reads this back.
+    int64_t Size = Offset < 0 ? -Offset : Offset;
+    unsigned Opc;
+    if (Size < 8)
+      Opc = Offset < 0 ? C166::SUB16ri3 : C166::ADD16ri3;
+    else
+      Opc = Offset < 0 ? C166::SUB16ri : C166::ADD16ri;
+
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, std::next(II), DL, TII.get(Opc))
+            .addReg(DstReg, RegState::Define | getDeadRegState(IsDead))
+            .addReg(DstReg)
+            .addImm(Size);
     (void)MIB;
     return false;
+  }
+
+  // A frame slot that turns out to sit at offset zero can use the two byte
+  // [Rw] form instead of the four byte one with nothing added.
+  if (Offset == 0) {
+    unsigned Short = 0;
+    switch (MI.getOpcode()) {
+    case C166::MOV16rm:
+      Short = C166::MOV16rp;
+      break;
+    case C166::MOVB8rm:
+      Short = C166::MOVB8rp;
+      break;
+    case C166::MOV16mr:
+      Short = C166::MOV16pr;
+      break;
+    case C166::MOVB8mr:
+      Short = C166::MOVB8pr;
+      break;
+    default:
+      break;
+    }
+    if (Short) {
+      MI.setDesc(TII.get(Short));
+      MI.getOperand(FIOperandNum).ChangeToRegister(BaseReg, /*isDef=*/false);
+      MI.removeOperand(FIOperandNum + 1);
+      return false;
+    }
   }
 
   MI.getOperand(FIOperandNum).ChangeToRegister(BaseReg, /*isDef=*/false);

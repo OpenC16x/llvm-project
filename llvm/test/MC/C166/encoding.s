@@ -25,8 +25,32 @@
         cmp     r2, r3
 ; CHECK: cmpb rl2, rl3    ; encoding: [0x41,0x46]
         cmpb    rl2, rl3
-; CHECK: cmp r2, #7       ; encoding: [0x46,0xf2,0x07,0x00]
+
+; Every arithmetic instruction has a two byte #data3 form, whose opcode is the
+; register/register one plus 8 and which the assembler prefers wherever the
+; constant fits.  A short constant is zero extended, so that is 0 to 7.
+; CHECK: cmp r2, #7       ; encoding: [0x48,0x27]
         cmp     r2, #7
+; CHECK: cmp r2, #8       ; encoding: [0x46,0xf2,0x08,0x00]
+        cmp     r2, #8
+; CHECK: add r4, #2       ; encoding: [0x08,0x42]
+        add     r4, #2
+; CHECK: sub r0, #2       ; encoding: [0x28,0x02]
+        sub     r0, #2
+; CHECK: addc r2, #1      ; encoding: [0x18,0x21]
+        addc    r2, #1
+; CHECK: subc r2, #1      ; encoding: [0x38,0x21]
+        subc    r2, #1
+; CHECK: and r2, #3       ; encoding: [0x68,0x23]
+        and     r2, #3
+; CHECK: or r2, #3        ; encoding: [0x78,0x23]
+        or      r2, #3
+; CHECK: xor r2, #3       ; encoding: [0x58,0x23]
+        xor     r2, #3
+; CHECK: cmpb rl2, #5     ; encoding: [0x49,0x45]
+        cmpb    rl2, #5
+; CHECK: addb rl2, #5     ; encoding: [0x09,0x45]
+        addb    rl2, #5
 
 ; Unary operations are encoded as "n0".
 ; CHECK: cpl r3           ; encoding: [0x91,0x30]
@@ -79,10 +103,32 @@
         mov     r2, [r3+#8]
 ; CHECK: mov [r0+#4], r2  ; encoding: [0xc4,0x20,0x04,0x00]
         mov     [r0+#4], r2
-; CHECK: mov r2, [r3]     ; encoding: [0xd4,0x23,0x00,0x00]
-        mov     r2, [r3]
 ; CHECK: movb rl2, [r3+#1] ; encoding: [0xf4,0x43,0x01,0x00]
         movb    rl2, [r3+#1]
+
+; "[Rw]" is a two byte instruction of its own, not the four byte one with a
+; zero displacement, so the two spellings assemble differently and the
+; displacement is always printed back.
+; CHECK: mov r2, [r3]     ; encoding: [0xa8,0x23]
+        mov     r2, [r3]
+; CHECK: mov [r3], r2     ; encoding: [0xb8,0x23]
+        mov     [r3], r2
+; CHECK: movb rl2, [r3]   ; encoding: [0xa9,0x43]
+        movb    rl2, [r3]
+; CHECK: movb [r3], rl2   ; encoding: [0xb9,0x43]
+        movb    [r3], rl2
+; CHECK: mov r2, [r3+#0]  ; encoding: [0xd4,0x23,0x00,0x00]
+        mov     r2, [r3+#0]
+
+; A short constant is zero extended, so #data4 covers 0 to 15 in two bytes.
+; CHECK: mov r2, #0       ; encoding: [0xe0,0x02]
+        mov     r2, #0
+; CHECK: mov r2, #15      ; encoding: [0xe0,0xf2]
+        mov     r2, #15
+; CHECK: movb rl2, #9     ; encoding: [0xe1,0x94]
+        movb    rl2, #9
+; CHECK: mov r2, #16      ; encoding: [0xe6,0xf2,0x10,0x00]
+        mov     r2, #16
 
 ; An SFR name stands for its address, so this assembles as MOV reg, mem and
 ; prints back with the address spelled out.  MDL is at FE0EH and MDH at FE0CH.
@@ -106,6 +152,67 @@
         push    r4
 ; CHECK: pop r4           ; encoding: [0xfc,0xf4]
         pop     r4
+
+; The bit-addressable space is named by an 8 bit word offset: F0H to FFH are
+; R0 to R15, and a special function register in FF00H to FFDEH keeps the short
+; address it already has.  BSET and BCLR put the bit position in the high
+; nibble of the opcode byte.
+; CHECK: bset r5.3        ; encoding: [0x3f,0xf5]
+        bset    r5.3
+; CHECK: bclr r5.3        ; encoding: [0x3e,0xf5]
+        bclr    r5.3
+; CHECK: bset 136.10      ; encoding: [0xaf,0x88]
+        bset    psw.10
+; CHECK: bclr 135.0       ; encoding: [0x0e,0x87]
+        bclr    mdc.0
+
+; A word written as a number closes up with its bit position in decimal, but a
+; hexadecimal one has to be spaced out: the lexer reads "0x88.15" as a broken
+; floating point literal before the target ever sees it.
+; CHECK: bset 136.10      ; encoding: [0xaf,0x88]
+        bset    136.10
+; CHECK: bset 136.15      ; encoding: [0xff,0x88]
+        bset    0x88 . 15
+
+; The two operand bit instructions name the destination first but encode the
+; source first, and pack the source bit position into the high nibble of the
+; last byte.
+; CHECK: band r2.1, r3.2  ; encoding: [0x6a,0xf3,0xf2,0x21]
+        band    r2.1, r3.2
+; CHECK: bor r2.1, r3.2   ; encoding: [0x5a,0xf3,0xf2,0x21]
+        bor     r2.1, r3.2
+; CHECK: bxor r2.1, r3.2  ; encoding: [0x7a,0xf3,0xf2,0x21]
+        bxor    r2.1, r3.2
+; CHECK: bmov r2.1, r3.2  ; encoding: [0x4a,0xf3,0xf2,0x21]
+        bmov    r2.1, r3.2
+; CHECK: bmovn r2.1, r3.2 ; encoding: [0x3a,0xf3,0xf2,0x21]
+        bmovn   r2.1, r3.2
+; CHECK: bcmp r2.1, r3.2  ; encoding: [0x2a,0xf3,0xf2,0x21]
+        bcmp    r2.1, r3.2
+
+; BFLDL and BFLDH are byte-swapped with respect to each other: the mask and the
+; value change places.
+; CHECK: bfldl r4, #15, #5 ; encoding: [0x0a,0xf4,0x0f,0x05]
+        bfldl   r4, #0x0f, #0x05
+; CHECK: bfldh r4, #240, #80 ; encoding: [0x1a,0xf4,0x50,0xf0]
+        bfldh   r4, #0xf0, #0x50
+
+; The bit test branches take a target that is a signed count of words from the
+; instruction after them, which is what the disassembler prints back.
+; CHECK: jb r5.3, -3      ; encoding: [0x8a,0xf5,0xfd,0x30]
+        jb      r5.3, -3
+; CHECK: jnb 136.10, 4    ; encoding: [0x9a,0x88,0x04,0xa0]
+        jnb     psw.10, 4
+; CHECK: jbc r5.3, 2      ; encoding: [0xaa,0xf5,0x02,0x30]
+        jbc     r5.3, 2
+; CHECK: jnbs r5.3, 0     ; encoding: [0xba,0xf5,0x00,0x30]
+        jnbs    r5.3, 0
+
+; A label leaves a relocatable displacement behind instead.
+; CHECK: jb r5.3, bit_target ; encoding: [0x8a,0xf5,A,0x30]
+; CHECK: fixup A - offset: 2, value: bit_target, kind: fixup_c166_rel8w
+        jb      r5.3, bit_target
+bit_target:
 
 ; Add and subtract with carry: the plain opcodes plus 10H.
 ; CHECK: addc r3, r5      ; encoding: [0x10,0x35]

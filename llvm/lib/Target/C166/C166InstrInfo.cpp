@@ -134,19 +134,23 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case C166::BRCC8ri: {
     // Nothing may come between the compare and the jump that reads its flags,
     // which is exactly why the two travelled together until now.
+    // A constant of 0 to 7 fits the two byte form of the compare.
+    const MachineOperand &Rhs = MI.getOperand(2);
+    bool Short = Rhs.isImm() && Rhs.getImm() >= 0 && Rhs.getImm() < 8;
+
     unsigned CmpOpc;
     switch (MI.getOpcode()) {
     case C166::BRCC16rr:
       CmpOpc = C166::CMP16rr;
       break;
     case C166::BRCC16ri:
-      CmpOpc = C166::CMP16ri;
+      CmpOpc = Short ? C166::CMP16ri3 : C166::CMP16ri;
       break;
     case C166::BRCC8rr:
       CmpOpc = C166::CMPB8rr;
       break;
     default:
-      CmpOpc = C166::CMPB8ri;
+      CmpOpc = Short ? C166::CMPB8ri3 : C166::CMPB8ri;
       break;
     }
 
@@ -154,6 +158,14 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(C166::JMPAcc)
         .addMBB(MI.getOperand(0).getMBB())
         .addImm(MI.getOperand(3).getImm());
+    break;
+  }
+  case C166::TCRETURNa:
+  case C166::TCRETURNi: {
+    // The frame is already gone by the time this runs, so all that is left is
+    // the jump that the callee will return from on our behalf.
+    bool Indirect = MI.getOpcode() == C166::TCRETURNi;
+    Emit(Indirect ? C166::TAILJMPi : C166::TAILJMPa).add(MI.getOperand(0));
     break;
   }
   case C166::FARLOAD16:
@@ -322,6 +334,11 @@ bool C166InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
   if (I == MBB.end() || !isUnpredicatedTerminator(*I))
     return false;
+
+  // A tail call ends the block like a return does, but it names a callee
+  // rather than a basic block, so there is nothing here to describe.
+  if (I->getOpcode() == C166::TCRETURNa || I->getOpcode() == C166::TCRETURNi)
+    return true;
 
   // Count the terminators and remember the first branch that ends the block
   // unconditionally.

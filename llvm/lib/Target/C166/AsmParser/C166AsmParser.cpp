@@ -53,11 +53,15 @@ class C166Operand : public MCParsedAsmOperand {
     k_CondCode,
     k_Memory,
     k_SFR,
+    k_BitAddr,
   } Kind;
 
   struct MemoryOp {
     MCRegister Base;
     const MCExpr *Disp;
+    // "[Rw]" and "[Rw + #0]" are different instructions with different
+    // lengths, so which one was written has to survive parsing.
+    bool HasDisp;
   };
 
   StringRef Tok;
@@ -65,6 +69,8 @@ class C166Operand : public MCParsedAsmOperand {
   const MCExpr *Imm = nullptr;
   int64_t CC = 0;
   MemoryOp Mem;
+  int64_t BitOff = 0;
+  int64_t BitPos = 0;
 
   SMLoc Start, End;
 
@@ -80,7 +86,8 @@ public:
   bool isMem() const override { return Kind == k_Memory; }
   bool isAddr() const { return Kind == k_Address || Kind == k_SFR; }
   bool isCondCode() const { return Kind == k_CondCode; }
-  bool isMemRI() const { return Kind == k_Memory; }
+  bool isMemR() const { return Kind == k_Memory && !Mem.HasDisp; }
+  bool isMemRI() const { return Kind == k_Memory && Mem.HasDisp; }
 
   /// True when this is an immediate whose value is known and in [Low, High].
   /// A symbol reference is accepted for the wider fields, which can hold a
@@ -96,11 +103,15 @@ public:
     return CE->getValue() >= Low && CE->getValue() <= High;
   }
 
+  bool isImm3() const { return isImmInRange(0, 7, /*AllowSymbol=*/false); }
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
   bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
   }
+  bool isBitAddr() const { return Kind == k_BitAddr; }
+  bool isBitOff() const { return isImmInRange(0, 255, /*AllowSymbol=*/false); }
+  bool isMask8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
   bool isIrang2() const { return isImmInRange(1, 4, /*AllowSymbol=*/false); }
   bool isSeg8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
   bool isPag10() const { return isImmInRange(0, 1023, /*AllowSymbol=*/true); }
@@ -138,6 +149,20 @@ public:
       addExpr(Inst, Imm);
   }
 
+  void addBitAddrOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 2 && "Invalid number of operands");
+    Inst.addOperand(MCOperand::createImm(BitOff));
+    Inst.addOperand(MCOperand::createImm(BitPos));
+  }
+
+  static std::unique_ptr<C166Operand> createBitAddr(int64_t Off, int64_t Pos,
+                                                    SMLoc S, SMLoc E) {
+    auto Op = std::make_unique<C166Operand>(k_BitAddr, S, E);
+    Op->BitOff = Off;
+    Op->BitPos = Pos;
+    return Op;
+  }
+
   static std::unique_ptr<C166Operand>
   createSFR(MCRegister Reg, const MCExpr *Addr, SMLoc S, SMLoc E) {
     auto Op = std::make_unique<C166Operand>(k_SFR, S, E);
@@ -150,6 +175,11 @@ public:
     assert(N == 2 && "Invalid number of operands");
     Inst.addOperand(MCOperand::createReg(Mem.Base));
     addExpr(Inst, Mem.Disp);
+  }
+
+  void addMemROperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands");
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
   }
 
   void print(raw_ostream &OS, const MCAsmInfo &MAI) const override {
@@ -171,6 +201,9 @@ public:
     case k_SFR:
       OS << "SFR:" << Reg.id() << ':';
       MAI.printExpr(OS, *Imm);
+      break;
+    case k_BitAddr:
+      OS << "BitAddr:" << BitOff << '.' << BitPos;
       break;
     case k_CondCode:
       OS << "CondCode:" << CC;
@@ -217,11 +250,14 @@ public:
     return Op;
   }
 
-  static std::unique_ptr<C166Operand>
-  createMem(MCRegister Base, const MCExpr *Disp, SMLoc S, SMLoc E) {
+  static std::unique_ptr<C166Operand> createMem(MCRegister Base,
+                                                const MCExpr *Disp,
+                                                bool HasDisp, SMLoc S,
+                                                SMLoc E) {
     auto Op = std::make_unique<C166Operand>(k_Memory, S, E);
     Op->Mem.Base = Base;
     Op->Mem.Disp = Disp;
+    Op->Mem.HasDisp = HasDisp;
     return Op;
   }
 };
@@ -234,6 +270,10 @@ class C166AsmParser : public MCTargetAsmParser {
                                OperandVector &Operands, MCStreamer &Out,
                                uint64_t &ErrorInfo,
                                bool MatchingInlineAsm) override;
+
+  bool parseBitOff(OperandVector &Operands);
+  bool parseBitAddr(OperandVector &Operands);
+  bool parseBitOffValue(int64_t &Off, StringRef &BitPosText);
 
   bool parseRegister(MCRegister &Reg, SMLoc &StartLoc, SMLoc &EndLoc) override;
   ParseStatus tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
@@ -296,6 +336,28 @@ static int64_t matchSpecialFunctionRegister(StringRef Name) {
       .Default(-1);
 }
 
+/// The 8 bit "bitoff" word address that names a word in the bit-addressable
+/// space, or -1 when the name is not a bit-addressable word.  General purpose
+/// registers are F0H + n; a special function register keeps the short address
+/// it already carries, but only the ones from FF00H to FFDEH are bit
+/// addressable at all - FE00H to FEFEH, where MDL, MDH, CP, SP and the DPPs
+/// live, is not.
+static int64_t matchBitAddressableWord(StringRef Name) {
+  std::string Lowered = Name.lower();
+  StringRef Number = Lowered;
+  if (Number.consume_front("r")) {
+    unsigned N;
+    if (!Number.getAsInteger(10, N) && N < 16)
+      return 0xF0 + N;
+    return -1;
+  }
+
+  int64_t Addr = matchSpecialFunctionRegister(Name);
+  if (Addr < 0xFF00 || Addr > 0xFFDE)
+    return -1;
+  return 0x80 + ((Addr - 0xFF00) / 2);
+}
+
 /// Map a cc_XX mnemonic onto its encoding.
 static int64_t matchCondCode(StringRef Name) {
   for (int64_t CC = 0; CC <= 0xF; ++CC) {
@@ -348,6 +410,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
     return Error(RegStart, "expected a base register");
 
   const MCExpr *Disp = MCConstantExpr::create(0, getContext());
+  bool HasDisp = false;
   if (getLexer().is(AsmToken::Plus)) {
     Lex(); // eat '+'
     if (getLexer().isNot(AsmToken::Hash))
@@ -355,6 +418,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
     Lex(); // eat '#'
     if (parseExpressionWithSpecifier(Disp))
       return true;
+    HasDisp = true;
   }
 
   if (getLexer().isNot(AsmToken::RBrac))
@@ -362,7 +426,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   SMLoc E = getLexer().getLoc();
   Lex();
 
-  Operands.push_back(C166Operand::createMem(Base, Disp, S, E));
+  Operands.push_back(C166Operand::createMem(Base, Disp, HasDisp, S, E));
   return false;
 }
 
@@ -391,8 +455,115 @@ bool C166AsmParser::parseExpressionWithSpecifier(const MCExpr *&Res) {
   return getParser().parseExpression(Res);
 }
 
+/// How many of an instruction's leading operands are bit addresses.  The bit
+/// test branches take one and then a relative target; the two operand bit
+/// instructions take two.
+static unsigned countBitAddrOperands(StringRef Mnemonic) {
+  return StringSwitch<unsigned>(Mnemonic)
+      .Cases({"bclr", "bset", "jb", "jbc", "jnb", "jnbs"}, 1)
+      .Cases({"band", "bor", "bxor", "bmov", "bmovn", "bcmp"}, 2)
+      .Default(0);
+}
+
+/// Read the word half of a bit address.  The assembly lexer folds '.' into an
+/// identifier, so "psw.3" arrives as a single token and the bit position has
+/// to be split back off here; it is returned as text for the caller to parse,
+/// empty when the token did not carry one.
+bool C166AsmParser::parseBitOffValue(int64_t &Off, StringRef &BitPosText) {
+  BitPosText = StringRef();
+  SMLoc S = getLexer().getLoc();
+
+  if (getLexer().is(AsmToken::Identifier)) {
+    StringRef Name = getLexer().getTok().getIdentifier();
+    StringRef Word = Name;
+    if (size_t Dot = Name.rfind('.'); Dot != StringRef::npos) {
+      Word = Name.take_front(Dot);
+      BitPosText = Name.drop_front(Dot + 1);
+    }
+
+    Off = matchBitAddressableWord(Word);
+    if (Off < 0)
+      return Error(S, "not a bit-addressable word");
+    Lex();
+    return false;
+  }
+
+  // A decimal word written up against its bit position, "136.10", is lexed as
+  // a floating point literal; take that apart rather than reject it.  A hex
+  // one cannot be: "0x88.15" is a lexer error before it reaches here, so it
+  // has to be written with the '.' spaced out.
+  if (getLexer().is(AsmToken::Real)) {
+    StringRef Text = getLexer().getTok().getString();
+    StringRef Word = Text.take_front(Text.find('.'));
+    BitPosText = Text.drop_front(Word.size() + 1);
+    if (Word.getAsInteger(10, Off) || Off < 0 || Off > 0xFF)
+      return Error(S, "expected a bit-addressable word");
+    Lex();
+    return false;
+  }
+
+  // Otherwise it is the bit-addressable word number itself, which is what the
+  // instruction encodes.
+  const MCExpr *Expr;
+  if (getParser().parseExpression(Expr))
+    return true;
+  const auto *CE = dyn_cast<MCConstantExpr>(Expr);
+  if (!CE || CE->getValue() < 0 || CE->getValue() > 0xFF)
+    return Error(S, "expected a bit-addressable word");
+  Off = CE->getValue();
+  return false;
+}
+
+bool C166AsmParser::parseBitOff(OperandVector &Operands) {
+  SMLoc S = getLexer().getLoc();
+  int64_t Off;
+  StringRef BitPosText;
+  if (parseBitOffValue(Off, BitPosText))
+    return true;
+  if (!BitPosText.empty())
+    return Error(S, "expected a bit-addressable word, not a bit address");
+
+  Operands.push_back(C166Operand::createImm(
+      MCConstantExpr::create(Off, getContext()), S, getLexer().getLoc()));
+  return false;
+}
+
+bool C166AsmParser::parseBitAddr(OperandVector &Operands) {
+  SMLoc S = getLexer().getLoc();
+  int64_t Off;
+  StringRef BitPosText;
+  if (parseBitOffValue(Off, BitPosText))
+    return true;
+
+  // A numeric word leaves the '.' and the position behind as separate tokens.
+  if (BitPosText.empty()) {
+    if (getLexer().isNot(AsmToken::Dot))
+      return Error(getLexer().getLoc(), "expected '.' and a bit position");
+    Lex();
+    if (getLexer().isNot(AsmToken::Integer))
+      return Error(getLexer().getLoc(), "expected a bit position");
+    BitPosText = getLexer().getTok().getString();
+    Lex();
+  }
+
+  unsigned Pos;
+  if (BitPosText.getAsInteger(10, Pos) || Pos > 15)
+    return Error(S, "expected a bit position in [0, 15]");
+
+  Operands.push_back(
+      C166Operand::createBitAddr(Off, Pos, S, getLexer().getLoc()));
+  return false;
+}
+
 bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   SMLoc S = getLexer().getLoc();
+
+  // Operands.size() counts the mnemonic, so it is one more than the index of
+  // the operand about to be parsed.
+  if (Operands.size() <= countBitAddrOperands(Mnemonic))
+    return parseBitAddr(Operands);
+  if (Operands.size() == 1 && (Mnemonic == "bfldl" || Mnemonic == "bfldh"))
+    return parseBitOff(Operands);
 
   switch (getLexer().getKind()) {
   case AsmToken::Hash: {

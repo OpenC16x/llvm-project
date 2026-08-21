@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/C166FixupKinds.h"
 #include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -34,6 +35,21 @@ public:
 
   ~C166AsmBackend() override = default;
 
+  MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
+    // This table must be kept in the same order as the enum in
+    // C166FixupKinds.h.
+    const static MCFixupKindInfo Infos[C166::NumTargetFixupKinds] = {
+        // name                offset bits flags
+        {"fixup_c166_rel8w", 0, 8, 0},
+    };
+    static_assert(std::size(Infos) == C166::NumTargetFixupKinds,
+                  "Not all fixup kinds added to Infos array");
+
+    if (Kind < FirstTargetFixupKind)
+      return MCAsmBackend::getFixupKindInfo(Kind);
+    return Infos[Kind - FirstTargetFixupKind];
+  }
+
   void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data, uint64_t Value,
                   bool IsResolved) override;
@@ -57,6 +73,25 @@ void C166AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   // the relocation above carries the whole address and the linker does the
   // splitting instead.
   Value = C166::applySpecifier(Target.getSpecifier(), Value);
+
+  // A relative branch counts words from the instruction after the one it sits
+  // in, while the fixup was measured to the displacement byte itself, which is
+  // two bytes into the instruction.  Halving turns bytes into words and the
+  // decrement moves the origin on to the next instruction.
+  if (Fixup.getKind() == C166::fixup_c166_rel8w) {
+    // When the target is not known yet the relocation above carries the whole
+    // distance and the linker does this instead; Value has been zeroed and
+    // must stay that way.
+    if (!IsResolved)
+      return;
+    if (Value & 1)
+      getContext().reportError(Fixup.getLoc(),
+                               "branch target must be 2-byte aligned");
+    int64_t Offset = (static_cast<int64_t>(Value) >> 1) - 1;
+    if (Offset < -128 || Offset > 127)
+      getContext().reportError(Fixup.getLoc(), "branch target out of range");
+    Value = static_cast<uint64_t>(Offset) & 0xff;
+  }
 
   if (!Value)
     return; // Doesn't change encoding.

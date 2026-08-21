@@ -72,6 +72,8 @@ def C166farload  : SDNode<"C166ISD::FAR_LOAD", SDT_C166FarLoad,
                           [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
                           [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -95,25 +97,45 @@ def MemRIAsmOperand : AsmOperandClass {
   let RenderMethod = "addMemRIOperands";
 }
 
+def MemRAsmOperand : AsmOperandClass {
+  let Name = "MemR";
+  let RenderMethod = "addMemROperands";
+}
+
 // Immediates are range checked so that an out of range value is rejected
 // rather than quietly truncated to the width of its field.  A symbol
 // reference is always accepted: the relocation sorts it out later.
-def Imm4AsmOperand : AsmOperandClass {
-  let Name = "Imm4";
+//
+// The three widths form a chain, narrowest last, which is what makes the
+// assembler prefer the two byte encoding for a constant that fits in four
+// bits: that is what the compiler emits, so it is what a disassembly has to
+// assemble back to.  It has to be a chain rather than a list, because only the
+// first superclass counts towards the hierarchy the matcher ranks by.
+def Data16AsmOperand : AsmOperandClass {
+  let Name = "Data16";
   let RenderMethod = "addImmOperands";
-  let DiagnosticString = "expected an immediate in the range [0, 15]";
+  let DiagnosticString = "expected a 16 bit immediate";
 }
 
 def Data8AsmOperand : AsmOperandClass {
   let Name = "Data8";
   let RenderMethod = "addImmOperands";
+  let SuperClasses = [Data16AsmOperand];
   let DiagnosticString = "expected an 8 bit immediate";
 }
 
-def Data16AsmOperand : AsmOperandClass {
-  let Name = "Data16";
+def Imm4AsmOperand : AsmOperandClass {
+  let Name = "Imm4";
   let RenderMethod = "addImmOperands";
-  let DiagnosticString = "expected a 16 bit immediate";
+  let SuperClasses = [Data8AsmOperand];
+  let DiagnosticString = "expected an immediate in the range [0, 15]";
+}
+
+def Imm3AsmOperand : AsmOperandClass {
+  let Name = "Imm3";
+  let RenderMethod = "addImmOperands";
+  let SuperClasses = [Imm4AsmOperand];
+  let DiagnosticString = "expected an immediate in the range [0, 7]";
 }
 
 def Irang2AsmOperand : AsmOperandClass {
@@ -128,6 +150,24 @@ def Seg8AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected an 8 bit segment number";
 }
 
+def BitOffAsmOperand : AsmOperandClass {
+  let Name = "BitOff";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected a bit-addressable word";
+}
+
+def BitAddrAsmOperand : AsmOperandClass {
+  let Name = "BitAddr";
+  let RenderMethod = "addBitAddrOperands";
+  let DiagnosticString = "expected a bit address of the form <word>.<bit>";
+}
+
+def Mask8AsmOperand : AsmOperandClass {
+  let Name = "Mask8";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an 8 bit mask";
+}
+
 def Pag10AsmOperand : AsmOperandClass {
   let Name = "Pag10";
   let RenderMethod = "addImmOperands";
@@ -139,6 +179,40 @@ def Pag10AsmOperand : AsmOperandClass {
 def reg8 : RegisterOperand<GR16orSFR> {
   let EncoderMethod = "getReg8OpValue";
   let DecoderMethod = "decodeReg8Operand";
+}
+
+// The 8 bit "bitoff" word address of the bit-addressable space, and a bit
+// address within it.  A bit address is printed <word>.<bit> and carried as two
+// operands; the encoder packs them as (bitpos << 8) | bitoff so that one value
+// can feed both instruction fields.
+def bitoff : Operand<i16> {
+  let PrintMethod = "printBitOffOperand";
+  let DecoderMethod = "decodeBitOffOperand";
+  let ParserMatchClass = BitOffAsmOperand;
+}
+
+def bitaddr : Operand<i16> {
+  let PrintMethod = "printBitAddrOperand";
+  let MIOperandInfo = (ops i16imm, i16imm);
+  let EncoderMethod = "getBitAddrOpValue";
+  let DecoderMethod = "decodeBitAddrOperand";
+  let ParserMatchClass = BitAddrAsmOperand;
+}
+
+// The target of a relative branch, an 8 bit signed count of words from the
+// instruction that follows.
+def reltarget : Operand<OtherVT> {
+  let PrintMethod = "printRelTargetOperand";
+  let EncoderMethod = "getRel8OpValue";
+  let ParserMatchClass = AddrAsmOperand;
+  // Marking it PC relative is what gets the instruction's own address handed
+  // to the print method, so a disassembly can name the target rather than the
+  // distance to it.
+  let OperandType = "OPERAND_PCREL";
+}
+
+def mask8 : Operand<i8> {
+  let ParserMatchClass = Mask8AsmOperand;
 }
 
 // A condition code, printed as cc_XX and encoded in a 4 bit field.
@@ -156,6 +230,15 @@ def memri : Operand<i16> {
   let EncoderMethod = "getMemRIOpValue";
   let DecoderMethod = "decodeMemRIOperand";
   let ParserMatchClass = MemRIAsmOperand;
+}
+
+// [Rw] on its own, which is a two byte instruction rather than the four byte
+// [Rw + #data16] with nothing added.
+def memr : Operand<i16> {
+  let PrintMethod = "printMemROperand";
+  let MIOperandInfo = (ops GR16);
+  let DecoderMethod = "decodeMemROperand";
+  let ParserMatchClass = MemRAsmOperand;
 }
 
 // A plain 16 bit data address ("mem" in the manual).
@@ -219,6 +302,27 @@ def pag10 : Operand<i16> {
   let ParserMatchClass = Pag10AsmOperand;
 }
 
+// The arithmetic instructions have a two byte form taking #data3, which is
+// zero extended like every short constant and so spans 0 to 7.
+def imm3 : Operand<i16>, ImmLeaf<i16, [{
+  return Imm >= 0 && Imm < 8;
+}]> {
+  let ParserMatchClass = Imm3AsmOperand;
+}
+
+def imm3b : Operand<i8>, ImmLeaf<i8, [{
+  return Imm >= 0 && Imm < 8;
+}]> {
+  let ParserMatchClass = Imm3AsmOperand;
+}
+
+// A short constant is zero extended, so #data4 spans 0 to 15 (manual 6.5).
+def imm4b : Operand<i8>, ImmLeaf<i8, [{
+  return Imm >= 0 && Imm < 16;
+}]> {
+  let ParserMatchClass = Imm4AsmOperand;
+}
+
 // Shift and rotate counts are #data4.
 def imm4 : Operand<i16>, ImmLeaf<i16, [{
   return Imm >= 0 && Imm < 16;
@@ -230,6 +334,7 @@ def imm4 : Operand<i16>, ImmLeaf<i16, [{
 // Complex Patterns
 //===----------------------------------------------------------------------===//
 
+def addrr   : ComplexPattern<iPTR, 1, "SelectAddrR", [], []>;
 def addrri  : ComplexPattern<iPTR, 2, "SelectAddrRI", [frameindex], []>;
 def addrabs : ComplexPattern<iPTR, 1, "SelectAddrAbs", [], []>;
 
@@ -311,6 +416,36 @@ def FARSTORE8i  : Pseudo<(outs), (ins GR8:$src, GR16:$off, i16imm:$seg),
                          "#FARSTORE8i", []>;
 }
 
+// A tail call is a jump to the callee once this function's frame is gone, so
+// the callee's RET goes straight back to our caller.  They are pseudos so that
+// the prolog/epilog inserter treats them as returns and tears the frame down
+// in front of them; expandPostRAPseudo() then turns them into the jumps below.
+//
+// The jumps need opcodes of their own rather than reusing JMPA and JMPI: their
+// target is a symbol, not a basic block, so anything that reads the control
+// flow graph must not take them for branches.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
+    Uses = [R0] in {
+def TCRETURNa : Pseudo<(outs), (ins calltarget:$dst), "#TCRETURNa", []>;
+def TCRETURNi : Pseudo<(outs), (ins GR16:$dst), "#TCRETURNi", []>;
+
+let isCodeGenOnly = 1 in {
+def TAILJMPa : InstL<0xEA, (outs), (ins calltarget:$dst), "jmpa\tcc_UC, $dst",
+                     []> {
+  bits<16> dst;
+  let Inst{15-12} = 0b0000;   // cc_UC
+  let Inst{11-8} = 0;
+  let Inst{31-16} = dst;
+}
+def TAILJMPi : InstS<0x9C, (outs), (ins GR16:$dst), "jmpi\tcc_UC, [$dst]",
+                     []> {
+  bits<4> dst;
+  let Inst{15-12} = 0b0000;   // cc_UC
+  let Inst{11-8} = dst;
+}
+}
+}
+
 // Multiply and divide go through the MDL/MDH register pair.  These pseudos are
 // expanded by C166InstrInfo::expandPostRAPseudo().
 let Defs = [MDL, MDH, MDC, PSW] in {
@@ -360,6 +495,26 @@ def MOVB8rr : InstS<0xF1, (outs GR8:$dst), (ins GR8:$src),
 }
 
 let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
+// MOV Rwn, #data4 / MOVB Rbn, #data4, two bytes with the constant in the high
+// nibble ahead of the register.  A short constant is zero extended, so these
+// cover 0 to 15.
+def MOV16ri4 : InstS<0xE0, (outs GR16:$dst), (ins imm4:$src),
+                     "mov\t$dst, $src", [(set GR16:$dst, imm4:$src)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
+}
+def MOVB8ri4 : InstS<0xE1, (outs GR8:$dst), (ins imm4b:$src),
+                     "movb\t$dst, $src", [(set GR8:$dst, imm4b:$src)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
+}
+
 // MOV reg, #data16  /  MOVB reg, #data8
 def MOV16ri : InstL<0xE6, (outs GR16:$dst), (ins data16:$src),
                     "mov\t$dst, $src", [(set GR16:$dst, imm:$src)]> {
@@ -377,6 +532,53 @@ def MOVB8ri : InstL<0xE7, (outs GR8:$dst), (ins data8:$src),
   let Inst{11-8} = dst;
   let Inst{23-16} = src;
   let Inst{31-24} = 0;
+}
+}
+
+// The two byte [Rw] forms of everything that would otherwise go through the
+// four byte [Rw + #data16].  They are preferred by AddedComplexity whenever the
+// displacement would have been zero, which in a pointer walking loop is every
+// access.  eliminateFrameIndex() switches to them as well when a frame slot
+// turns out to sit at offset zero.
+let mayLoad = 1 in {
+def MOV16rp  : InstS<0xA8, (outs GR16:$dst), (ins memr:$src),
+                         "mov\t$dst, $src",
+                         [(set GR16:$dst, (load addrr:$src))]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = src;
+  let AddedComplexity = 10;
+}
+def MOVB8rp  : InstS<0xA9, (outs GR8:$dst), (ins memr:$src),
+                         "movb\t$dst, $src",
+                         [(set GR8:$dst, (load addrr:$src))]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = src;
+  let AddedComplexity = 10;
+}
+}
+
+let mayStore = 1 in {
+def MOV16pr : InstS<0xB8, (outs), (ins memr:$dst, GR16:$src),
+                          "mov\t$dst, $src",
+                          [(store GR16:$src, addrr:$dst)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
+}
+def MOVB8pr : InstS<0xB9, (outs), (ins memr:$dst, GR8:$src),
+                          "movb\t$dst, $src",
+                          [(store GR8:$src, addrr:$dst)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
 }
 }
 
@@ -491,6 +693,20 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
                   SDNode opnode, bit commutable = 0,
                   list<Register> uses = []> {
   let Constraints = "$src1 = $dst", Defs = [PSW], Uses = uses in {
+    // The two byte #data3 form, preferred whenever the constant fits.  Its
+    // opcode is the register/register one plus 8.
+    let AddedComplexity = 10 in
+    def 16ri3 : InstS<!add(opRR, 8), (outs GR16:$dst),
+                      (ins GR16:$src1, imm3:$src2),
+                      !strconcat(mnemonic, "\t$dst, $src2"),
+                      [(set GR16:$dst, (opnode GR16:$src1, imm3:$src2))]> {
+      bits<4> dst;
+      bits<3> src2;
+      let Inst{15-12} = dst;
+      let Inst{11} = 0;
+      let Inst{10-8} = src2;
+    }
+
     let isCommutable = commutable in
     def 16rr : InstS<opRR, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
@@ -526,6 +742,18 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
 multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
                   SDNode opnode, bit commutable = 0> {
   let Constraints = "$src1 = $dst", Defs = [PSW] in {
+    let AddedComplexity = 10 in
+    def 8ri3 : InstS<!add(opRR, 8), (outs GR8:$dst),
+                     (ins GR8:$src1, imm3b:$src2),
+                     !strconcat(mnemonic, "\t$dst, $src2"),
+                     [(set GR8:$dst, (opnode GR8:$src1, imm3b:$src2))]> {
+      bits<4> dst;
+      bits<3> src2;
+      let Inst{15-12} = dst;
+      let Inst{11} = 0;
+      let Inst{10-8} = src2;
+    }
+
     let isCommutable = commutable in
     def 8rr : InstS<opRR, (outs GR8:$dst), (ins GR8:$src1, GR8:$src2),
                     !strconcat(mnemonic, "\t$dst, $src2"),
@@ -642,6 +870,22 @@ def CMP16rr : InstS<0x40, (outs), (ins GR16:$src1, GR16:$src2),
   let Inst{15-12} = src1;
   let Inst{11-8} = src2;
 }
+
+// The two byte #data3 forms, which expandPostRAPseudo() picks when the fused
+// compare-and-branch it is splitting carries a small enough constant.
+class CompareImm3<bits<8> opcode, string mnemonic, RegisterClass RC,
+                  Operand ImmTy>
+    : InstS<opcode, (outs), (ins RC:$src1, ImmTy:$src2),
+            !strconcat(mnemonic, "\t$src1, $src2"), []> {
+  bits<4> src1;
+  bits<3> src2;
+  let Inst{15-12} = src1;
+  let Inst{11} = 0;
+  let Inst{10-8} = src2;
+}
+
+def CMP16ri3 : CompareImm3<0x48, "cmp", GR16, imm3>;
+def CMPB8ri3 : CompareImm3<0x49, "cmpb", GR8, imm3b>;
 def CMP16ri : InstL<0x46, (outs), (ins GR16:$src1, data16:$src2),
                     "cmp\t$src1, $src2", []> {
   bits<4> src1;
@@ -880,6 +1124,102 @@ def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
 }
 
 //===----------------------------------------------------------------------===//
+// Bit Instructions
+//===----------------------------------------------------------------------===//
+//
+// The bit-addressable space is named by an 8 bit "bitoff" word address: 00H to
+// 7FH is internal RAM at FD00H + 2*bitoff, 80H to EFH is the SFR area at
+// FF00H + 2*(bitoff - 80H), and F0H to FFH is R0 to R15.  An SFR's short
+// register address is therefore also its bitoff, since both land on the same
+// word.  A bit address adds a position 0 to 15 within that word.
+//
+// These are MC level only: knowing that an address is bit-addressable is
+// beyond what the compiler can see, so nothing generates them yet.
+//===----------------------------------------------------------------------===//
+
+// BCLR and BSET put the bit position in the high nibble of the opcode byte.
+class BitSetClear<bits<4> op, string mnemonic>
+    : C166Inst<(outs), (ins bitaddr:$addr), 2,
+               !strconcat(mnemonic, "\t$addr"), []> {
+  bits<12> addr;
+  let Inst{3-0} = op;
+  let Inst{7-4} = addr{11-8};
+  let Inst{15-8} = addr{7-0};
+  let Inst{31-16} = 0;
+  let Defs = [PSW];
+}
+
+def BCLR : BitSetClear<0xE, "bclr">;
+def BSET : BitSetClear<0xF, "bset">;
+
+// The two operand bit instructions name the destination first but encode the
+// source first, and pack the two bit positions into the last byte as the
+// source in the high nibble and the destination in the low one.
+class BitBinary<bits<8> op, string mnemonic>
+    : InstL<op, (outs), (ins bitaddr:$dst, bitaddr:$src),
+            !strconcat(mnemonic, "\t$dst, $src"), []> {
+  bits<12> dst;
+  bits<12> src;
+  let Inst{15-8} = src{7-0};
+  let Inst{23-16} = dst{7-0};
+  let Inst{27-24} = dst{11-8};
+  let Inst{31-28} = src{11-8};
+  let Defs = [PSW];
+}
+
+def BCMP  : BitBinary<0x2A, "bcmp">;
+def BMOVN : BitBinary<0x3A, "bmovn">;
+def BMOV  : BitBinary<0x4A, "bmov">;
+def BOR   : BitBinary<0x5A, "bor">;
+def BAND  : BitBinary<0x6A, "band">;
+def BXOR  : BitBinary<0x7A, "bxor">;
+
+// BFLDL and BFLDH replace the masked bits of one byte of a word.  The two are
+// byte-swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
+// "1A QQ ## @@", so the mask and the value change places.
+let Defs = [PSW] in {
+def BFLDL : InstL<0x0A, (outs), (ins bitoff:$addr, mask8:$mask, data8:$value),
+                  "bfldl\t$addr, $mask, $value", []> {
+  bits<8> addr;
+  bits<8> mask;
+  bits<8> value;
+  let Inst{15-8} = addr;
+  let Inst{23-16} = mask;
+  let Inst{31-24} = value;
+}
+def BFLDH : InstL<0x1A, (outs), (ins bitoff:$addr, mask8:$mask, data8:$value),
+                  "bfldh\t$addr, $mask, $value", []> {
+  bits<8> addr;
+  bits<8> mask;
+  bits<8> value;
+  let Inst{15-8} = addr;
+  let Inst{23-16} = value;
+  let Inst{31-24} = mask;
+}
+}
+
+// The bit test branches.  The bit position goes in the high nibble of the last
+// byte, with the low one left clear.
+let isBranch = 1, isTerminator = 1 in
+class BitBranch<bits<8> op, string mnemonic, bit setsFlags>
+    : InstL<op, (outs), (ins bitaddr:$addr, reltarget:$dst),
+            !strconcat(mnemonic, "\t$addr, $dst"), []> {
+  bits<12> addr;
+  bits<8> dst;
+  let Inst{15-8} = addr{7-0};
+  let Inst{23-16} = dst;
+  let Inst{27-24} = 0;
+  let Inst{31-28} = addr{11-8};
+  let Defs = !if(setsFlags, [PSW], []);
+}
+
+def JB   : BitBranch<0x8A, "jb",   0>;
+def JNB  : BitBranch<0x9A, "jnb",  0>;
+// JBC and JNBS also change the bit they tested.
+def JBC  : BitBranch<0xAA, "jbc",  1>;
+def JNBS : BitBranch<0xBA, "jnbs", 1>;
+
+//===----------------------------------------------------------------------===//
 // Segmented Addressing
 //===----------------------------------------------------------------------===//
 //
@@ -1005,13 +1345,21 @@ def RETS : InstS<0xDB, (outs), (ins), "rets", [(C166retsglue)]> {
 // the byte extensions - leaves the carry alone.
 def : Pat<(addc GR16:$src1, GR16:$src2), (ADD16rr GR16:$src1, GR16:$src2)>;
 def : Pat<(addc GR16:$src1, imm:$src2),  (ADD16ri GR16:$src1, imm:$src2)>;
+let AddedComplexity = 10 in
+def : Pat<(addc GR16:$src1, imm3:$src2), (ADD16ri3 GR16:$src1, imm3:$src2)>;
 def : Pat<(addc GR16:$src1, (load addrabs:$src2)),
           (ADD16ra GR16:$src1, addrabs:$src2)>;
 
 def : Pat<(subc GR16:$src1, GR16:$src2), (SUB16rr GR16:$src1, GR16:$src2)>;
 def : Pat<(subc GR16:$src1, imm:$src2),  (SUB16ri GR16:$src1, imm:$src2)>;
+let AddedComplexity = 10 in
+def : Pat<(subc GR16:$src1, imm3:$src2), (SUB16ri3 GR16:$src1, imm3:$src2)>;
 def : Pat<(subc GR16:$src1, (load addrabs:$src2)),
           (SUB16ra GR16:$src1, addrabs:$src2)>;
+
+def : Pat<(C166tcret (i16 tglobaladdr:$dst)),  (TCRETURNa tglobaladdr:$dst)>;
+def : Pat<(C166tcret (i16 texternalsym:$dst)), (TCRETURNa texternalsym:$dst)>;
+def : Pat<(C166tcret GR16:$dst),               (TCRETURNi GR16:$dst)>;
 
 // Direct and indirect calls, and indirect jumps, all with cc_UC (0).
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;

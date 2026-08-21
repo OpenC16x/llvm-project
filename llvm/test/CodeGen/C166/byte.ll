@@ -13,7 +13,7 @@ define i8 @load_byte(ptr %p) {
 define void @store_byte(ptr %p, i8 %v) {
 ; CHECK-LABEL: store_byte:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    movb [r2], rl3
+; CHECK-NEXT:    movb [r2+#0], rl3
 ; CHECK-NEXT:    ret
   store i8 %v, ptr %p
   ret void
@@ -44,7 +44,7 @@ define i16 @sext_byte(ptr %p) {
 define void @truncating_store(ptr %p, i16 %v) {
 ; CHECK-LABEL: truncating_store:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    movb [r2], rl3
+; CHECK-NEXT:    movb [r2+#0], rl3
 ; CHECK-NEXT:    ret
   %t = trunc i16 %v to i8
   store i8 %t, ptr %p

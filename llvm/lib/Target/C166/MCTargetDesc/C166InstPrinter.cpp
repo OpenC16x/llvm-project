@@ -13,6 +13,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
@@ -51,17 +52,21 @@ void C166InstPrinter::printMemRIOperand(const MCInst *MI, unsigned OpNo,
   const MCOperand &Base = MI->getOperand(OpNo);
   const MCOperand &Disp = MI->getOperand(OpNo + 1);
 
-  O << '[' << getRegisterName(Base.getReg());
-  if (Disp.isImm()) {
-    int64_t Imm = Disp.getImm();
-    if (Imm != 0)
-      O << "+#" << Imm;
-  } else {
+  // The displacement is always printed, zero included: "[Rw]" is the shorter
+  // instruction rather than the same one with nothing added.
+  O << '[' << getRegisterName(Base.getReg()) << "+#";
+  if (Disp.isImm())
+    O << Disp.getImm();
+  else {
     assert(Disp.isExpr() && "unknown displacement in printMemRIOperand");
-    O << "+#";
     MAI.printExpr(O, *Disp.getExpr());
   }
   O << ']';
+}
+
+void C166InstPrinter::printMemROperand(const MCInst *MI, unsigned OpNo,
+                                       raw_ostream &O) {
+  O << '[' << getRegisterName(MI->getOperand(OpNo).getReg()) << ']';
 }
 
 void C166InstPrinter::printAddr16Operand(const MCInst *MI, unsigned OpNo,
@@ -84,6 +89,50 @@ void C166InstPrinter::printBrTargetOperand(const MCInst *MI, unsigned OpNo,
 void C166InstPrinter::printCallTargetOperand(const MCInst *MI, unsigned OpNo,
                                              raw_ostream &O) {
   printAddr16Operand(MI, OpNo, O);
+}
+
+void C166InstPrinter::printRelTargetOperand(const MCInst *MI, uint64_t Address,
+                                            unsigned OpNo, raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (!Op.isImm()) {
+    assert(Op.isExpr() && "unknown operand kind in printRelTargetOperand");
+    MAI.printExpr(O, *Op.getExpr());
+    return;
+  }
+
+  // The displacement counts words from the instruction after this one, which
+  // is four bytes on: every relative branch here is a long one.  Naming the
+  // target instead is what a disassembly wants, but only the distance can be
+  // fed back to the assembler, so it stays the default.
+  int64_t Words = SignExtend64<8>(Op.getImm());
+  if (PrintBranchImmAsAddress)
+    O << formatHex((Address + 4 + 2 * Words) & 0xffff);
+  else
+    O << Words;
+}
+
+void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
+                                         raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (!Op.isImm()) {
+    assert(Op.isExpr() && "unknown operand kind in printBitOffOperand");
+    MAI.printExpr(O, *Op.getExpr());
+    return;
+  }
+
+  // F0H to FFH is the general purpose register window, which reads better by
+  // name; the rest of the bit-addressable space has no names to give it.
+  uint64_t Off = static_cast<uint64_t>(Op.getImm()) & 0xff;
+  if (Off >= 0xf0)
+    O << "r" << (Off - 0xf0);
+  else
+    O << Off;
+}
+
+void C166InstPrinter::printBitAddrOperand(const MCInst *MI, unsigned OpNo,
+                                          raw_ostream &O) {
+  printBitOffOperand(MI, OpNo, O);
+  O << '.' << (MI->getOperand(OpNo + 1).getImm() & 0xf);
 }
 
 void C166InstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo,

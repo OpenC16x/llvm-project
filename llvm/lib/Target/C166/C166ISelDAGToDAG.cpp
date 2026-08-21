@@ -44,6 +44,7 @@ public:
                                     std::vector<SDValue> &OutOps) override;
 
   // Complex pattern selectors.
+  bool SelectAddrR(SDValue Addr, SDValue &Base);
   bool SelectAddrRI(SDValue Addr, SDValue &Base, SDValue &Disp);
   bool SelectAddrAbs(SDValue Addr, SDValue &Address);
 
@@ -90,8 +91,9 @@ static bool matchAbsoluteAddress(SelectionDAG &DAG, SDValue Addr,
   }
 
   if (Addr.getOpcode() == C166ISD::Wrapper) {
-    // Block addresses and jump table entries live in code memory, which is not
-    // reachable through a data address.
+    // A block address names a place in code memory, which no data address
+    // reaches.  A jump table is data, but reading one is always indexed, so it
+    // is SelectAddrRI below that folds it.
     SDValue Op = Addr.getOperand(0);
     if (Op.getOpcode() != ISD::TargetGlobalAddress &&
         Op.getOpcode() != ISD::TargetExternalSymbol)
@@ -143,6 +145,22 @@ bool C166DAGToDAGISel::SelectAddrAbs(SDValue Addr, SDValue &Address) {
 }
 
 /// Match [Rw] and [Rw + #data16] addressing.
+bool C166DAGToDAGISel::SelectAddrR(SDValue Addr, SDValue &Base) {
+  // Only a bare register.  An absolute address, a frame index and anything
+  // with something added to it all have a better instruction waiting for them,
+  // and this one has no field to put the rest in.
+  SDValue AbsBase;
+  int64_t AbsOffset;
+  if (matchAbsoluteAddress(*CurDAG, Addr, AbsBase, AbsOffset))
+    return false;
+  if (isa<FrameIndexSDNode>(Addr) || Addr.getOpcode() == ISD::ADD ||
+      Addr.getOpcode() == ISD::OR)
+    return false;
+
+  Base = Addr;
+  return true;
+}
+
 bool C166DAGToDAGISel::SelectAddrRI(SDValue Addr, SDValue &Base,
                                     SDValue &Disp) {
   SDLoc DL(Addr);
@@ -173,6 +191,21 @@ bool C166DAGToDAGISel::SelectAddrRI(SDValue Addr, SDValue &Base,
         Base = N0;
 
       Disp = CurDAG->getSignedTargetConstant(C->getSExtValue(), DL, MVT::i16);
+      return true;
+    }
+
+    // Reading a jump table entry adds the scaled index to the table's address,
+    // and that address is a relocatable constant, so it rides in the
+    // displacement field rather than being materialised into a register.
+    for (unsigned I = 0; I != 2; ++I) {
+      SDValue Wrapped = Addr.getOperand(I);
+      if (Wrapped.getOpcode() != C166ISD::Wrapper)
+        continue;
+      SDValue Table = Wrapped.getOperand(0);
+      if (Table.getOpcode() != ISD::TargetJumpTable)
+        continue;
+      Base = Addr.getOperand(1 - I);
+      Disp = Table;
       return true;
     }
   }
