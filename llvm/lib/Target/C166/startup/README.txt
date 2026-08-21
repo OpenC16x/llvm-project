@@ -69,6 +69,10 @@ __user_stack_top, which the script puts at the top of RAM.  Both are in the
 same 1 KByte to start with, which does not leave much; a board with external
 RAM should move the user stack out there and give the system stack the room.
 
+crt0.S writes SP, STKUN, STKOV and the DPPs with a plain "mov sp, #..." each,
+which the assembler can do because the 8 bit "reg" field of MOV reaches the
+special function registers.  There is no scratch register involved.
+
 crt0.S leaves CP where reset put it.  CP says where R0 to R15 are, so an
 instruction that changes it changes what every register operand around it
 means; a program that wants a different register bank is better off doing that

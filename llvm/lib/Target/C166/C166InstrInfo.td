@@ -604,6 +604,7 @@ def MOVB8ri4 : InstS<0xE1, (outs GR8:$dst), (ins imm4b:$src),
 }
 
 // MOV reg, #data16  /  MOVB reg, #data8
+let isCodeGenOnly = 1 in
 def MOV16ri : InstL<0xE6, (outs GR16:$dst), (ins data16:$src),
                     "mov\t$dst, $src", [(set GR16:$dst, imm:$src)]> {
   bits<4> dst;
@@ -701,6 +702,7 @@ def MOV16rm : InstL<0xD4, (outs GR16:$dst), (ins memri:$src),
   let Inst{31-16} = src{19-4};
 }
 // MOV reg, mem
+let isCodeGenOnly = 1 in
 def MOV16ra : InstL<0xF2, (outs GR16:$dst), (ins addr16:$src),
                     "mov\t$dst, $src", [(set GR16:$dst, (load addrabs:$src))]> {
   bits<4> dst;
@@ -824,6 +826,7 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{15-12} = dst;
       let Inst{11-8} = src2;
     }
+    let isCodeGenOnly = 1 in
     def 16ri : InstL<opRI, (outs GR16:$dst), (ins GR16:$src1, data16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
                      [(set GR16:$dst, (opnode GR16:$src1, imm:$src2))]> {
@@ -833,7 +836,7 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
       let Inst{11-8} = dst;
       let Inst{31-16} = src2;
     }
-    let mayLoad = 1 in
+    let mayLoad = 1, isCodeGenOnly = 1 in
     def 16ra : InstL<opRA, (outs GR16:$dst), (ins GR16:$src1, addr16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
                      [(set GR16:$dst,
@@ -893,6 +896,77 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
     }
   }
 }
+
+// The same two instructions with the whole 8 bit "reg" field, so that a
+// special function register can be named where the instruction allows one.
+//
+// They carry no pattern, and that is the point: reg8's register class holds
+// both kinds of register and is not allocatable, so it cannot be what a
+// pattern produces without the register allocator being told it may put a
+// result in an SFR.  The GPR-only forms above keep the patterns and are marked
+// codegen-only, which takes them out of the matcher and the decoder, so
+// "add r2, #1234" assembles as one of these and those bytes come back as it.
+multiclass ArithWReg<string mnemonic, bits<8> opRI, bits<8> opRA,
+                     list<Register> uses = []> {
+  let Defs = [PSW], Uses = uses in {
+    def 16regi : InstL<opRI, (outs), (ins reg8:$dst, data16:$src),
+                       !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<16> src;
+      let Inst{15-8} = dst;
+      let Inst{31-16} = src;
+    }
+    let mayLoad = 1 in
+    def 16rega : InstL<opRA, (outs), (ins reg8:$dst, addr16:$src),
+                       !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<8> dst;
+      bits<16> src;
+      let Inst{15-8} = dst;
+      let Inst{31-16} = src;
+    }
+  }
+}
+
+// The compare and the two loading forms of MOV, widened the same way.  MOV
+// mem, reg is deliberately not: with both operands able to be an SFR name,
+// "mov mdl, mdh" would match it as well as MOV reg, mem, and the two are
+// different encodings of the same thing, so there would be nothing to choose
+// between them.
+def CMP16regi : InstL<0x46, (outs), (ins reg8:$src1, data16:$src2),
+                      "cmp\t$src1, $src2", []> {
+  bits<8> src1;
+  bits<16> src2;
+  let Defs = [PSW];
+  let Inst{15-8} = src1;
+  let Inst{31-16} = src2;
+}
+
+def MOV16regi : InstL<0xE6, (outs), (ins reg8:$dst, data16:$src),
+                      "mov\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+
+let mayLoad = 1 in
+def MOV16rega : InstL<0xF2, (outs), (ins reg8:$dst, addr16:$src),
+                      "mov\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Defs = [PSW];
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+
+defm ADD  : ArithWReg<"add",  0x06, 0x02>;
+defm SUB  : ArithWReg<"sub",  0x26, 0x22>;
+defm AND  : ArithWReg<"and",  0x66, 0x62>;
+defm OR   : ArithWReg<"or",   0x76, 0x72>;
+defm XOR  : ArithWReg<"xor",  0x56, 0x52>;
+defm ADDC : ArithWReg<"addc", 0x16, 0x12, [PSW]>;
+defm SUBC : ArithWReg<"subc", 0x36, 0x32, [PSW]>;
 
 defm ADD  : ArithW<"add",  0x00, 0x06, 0x02, add, 1>;
 defm SUB  : ArithW<"sub",  0x20, 0x26, 0x22, sub, 0>;
@@ -994,6 +1068,7 @@ class CompareImm3<bits<8> opcode, string mnemonic, RegisterClass RC,
 
 def CMP16ri3 : CompareImm3<0x48, "cmp", GR16, imm3>;
 def CMPB8ri3 : CompareImm3<0x49, "cmpb", GR8, imm3b>;
+let isCodeGenOnly = 1 in
 def CMP16ri : InstL<0x46, (outs), (ins GR16:$src1, data16:$src2),
                     "cmp\t$src1, $src2", []> {
   bits<4> src1;

@@ -408,6 +408,17 @@ for the address it is mapped to (MDL is FE0EH, MDH is FE0CH).  The parser
 produces one operand that can be either and lets the matcher decide, since
 which one is meant is a property of the instruction rather than of the name.
 
+The wide field is not confined to PUSH and POP.  The word arithmetic and
+compare instructions, and the two loading forms of MOV, have it too, so
+"add mdl, #1" assembles and a startup sequence can write SP or a DPP without a
+register to go through.  Those forms carry no pattern, which is what makes
+them safe: reg8's register class holds both kinds of register and is not
+allocatable, so it cannot be what a pattern produces without the register
+allocator being told it may leave a result in an SFR.  The general purpose
+register forms keep the patterns and are marked codegen-only, which takes them
+out of the matcher and the decoder, so "add r2, #1234" assembles as the wide
+form and those bytes come back as it.
+
 Where those addresses are written down is C166MCTargetDesc, so that what the
 assembler accepts and what the disassembler prints back cannot drift apart:
 "mov r2, mdl" disassembles as itself rather than as "mov r2, 65038", and still
@@ -417,19 +428,18 @@ a number.
 Known limitations / things to do
 --------------------------------
 
-* PUSH and POP are the only instructions whose 8 bit "reg" field reaches the
-  special function registers.  Everything else that could put an SFR there -
-  "ADD MDL, #1" and friends - can be neither assembled nor disassembled.
-  Widening them means the operand class has to hold both kinds of register,
-  which PUSH and POP can do because they have no pattern to satisfy: a class
-  covering GPRs and SFRs cannot be the result of a codegen pattern without
-  becoming what the register allocator constrains those results to.  Word and
-  byte forms would need one such class each, since "reg" F0H + n names a word
-  register in a word instruction and a byte register in a byte one.
-* Only the handful of special function registers the backend has a use for are
-  modelled, so "push t0" is not understood and its encoding does not decode.
-  The assembler does know the address of a few more, which is enough to name
-  them where an address is what is wanted.
+* Only the word instructions have the wide "reg" field; the byte ones are
+  still general purpose registers only, so "ADDB MDL, #1" is not understood.
+  It needs a second operand class holding byte registers and SFRs together,
+  since "reg" F0H + n names a word register in a word instruction and a byte
+  register in a byte one.
+* MOV mem, reg keeps its narrow field, because widening it would make
+  "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
+  encodings of the same thing and there would be nothing to choose between
+  them.
+* Only the special function registers the backend has a use for, plus the ones
+  a startup sequence writes, are modelled; "push t0" is not understood and its
+  encoding does not decode.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * A far access always costs an EXTS, even for several accesses in a row to the

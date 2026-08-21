@@ -285,6 +285,35 @@ bit_target:
 ; CHECK: mov r2, mdl      ; encoding: [0xf2,0xf2,0x0e,0xfe]
         mov     r2, mdl
 
+; The "reg" field of an arithmetic instruction reaches the special function
+; registers too: a general purpose register is F0H + n and an SFR is its short
+; address.
+; CHECK: add mdl, #1      ; encoding: [0x06,0x07,0x01,0x00]
+        add     mdl, #1
+; CHECK: add r2, #1234    ; encoding: [0x06,0xf2,0xd2,0x04]
+        add     r2, #1234
+; CHECK: sub stkov, #256  ; encoding: [0x26,0x0a,0x00,0x01]
+        sub     stkov, #0x100
+; CHECK: and psw, #65534  ; encoding: [0x66,0x88,0xfe,0xff]
+        and     psw, #0xFFFE
+; CHECK: or cp, 4660      ; encoding: [0x72,0x08,0x34,0x12]
+        or      cp, 0x1234
+; CHECK: addc mdh, #7     ; encoding: [0x16,0x06,0x07,0x00]
+        addc    mdh, #7
+; CHECK: cmp mdl, #0      ; encoding: [0x46,0x07,0x00,0x00]
+        cmp     mdl, #0
+
+; Which is what lets a startup sequence write one without a register to go
+; through.
+; CHECK: mov sp, #64512   ; encoding: [0xe6,0x09,0x00,0xfc]
+        mov     sp, #0xFC00
+; CHECK: mov dpp3, #3     ; encoding: [0xe6,0x03,0x03,0x00]
+        mov     dpp3, #3
+
+; Both operands of MOV reg, mem can be one.
+; CHECK: mov mdl, mdh     ; encoding: [0xf2,0x07,0x0c,0xfe]
+        mov     mdl, mdh
+
 ; The protected instructions repeat their opcode in the second word.
 ; CHECK: srst             ; encoding: [0xb7,0x48,0xb7,0xb7]
         srst

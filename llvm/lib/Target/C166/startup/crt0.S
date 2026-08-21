@@ -33,24 +33,18 @@ _start:
         // and STKOV come up holding the values below on a part with the
         // internal RAM at 00'FA00H; a board with its stack somewhere else
         // changes them in the linker script and this writes them.
-        mov     r1, #__system_stack_top
-        mov     sp, r1
-        mov     stkun, r1
-        mov     r1, #__system_stack_limit
-        mov     stkov, r1
+        mov     sp, #__system_stack_top
+        mov     stkun, #__system_stack_top
+        mov     stkov, #__system_stack_limit
 
         // The data page pointers map the top two bits of a 16 bit address onto
         // a 10 bit page.  0, 1, 2, 3 is the identity over the first 64 KByte,
         // which is what a near address means to the compiler.  It is also the
         // reset state, so this only matters if something ran before us.
-        mov     r1, #0
-        mov     dpp0, r1
-        mov     r1, #1
-        mov     dpp1, r1
-        mov     r1, #2
-        mov     dpp2, r1
-        mov     r1, #3
-        mov     dpp3, r1
+        mov     dpp0, #0
+        mov     dpp1, #1
+        mov     dpp2, #2
+        mov     dpp3, #3
 
         // CP is left where reset put it.  It says where R0 to R15 are, so an
         // instruction that moves it changes the meaning of every register
