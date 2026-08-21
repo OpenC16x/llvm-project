@@ -658,13 +658,18 @@ bool C166TargetLowering::isEligibleForTailCall(
     return false;
 
   // A far function was entered with CALLS and has a code segment on the
-  // hardware stack waiting for RETS, so jumping to a near callee would leave
-  // a RET to pop half of it.  Far to far would be sound, but only through
-  // JMPS: JMPA stays inside the current segment, and nothing promises the
-  // linker put both functions in the same one.
+  // hardware stack waiting for RETS, so both ends have to be the same kind:
+  // a near callee's RET would pop half of what a far caller left there, and a
+  // far callee's RETS would pop a segment a near caller never pushed.
   const auto *Callee = dyn_cast<GlobalAddressSDNode>(CLI.Callee);
-  if (Caller.hasFnAttribute("far") ||
-      (Callee && isFarFunction(Callee->getGlobal())))
+  bool CallerIsFar = Caller.hasFnAttribute("far");
+  bool CalleeIsFar = Callee && isFarFunction(Callee->getGlobal());
+  if (CallerIsFar != CalleeIsFar)
+    return false;
+
+  // The far jump names its target segment, and only the direct form does;
+  // CALLI has no inter-segment counterpart to tail call through.
+  if (CallerIsFar && !Callee)
     return false;
 
   if (CLI.IsVarArg || Caller.isVarArg())
@@ -887,7 +892,7 @@ C166TargetLowering::LowerCCCCallTo(TargetLowering::CallLoweringInfo &CLI,
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   SmallVector<SDValue, 8> Ops;
   Ops.push_back(Chain);
-  if (IsFarCall && !CLI.IsTailCall)
+  if (IsFarCall)
     Ops.push_back(CalleeSeg);
   Ops.push_back(Callee);
 
@@ -903,11 +908,10 @@ C166TargetLowering::LowerCCCCallTo(TargetLowering::CallLoweringInfo &CLI,
     Ops.push_back(InGlue);
 
   // A tail call is a jump, so it produces no chain for anything to hang off
-  // and returns whatever the callee returns straight to our caller.  A far one
-  // needs no segment: it stays in the segment this function was called into,
-  // which is where its own caller expects RETS to come back from.
+  // and returns whatever the callee returns straight to our caller.
   if (CLI.IsTailCall)
-    return DAG.getNode(C166ISD::TC_RETURN, DL, MVT::Other, Ops);
+    return DAG.getNode(IsFarCall ? C166ISD::TC_RETURN_SEG : C166ISD::TC_RETURN,
+                       DL, MVT::Other, Ops);
 
   Chain = DAG.getNode(IsFarCall ? C166ISD::CALL_SEG : C166ISD::CALL, DL,
                       NodeTys, Ops);

@@ -74,6 +74,8 @@ def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
                           [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -428,6 +430,10 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
     Uses = [R0] in {
 def TCRETURNa : Pseudo<(outs), (ins calltarget:$dst), "#TCRETURNa", []>;
 def TCRETURNi : Pseudo<(outs), (ins GR16:$dst), "#TCRETURNi", []>;
+// A far tail call names the target segment, since JMPA would only reach
+// inside the one this function happens to have been called into.
+def TCRETURNs : Pseudo<(outs), (ins jseg8:$seg, calltarget:$dst),
+                       "#TCRETURNs", []>;
 
 let isCodeGenOnly = 1 in {
 def TAILJMPa : InstL<0xEA, (outs), (ins calltarget:$dst), "jmpa\tcc_UC, $dst",
@@ -442,6 +448,13 @@ def TAILJMPi : InstS<0x9C, (outs), (ins GR16:$dst), "jmpi\tcc_UC, [$dst]",
   bits<4> dst;
   let Inst{15-12} = 0b0000;   // cc_UC
   let Inst{11-8} = dst;
+}
+def TAILJMPs : InstL<0xFA, (outs), (ins jseg8:$seg, calltarget:$dst),
+                     "jmps\t$seg, $dst", []> {
+  bits<8> seg;
+  bits<16> dst;
+  let Inst{15-8} = seg;
+  let Inst{31-16} = dst;
 }
 }
 }
@@ -1360,6 +1373,8 @@ def : Pat<(subc GR16:$src1, (load addrabs:$src2)),
 def : Pat<(C166tcret (i16 tglobaladdr:$dst)),  (TCRETURNa tglobaladdr:$dst)>;
 def : Pat<(C166tcret (i16 texternalsym:$dst)), (TCRETURNa texternalsym:$dst)>;
 def : Pat<(C166tcret GR16:$dst),               (TCRETURNi GR16:$dst)>;
+def : Pat<(C166tcretseg (i16 tglobaladdr:$seg), (i16 tglobaladdr:$dst)),
+          (TCRETURNs tglobaladdr:$seg, tglobaladdr:$dst)>;
 
 // Direct and indirect calls, and indirect jumps, all with cc_UC (0).
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;

@@ -160,6 +160,12 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addImm(MI.getOperand(3).getImm());
     break;
   }
+  case C166::TCRETURNs: {
+    // A far tail call keeps the segment its caller expects RETS to come back
+    // from, so it names the callee's segment outright.
+    Emit(C166::TAILJMPs).add(MI.getOperand(0)).add(MI.getOperand(1));
+    break;
+  }
   case C166::TCRETURNa:
   case C166::TCRETURNi: {
     // The frame is already gone by the time this runs, so all that is left is
@@ -337,7 +343,8 @@ bool C166InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
 
   // A tail call ends the block like a return does, but it names a callee
   // rather than a basic block, so there is nothing here to describe.
-  if (I->getOpcode() == C166::TCRETURNa || I->getOpcode() == C166::TCRETURNi)
+  if (I->getOpcode() == C166::TCRETURNa || I->getOpcode() == C166::TCRETURNi ||
+      I->getOpcode() == C166::TCRETURNs)
     return true;
 
   // Count the terminators and remember the first branch that ends the block

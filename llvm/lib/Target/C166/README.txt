@@ -36,11 +36,14 @@ A call in tail position becomes a jump once the frame is down, so the callee's
 RET goes straight back to our caller and no return address is ever pushed onto
 the small hardware stack.  That needs both ends to agree about how returning
 works, so it is off for an interrupt handler, which comes back with RETI, and
-for a far function at either end, which has a code segment stacked that only
-RETS pops.  Far to far would be sound through JMPS, but not through the JMPA a
-tail call turns into, since nothing promises the linker put both functions in
-the same segment.  Arguments that do not fit in registers rule it out as well:
-they would be written where the frame is about to stop being.
+and for a mismatched pair of near and far functions, since a near callee's RET
+would pop half of what a far caller left on the hardware stack.  Far to far is
+fine, but only through JMPS, which names the target segment: the JMPA a near
+tail call turns into stays inside the segment this function happens to have
+been called into, and nothing promises the linker put both functions in the
+same one.  There is no inter-segment CALLI, so a far tail call has to be
+direct.  Arguments that do not fit in registers rule one out as well: they
+would be written where the frame is about to stop being.
 
 A function carrying the "interrupt" attribute returns with RETI and saves
 every general purpose register it modifies.  That includes the registers
@@ -314,5 +317,4 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* A far function neither makes nor receives a tail call, which JMPS would fix.
 * No support for the XC16x MAC unit.
