@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/Support/MathExtras.h"
@@ -64,6 +65,21 @@ static void adjustStackPointer(MachineBasicBlock &MBB,
       .setMIFlag(Flag);
 }
 
+/// The C166 interrupts MUL and DIV part way through rather than making them
+/// atomic, so MDL, MDH and MDC can hold live state belonging to whatever the
+/// handler interrupted.  A handler that touches the multiply/divide unit at
+/// all - directly, or through a call to something that might - has to put it
+/// back.  PSW.MULIP, the other half of that state, rides along on the PSW the
+/// hardware stacks on entry and RETI restores.
+static bool needsMulDivSave(const MachineFunction &MF) {
+  if (!MF.getFunction().hasFnAttribute("interrupt"))
+    return false;
+
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  return MRI.isPhysRegModified(C166::MDL) || MRI.isPhysRegModified(C166::MDH) ||
+         MRI.isPhysRegModified(C166::MDC);
+}
+
 void C166FrameLowering::emitPrologue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
   MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -74,6 +90,15 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
   DebugLoc DL;
 
   uint64_t StackSize = MFI.getStackSize();
+
+  // Save the multiply/divide unit before anything else can disturb it.  MDC
+  // goes first because reading MDL - which is what pushing it does - clears
+  // MDC.MDRIU, the bit that says the unit is in use.
+  if (needsMulDivSave(MF))
+    for (MCRegister Reg : {C166::MDC, C166::MDL, C166::MDH})
+      BuildMI(MBB, MBBI, DL, TII.get(C166::PUSH))
+          .addReg(Reg)
+          .setMIFlag(MachineInstr::FrameSetup);
 
   // Allocate the frame before the callee saved registers are spilled: their
   // slots are addressed relative to the already adjusted stack pointer.
@@ -144,6 +169,40 @@ void C166FrameLowering::emitEpilogue(MachineFunction &MF,
         .addCFIIndex(CFIIndex)
         .setMIFlag(MachineInstr::FrameDestroy);
   }
+
+  // Undo the saves of the multiply/divide unit last, so that nothing between
+  // here and the RETI can touch it again.  Popping in the mirror order also
+  // puts MDC back after MDL and MDH, whose restoration would otherwise leave
+  // MDC.MDRIU set whether or not it was.
+  if (needsMulDivSave(MF))
+    for (MCRegister Reg : {C166::MDH, C166::MDL, C166::MDC})
+      BuildMI(MBB, MBBI, DL, TII.get(C166::POP), Reg)
+          .setMIFlag(MachineInstr::FrameDestroy);
+}
+
+bool C166FrameLowering::spillCalleeSavedRegisters(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+    ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
+  if (CSI.empty())
+    return false;
+
+  MachineFunction &MF = *MBB.getParent();
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+
+  for (const CalleeSavedInfo &CS : CSI) {
+    // An interrupt handler saves the argument registers along with everything
+    // else, so a callee saved register here can still be carrying an incoming
+    // value that the body goes on to use.  Spilling such a register does not
+    // end its life, and saying that it does leaves a kill flag that later
+    // passes are entitled to believe.
+    MCRegister Reg = CS.getReg();
+    TII.storeRegToStackSlot(MBB, MI, Reg, /*isKill=*/!MRI.isLiveIn(Reg),
+                            CS.getFrameIdx(), TRI->getMinimalPhysRegClass(Reg),
+                            Register());
+  }
+
+  return true;
 }
 
 MachineBasicBlock::iterator C166FrameLowering::eliminateCallFramePseudoInstr(

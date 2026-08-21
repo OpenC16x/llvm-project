@@ -33,7 +33,19 @@ stack so that the callee can walk the list with a plain pointer.  R1 and
 R12-R15 are callee saved, R2-R11 are caller saved.
 
 A function carrying the "interrupt" attribute returns with RETI and saves
-every general purpose register it modifies.
+every general purpose register it modifies.  That includes the registers
+arguments arrive in, so unlike a normal function it can be saving a register
+that is still carrying a live incoming value; the spill therefore must not be
+marked as the end of that value's life.
+
+It also has to preserve the multiply/divide unit.  The C166 interrupts MUL and
+DIV part way through rather than running them to completion, so MDL, MDH and
+MDC can hold state belonging to whatever was interrupted, and a handler that
+touches the unit - directly, or through a call to something that might -
+pushes and pops all three.  MDC is saved first and restored last, because
+reading MDL (which is what pushing it does) clears MDC.MDRIU, and writing MDL
+or MDH back sets it again.  PSW.MULIP, the other half of that state, rides
+along on the PSW the hardware stacks on entry and RETI restores.
 
 Condition flags
 ---------------
@@ -169,24 +181,35 @@ the opcode byte alone decides the length, so no opcode appears in both.
 
 Operand parsing is syntax directed, because the printed form is what tells the
 three flavours of 16 bit operand apart: "#1234" is an immediate, "label" is an
-address, "[r1+#4]" is a memory reference.  A special function register name
-stands for its address (MDL is FE0EH, MDH is FE0CH), since no instruction here
-takes an SFR as a register operand.
+address, "[r1+#4]" is a memory reference.
+
+A special function register name means one of two things.  The 8 bit "reg"
+field of PUSH and POP names a register directly - it addresses a GPR as F0H + n
+and an SFR by its short address, which is why the modelled SFRs carry that
+short address as their hardware encoding.  Everywhere else an SFR name stands
+for the address it is mapped to (MDL is FE0EH, MDH is FE0CH).  The parser
+produces one operand that can be either and lets the matcher decide, since
+which one is meant is a property of the instruction rather than of the name.
 
 Known limitations / things to do
 --------------------------------
 
-* Only GPRs are modelled in the 8 bit "reg" field, so an instruction that puts
-  an SFR there - "ADD MDL, #1" and friends - can be neither assembled nor
-  disassembled.  The assembler does understand an SFR name used as an address.
-* The disassembler prints an SFR address numerically rather than by name, so
-  "mov r2, mdl" comes back as "mov r2, 65038".
+* PUSH and POP are the only instructions whose 8 bit "reg" field reaches the
+  special function registers.  Everything else that could put an SFR there -
+  "ADD MDL, #1" and friends - can be neither assembled nor disassembled.
+* Only the handful of special function registers the backend has a use for are
+  modelled, so "push t0" is not understood and its encoding does not decode.
+  The assembler does know the address of a few more, which is enough to name
+  them where an address is what is wanted.
+* Outside the "reg" field an SFR is just an address, and the disassembler
+  prints it numerically: "mov r2, mdl" comes back as "mov r2, 65038".
 * The far relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here: no linker implements them yet.
 * A far access always costs an EXTS, even for several accesses in a row to the
   same segment, which one EXTS covering up to four instructions could do.
-* Interrupt handlers do not save MDL/MDH/MDC, so an interrupted multiply or
-  divide can be corrupted by an ISR that itself multiplies or divides.
+* A handler that uses the multiply/divide unit saves it whole, and one that
+  calls anything at all is assumed to: there is no way to see whether the
+  callee multiplies, so three words go on the hardware stack either way.
 * The ADDC/SUBC instructions are described but not used: wide integer
   arithmetic is expanded with explicit compares instead of a carry chain.
 * Jump tables are disabled; switches become compare and branch chains.

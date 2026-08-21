@@ -99,6 +99,27 @@ static DecodeStatus decodeMemRIOperand(MCInst &MI, uint64_t Imm,
 }
 
 /// An instruction range is encoded as 0 to 3 and written as 1 to 4.
+/// The 8 bit "reg" field of PUSH and POP: F0H + n is a general purpose
+/// register, anything else is the short address of a special function
+/// register.  Only the special function registers the backend models can be
+/// named, so the rest of the SFR space does not decode.
+static DecodeStatus decodeReg8Operand(MCInst &MI, uint64_t Imm,
+                                      uint64_t Address,
+                                      const MCDisassembler *Decoder) {
+  if (Imm >= 0xF0)
+    return DecodeGR16RegisterClass(MI, Imm - 0xF0, Address, Decoder);
+
+  const MCRegisterClass &SFRs = getC166MCRegisterClass(C166::SFRRegClassID);
+  const MCRegisterInfo *MRI = Decoder->getContext().getRegisterInfo();
+  for (MCPhysReg Reg : SFRs) {
+    if (MRI->getEncodingValue(Reg) == Imm) {
+      MI.addOperand(MCOperand::createReg(Reg));
+      return MCDisassembler::Success;
+    }
+  }
+  return MCDisassembler::Fail;
+}
+
 static DecodeStatus decodeIrang2Operand(MCInst &MI, uint64_t Imm,
                                         uint64_t Address,
                                         const MCDisassembler *Decoder) {
