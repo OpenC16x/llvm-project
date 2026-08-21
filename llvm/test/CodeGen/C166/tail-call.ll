@@ -131,8 +131,9 @@ define i16 @stack_arguments(i16 %a) {
   ret i16 %r
 }
 
-; A far function has a code segment on the hardware stack that only RETS pops,
-; so neither end of a tail call may be one.
+; Both ends have to be the same kind, since a near callee's RET would pop half
+; of what a far caller left on the hardware stack and a far callee's RETS would
+; pop a segment a near caller never pushed.
 define i16 @to_far(i16 %a) {
 ; CHECK-LABEL: to_far:
 ; CHECK:       ; %bb.0:
@@ -149,6 +150,51 @@ define i16 @from_far(i16 %a) #1 {
 ; CHECK-NEXT:    calla cc_UC, callee
 ; CHECK-NEXT:    rets
   %r = tail call i16 @callee(i16 %a, i16 1)
+  ret i16 %r
+}
+
+; Far to far goes through JMPS, which names the target segment; JMPA would only
+; reach inside the segment this function happens to have been called into.
+declare i16 @far_many(i16, i16, i16, i16, i16, i16) #1
+
+define i16 @far_to_far(i16 %a) #1 {
+; CHECK-LABEL: far_to_far:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    jmps #seg(far_callee), sof(far_callee)
+  %r = tail call i16 @far_callee(i16 %a)
+  ret i16 %r
+}
+
+; There is no inter-segment CALLI, so no indirect far jump to tail call
+; through either.
+define i16 @far_indirect(ptr %f, i16 %a) #1 {
+; CHECK-LABEL: far_indirect:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r4, r2
+; CHECK-NEXT:    mov r2, r3
+; CHECK-NEXT:    calli cc_UC, [r4]
+; CHECK-NEXT:    rets
+  %r = tail call i16 %f(i16 %a)
+  ret i16 %r
+}
+
+define i16 @far_stack_arguments(i16 %a) #1 {
+; CHECK-LABEL: far_stack_arguments:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    sub r0, #4
+; CHECK-NEXT:    .cfi_def_cfa_offset 4
+; CHECK-NEXT:    mov r3, #5
+; CHECK-NEXT:    mov [r0+#2], r3
+; CHECK-NEXT:    mov r3, #4
+; CHECK-NEXT:    mov [r0], r3
+; CHECK-NEXT:    mov r3, #1
+; CHECK-NEXT:    mov r4, #2
+; CHECK-NEXT:    mov r5, #3
+; CHECK-NEXT:    calls #seg(far_many), sof(far_many)
+; CHECK-NEXT:    add r0, #4
+; CHECK-NEXT:    .cfi_def_cfa r0, 0
+; CHECK-NEXT:    rets
+  %r = tail call i16 @far_many(i16 %a, i16 1, i16 2, i16 3, i16 4, i16 5)
   ret i16 %r
 }
 

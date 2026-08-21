@@ -18,8 +18,7 @@ define i16 @select_umax(i16 %a, i16 %b) {
 define i8 @select_byte(i8 %a, i8 %b, i16 %x) {
 ; CHECK-LABEL: select_byte:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r5, #0
-; CHECK-NEXT:    cmp r4, r5
+; CHECK-NEXT:    cmp r4, #0
 ; CHECK-NEXT:    jmpa cc_EQ, .LBB1_2
 ; CHECK-NEXT:  ; %bb.1:
 ; CHECK-NEXT:    movb rl2, rl3
@@ -44,4 +43,52 @@ define i16 @setcc_sge(i16 %a, i16 %b) {
   %c = icmp sge i16 %a, %b
   %z = zext i1 %c to i16
   ret i16 %z
+}
+
+; A comparison against a constant goes straight into the compare rather than
+; being materialised into a register first, and a small one fits the two byte
+; form of it.
+define i16 @select_against_small_constant(i16 %x, i16 %a, i16 %b) {
+; CHECK-LABEL: select_against_small_constant:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    cmp r2, #3
+; CHECK-NEXT:    jmpa cc_ULT, .LBB3_2
+; CHECK-NEXT:  ; %bb.1:
+; CHECK-NEXT:    mov r3, r4
+; CHECK-NEXT:  .LBB3_2:
+; CHECK-NEXT:    mov r2, r3
+; CHECK-NEXT:    ret
+  %c = icmp ult i16 %x, 3
+  %r = select i1 %c, i16 %a, i16 %b
+  ret i16 %r
+}
+
+define i16 @select_against_big_constant(i16 %x, i16 %a, i16 %b) {
+; CHECK-LABEL: select_against_big_constant:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    cmp r2, #1000
+; CHECK-NEXT:    jmpa cc_ULT, .LBB4_2
+; CHECK-NEXT:  ; %bb.1:
+; CHECK-NEXT:    mov r3, r4
+; CHECK-NEXT:  .LBB4_2:
+; CHECK-NEXT:    mov r2, r3
+; CHECK-NEXT:    ret
+  %c = icmp ult i16 %x, 1000
+  %r = select i1 %c, i16 %a, i16 %b
+  ret i16 %r
+}
+
+define i8 @select_byte_against_constant(i8 %x, i8 %a, i8 %b) {
+; CHECK-LABEL: select_byte_against_constant:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    cmpb rl2, #5
+; CHECK-NEXT:    jmpa cc_UGT, .LBB5_2
+; CHECK-NEXT:  ; %bb.1:
+; CHECK-NEXT:    movb rl3, rl4
+; CHECK-NEXT:  .LBB5_2:
+; CHECK-NEXT:    mov r2, r3
+; CHECK-NEXT:    ret
+  %c = icmp ugt i8 %x, 5
+  %r = select i1 %c, i8 %a, i8 %b
+  ret i8 %r
 }

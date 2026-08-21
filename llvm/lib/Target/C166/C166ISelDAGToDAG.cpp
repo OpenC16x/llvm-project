@@ -45,6 +45,7 @@ public:
 
   // Complex pattern selectors.
   bool SelectAddrR(SDValue Addr, SDValue &Base);
+  bool trySelectPostIncLoad(SDNode *Node);
   bool SelectAddrRI(SDValue Addr, SDValue &Base, SDValue &Disp);
   bool SelectAddrAbs(SDValue Addr, SDValue &Address);
 
@@ -146,16 +147,25 @@ bool C166DAGToDAGISel::SelectAddrAbs(SDValue Addr, SDValue &Address) {
 
 /// Match [Rw] and [Rw + #data16] addressing.
 bool C166DAGToDAGISel::SelectAddrR(SDValue Addr, SDValue &Base) {
-  // Only a bare register.  An absolute address, a frame index and anything
-  // with something added to it all have a better instruction waiting for them,
-  // and this one has no field to put the rest in.
+  // Whatever ends up in a register on its own.  An absolute address and a
+  // frame index have better instructions waiting for them, and so does
+  // anything the displacement field can hold: a constant offset, or the
+  // address of a jump table.  A sum of two registers is not one of those - it
+  // has to be added up into a register either way - so it belongs here.
   SDValue AbsBase;
   int64_t AbsOffset;
   if (matchAbsoluteAddress(*CurDAG, Addr, AbsBase, AbsOffset))
     return false;
-  if (isa<FrameIndexSDNode>(Addr) || Addr.getOpcode() == ISD::ADD ||
-      Addr.getOpcode() == ISD::OR)
+  if (isa<FrameIndexSDNode>(Addr))
     return false;
+
+  if (Addr.getOpcode() == ISD::ADD || Addr.getOpcode() == ISD::OR) {
+    if (isa<ConstantSDNode>(Addr.getOperand(1)))
+      return false;
+    for (unsigned I = 0; I != 2; ++I)
+      if (Addr.getOperand(I).getOpcode() == C166ISD::Wrapper)
+        return false;
+  }
 
   Base = Addr;
   return true;
@@ -230,6 +240,30 @@ bool C166DAGToDAGISel::SelectInlineAsmMemoryOperand(
   return false;
 }
 
+bool C166DAGToDAGISel::trySelectPostIncLoad(SDNode *Node) {
+  auto *LD = cast<LoadSDNode>(Node);
+  if (LD->getAddressingMode() != ISD::POST_INC ||
+      LD->getExtensionType() != ISD::NON_EXTLOAD)
+    return false;
+
+  unsigned Opc;
+  MVT VT = LD->getMemoryVT().getSimpleVT();
+  if (VT == MVT::i16)
+    Opc = C166::MOV16rpi;
+  else if (VT == MVT::i8)
+    Opc = C166::MOVB8rpi;
+  else
+    return false;
+
+  // The results are the value, the stepped pointer and the chain.
+  MachineSDNode *New =
+      CurDAG->getMachineNode(Opc, SDLoc(Node), VT, MVT::i16, MVT::Other,
+                             LD->getBasePtr(), LD->getChain());
+  CurDAG->setNodeMemRefs(New, {LD->getMemOperand()});
+  ReplaceNode(Node, New);
+  return true;
+}
+
 void C166DAGToDAGISel::Select(SDNode *Node) {
   SDLoc DL(Node);
 
@@ -240,6 +274,12 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
   }
 
   switch (Node->getOpcode()) {
+  case ISD::LOAD:
+    // A post-incrementing load writes the stepped pointer back as well as the
+    // value, which no pattern describes, so it is selected by hand.
+    if (trySelectPostIncLoad(Node))
+      return;
+    break;
   case ISD::FrameIndex: {
     // A bare frame index is the address of a stack slot; materialise it with
     // the ADDframe pseudo, which eliminateFrameIndex turns into a move plus an

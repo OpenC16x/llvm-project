@@ -56,7 +56,7 @@ define i16 @load_indexed(ptr %p, i16 %i) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    shl r3, #1
 ; CHECK-NEXT:    add r3, r2
-; CHECK-NEXT:    mov r2, [r3+#0]
+; CHECK-NEXT:    mov r2, [r3]
 ; CHECK-NEXT:    ret
   %a = getelementptr i16, ptr %p, i16 %i
   %v = load i16, ptr %a

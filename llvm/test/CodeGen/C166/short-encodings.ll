@@ -59,7 +59,8 @@ define i16 @add_too_big(i16 %a) {
   ret i16 %r
 }
 
-; A pointer walk is where it adds up: the loop body is all short forms.
+; A pointer walk is where it adds up: the loop body is all short forms, and the
+; pointer steps itself as part of the load rather than needing its own add.
 define i16 @sum(ptr %a, i16 %n) {
 ; CHECK-LABEL: sum:
 ; CHECK:       ; %bb.0: ; %entry
@@ -68,9 +69,8 @@ define i16 @sum(ptr %a, i16 %n) {
 ; CHECK-NEXT:    mov r5, #0
 ; CHECK-NEXT:  .LBB6_1: ; %loop
 ; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    mov r6, [r4]
+; CHECK-NEXT:    mov r6, [r4+]
 ; CHECK-NEXT:    add r2, r6
-; CHECK-NEXT:    add r4, #2
 ; CHECK-NEXT:    add r5, #1
 ; CHECK-NEXT:    cmp r5, r3
 ; CHECK-NEXT:    jmpa cc_ULT, .LBB6_1
@@ -89,6 +89,38 @@ loop:
   br i1 %c, label %loop, label %done
 done:
   ret i16 %s1
+}
+
+define i8 @walk_bytes(ptr %a, i16 %n) {
+; CHECK-LABEL: walk_bytes:
+; CHECK:       ; %bb.0: ; %entry
+; CHECK-NEXT:    mov r4, r2
+; CHECK-NEXT:    movb rl2, #0
+; CHECK-NEXT:    mov r5, #0
+; CHECK-NEXT:  .LBB7_1: ; %loop
+; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    mov r6, r4
+; CHECK-NEXT:    add r6, r5
+; CHECK-NEXT:    movb rl6, [r6]
+; CHECK-NEXT:    addb rl2, rl6
+; CHECK-NEXT:    add r5, #1
+; CHECK-NEXT:    cmp r5, r3
+; CHECK-NEXT:    jmpa cc_ULT, .LBB7_1
+; CHECK-NEXT:  ; %bb.2: ; %done
+; CHECK-NEXT:    ret
+entry:
+  br label %loop
+loop:
+  %i = phi i16 [0, %entry], [%i1, %loop]
+  %s = phi i8 [0, %entry], [%s1, %loop]
+  %p = getelementptr i8, ptr %a, i16 %i
+  %v = load i8, ptr %p
+  %s1 = add i8 %s, %v
+  %i1 = add i16 %i, 1
+  %c = icmp ult i16 %i1, %n
+  br i1 %c, label %loop, label %done
+done:
+  ret i8 %s1
 }
 
 ; BYTES-LABEL: <load_indirect>:

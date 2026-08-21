@@ -12,7 +12,7 @@ define i16 @far_load(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r2, [r2+#0]
+; CHECK-NEXT:    mov r2, [r2]
 ; CHECK-NEXT:    ret
   %v = load i16, ptr addrspace(1) %p
   ret i16 %v
@@ -22,7 +22,7 @@ define void @far_store(ptr addrspace(1) %p, i16 %v) {
 ; CHECK-LABEL: far_store:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov [r2+#0], r4
+; CHECK-NEXT:    mov [r2], r4
 ; CHECK-NEXT:    ret
   store i16 %v, ptr addrspace(1) %p
   ret void
@@ -32,7 +32,7 @@ define zeroext i8 @far_load_byte(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load_byte:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    movb rl2, [r2+#0]
+; CHECK-NEXT:    movb rl2, [r2]
 ; CHECK-NEXT:    movbz r2, rl2
 ; CHECK-NEXT:    ret
   %v = load i8, ptr addrspace(1) %p
@@ -43,7 +43,7 @@ define void @far_store_byte(ptr addrspace(1) %p, i8 %v) {
 ; CHECK-LABEL: far_store_byte:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    movb [r2+#0], rl4
+; CHECK-NEXT:    movb [r2], rl4
 ; CHECK-NEXT:    ret
   store i8 %v, ptr addrspace(1) %p
   ret void
@@ -55,11 +55,11 @@ define i32 @far_load_i32(ptr addrspace(1) %p) {
 ; CHECK-LABEL: far_load_i32:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r4, [r2+#0]
+; CHECK-NEXT:    mov r4, [r2]
 ; CHECK-NEXT:    add r2, #2
 ; CHECK-NEXT:    addc r3, #0
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r3, [r2+#0]
+; CHECK-NEXT:    mov r3, [r2]
 ; CHECK-NEXT:    mov r2, r4
 ; CHECK-NEXT:    ret
   %v = load i32, ptr addrspace(1) %p
@@ -76,7 +76,7 @@ define i16 @far_index(ptr addrspace(1) %p, i16 %i) {
 ; CHECK-NEXT:    add r5, r2
 ; CHECK-NEXT:    addc r4, r3
 ; CHECK-NEXT:    exts r4, #1
-; CHECK-NEXT:    mov r2, [r5+#0]
+; CHECK-NEXT:    mov r2, [r5]
 ; CHECK-NEXT:    ret
   %e = zext i16 %i to i32
   %q = getelementptr i16, ptr addrspace(1) %p, i32 %e
@@ -111,7 +111,7 @@ define i16 @far_load_global() {
 ; CHECK-NEXT:    mov r2, #0
 ; CHECK-NEXT:    mov r3, #g
 ; CHECK-NEXT:    exts r2, #1
-; CHECK-NEXT:    mov r2, [r3+#0]
+; CHECK-NEXT:    mov r2, [r3]
 ; CHECK-NEXT:    ret
   %f = addrspacecast ptr @g to ptr addrspace(1)
   %v = load i16, ptr addrspace(1) %f
@@ -123,9 +123,8 @@ define i16 @far_load_global() {
 define i16 @far_global() {
 ; CHECK-LABEL: far_global:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r2, #sof(fg)
 ; CHECK-NEXT:    exts #seg(fg), #1
-; CHECK-NEXT:    mov r2, [r2+#0]
+; CHECK-NEXT:    mov r2, sof(fg)
 ; CHECK-NEXT:    ret
   %v = load i16, ptr addrspace(1) @fg
   ret i16 %v
@@ -134,9 +133,8 @@ define i16 @far_global() {
 define void @far_global_store(i16 %v) {
 ; CHECK-LABEL: far_global_store:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r3, #sof(fg)
 ; CHECK-NEXT:    exts #seg(fg), #1
-; CHECK-NEXT:    mov [r3+#0], r2
+; CHECK-NEXT:    mov sof(fg), r2
 ; CHECK-NEXT:    ret
   store i16 %v, ptr addrspace(1) @fg
   ret void
@@ -154,10 +152,45 @@ define i16 @far_global_indexed(i16 %i) {
 ; CHECK-NEXT:    add r4, r3
 ; CHECK-NEXT:    addc r5, r2
 ; CHECK-NEXT:    exts r5, #1
-; CHECK-NEXT:    mov r2, [r4+#0]
+; CHECK-NEXT:    mov r2, [r4]
 ; CHECK-NEXT:    ret
   %e = zext i16 %i to i32
   %q = getelementptr i16, ptr addrspace(1) @fg, i32 %e
   %v = load i16, ptr addrspace(1) %q
+  ret i16 %v
+}
+
+; A constant offset into a far object belongs to its address rather than being
+; arithmetic on it, since both relocations carry an addend.
+@fa = addrspace(1) global [4 x i16] zeroinitializer
+
+define i16 @far_global_field() {
+; CHECK-LABEL: far_global_field:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    exts #seg(fa+4), #1
+; CHECK-NEXT:    mov r2, sof(fa+4)
+; CHECK-NEXT:    ret
+  %v = load i16, ptr addrspace(1) getelementptr inbounds ([4 x i16], ptr addrspace(1) @fa, i32 0, i32 2)
+  ret i16 %v
+}
+
+; A near global reached through a cast is a different thing: the offset is
+; added to the 16 bit address, which the cast then widens, and folding it into
+; the symbol would only be right if that addition could not wrap.
+@na = global [4 x i16] zeroinitializer
+
+define i16 @cast_global_field() {
+; CHECK-LABEL: cast_global_field:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r2, #na
+; CHECK-NEXT:    mov r3, #0
+; CHECK-NEXT:    add r2, #4
+; CHECK-NEXT:    addc r3, #0
+; CHECK-NEXT:    exts r3, #1
+; CHECK-NEXT:    mov r2, [r2]
+; CHECK-NEXT:    ret
+  %f = addrspacecast ptr @na to ptr addrspace(1)
+  %p = getelementptr [4 x i16], ptr addrspace(1) %f, i32 0, i32 2
+  %v = load i16, ptr addrspace(1) %p
   ret i16 %v
 }

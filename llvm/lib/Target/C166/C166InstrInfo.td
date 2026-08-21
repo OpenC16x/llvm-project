@@ -74,6 +74,8 @@ def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
                           [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -100,6 +102,12 @@ def MemRIAsmOperand : AsmOperandClass {
 def MemRAsmOperand : AsmOperandClass {
   let Name = "MemR";
   let RenderMethod = "addMemROperands";
+}
+
+def MemRPostIncAsmOperand : AsmOperandClass {
+  let Name = "MemRPostInc";
+  let RenderMethod = "addMemROperands";
+  let DiagnosticString = "expected [Rw+]";
 }
 
 // Immediates are range checked so that an out of range value is rejected
@@ -241,6 +249,15 @@ def memr : Operand<i16> {
   let ParserMatchClass = MemRAsmOperand;
 }
 
+// [Rw+], which steps the pointer past what it just read by the width of the
+// access: two for a word and one for a byte.
+def memrpi : Operand<i16> {
+  let PrintMethod = "printMemRPostIncOperand";
+  let MIOperandInfo = (ops GR16);
+  let DecoderMethod = "decodeMemROperand";
+  let ParserMatchClass = MemRPostIncAsmOperand;
+}
+
 // A plain 16 bit data address ("mem" in the manual).
 def addr16 : Operand<i16> {
   let PrintMethod = "printAddr16Operand";
@@ -371,10 +388,28 @@ class SelectPseudo<RegisterClass VRC, RegisterClass CRC>
   let Defs = [PSW];
 }
 
+// The same again with a constant on the right of the comparison, so that a
+// select against one does not have to materialise it into a register first.
+class SelectPseudoImm<RegisterClass VRC, RegisterClass CRC, Operand ImmTy,
+                      ValueType ImmVT>
+    : Pseudo<(outs VRC:$dst),
+             (ins VRC:$t, VRC:$f, CRC:$lhs, ImmTy:$rhs, i8imm:$cond),
+             "#Select",
+             [(set VRC:$dst, (C166selectcc VRC:$t, VRC:$f, CRC:$lhs,
+                                           (ImmVT imm:$rhs), imm:$cond))]> {
+  let usesCustomInserter = 1;
+  let Defs = [PSW];
+}
+
 def Select16_16 : SelectPseudo<GR16, GR16>;
 def Select16_8  : SelectPseudo<GR16, GR8>;
 def Select8_16  : SelectPseudo<GR8, GR16>;
 def Select8_8   : SelectPseudo<GR8, GR8>;
+
+def Select16_16i : SelectPseudoImm<GR16, GR16, data16, i16>;
+def Select16_8i  : SelectPseudoImm<GR16, GR8, data8, i8>;
+def Select8_16i  : SelectPseudoImm<GR8, GR16, data16, i16>;
+def Select8_8i   : SelectPseudoImm<GR8, GR8, data8, i8>;
 
 // Far accesses.  The EXTS that names the segment only covers the instruction
 // that follows it, so the two have to stay adjacent all the way through the
@@ -416,6 +451,23 @@ def FARSTORE8i  : Pseudo<(outs), (ins GR8:$src, GR16:$off, i16imm:$seg),
                          "#FARSTORE8i", []>;
 }
 
+// When the offset is settled at link time too, the access itself can name it:
+// EXTS covers a long (mem) address just as it covers an indirect one, so the
+// whole address stays out of registers.
+let mayLoad = 1 in {
+def FARLOAD16a : Pseudo<(outs GR16:$dst), (ins i16imm:$off, i16imm:$seg),
+                        "#FARLOAD16a", []>;
+def FARLOAD8a  : Pseudo<(outs GR8:$dst), (ins i16imm:$off, i16imm:$seg),
+                        "#FARLOAD8a", []>;
+}
+
+let mayStore = 1 in {
+def FARSTORE16a : Pseudo<(outs), (ins GR16:$src, i16imm:$off, i16imm:$seg),
+                         "#FARSTORE16a", []>;
+def FARSTORE8a  : Pseudo<(outs), (ins GR8:$src, i16imm:$off, i16imm:$seg),
+                         "#FARSTORE8a", []>;
+}
+
 // A tail call is a jump to the callee once this function's frame is gone, so
 // the callee's RET goes straight back to our caller.  They are pseudos so that
 // the prolog/epilog inserter treats them as returns and tears the frame down
@@ -428,6 +480,10 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
     Uses = [R0] in {
 def TCRETURNa : Pseudo<(outs), (ins calltarget:$dst), "#TCRETURNa", []>;
 def TCRETURNi : Pseudo<(outs), (ins GR16:$dst), "#TCRETURNi", []>;
+// A far tail call names the target segment, since JMPA would only reach
+// inside the one this function happens to have been called into.
+def TCRETURNs : Pseudo<(outs), (ins jseg8:$seg, calltarget:$dst),
+                       "#TCRETURNs", []>;
 
 let isCodeGenOnly = 1 in {
 def TAILJMPa : InstL<0xEA, (outs), (ins calltarget:$dst), "jmpa\tcc_UC, $dst",
@@ -442,6 +498,13 @@ def TAILJMPi : InstS<0x9C, (outs), (ins GR16:$dst), "jmpi\tcc_UC, [$dst]",
   bits<4> dst;
   let Inst{15-12} = 0b0000;   // cc_UC
   let Inst{11-8} = dst;
+}
+def TAILJMPs : InstL<0xFA, (outs), (ins jseg8:$seg, calltarget:$dst),
+                     "jmps\t$seg, $dst", []> {
+  bits<8> seg;
+  bits<16> dst;
+  let Inst{15-8} = seg;
+  let Inst{31-16} = dst;
 }
 }
 }
@@ -558,6 +621,26 @@ def MOVB8rp  : InstS<0xA9, (outs GR8:$dst), (ins memr:$src),
   let Inst{15-12} = dst;
   let Inst{11-8} = src;
   let AddedComplexity = 10;
+}
+}
+
+// [Rw+] reads and then steps the pointer, which is what an array walk wants.
+// These are selected by hand in C166ISelDAGToDAG.cpp, since the pointer being
+// written back makes them two-result instructions that no pattern describes.
+let mayLoad = 1, Constraints = "$base = $base_wb" in {
+def MOV16rpi  : InstS<0x98, (outs GR16:$dst, GR16:$base_wb),
+                      (ins memrpi:$base), "mov\t$dst, $base", []> {
+  bits<4> dst;
+  bits<4> base;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = base;
+}
+def MOVB8rpi  : InstS<0x99, (outs GR8:$dst, GR16:$base_wb),
+                      (ins memrpi:$base), "movb\t$dst, $base", []> {
+  bits<4> dst;
+  bits<4> base;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = base;
 }
 }
 
@@ -1360,6 +1443,8 @@ def : Pat<(subc GR16:$src1, (load addrabs:$src2)),
 def : Pat<(C166tcret (i16 tglobaladdr:$dst)),  (TCRETURNa tglobaladdr:$dst)>;
 def : Pat<(C166tcret (i16 texternalsym:$dst)), (TCRETURNa texternalsym:$dst)>;
 def : Pat<(C166tcret GR16:$dst),               (TCRETURNi GR16:$dst)>;
+def : Pat<(C166tcretseg (i16 tglobaladdr:$seg), (i16 tglobaladdr:$dst)),
+          (TCRETURNs tglobaladdr:$seg, tglobaladdr:$dst)>;
 
 // Direct and indirect calls, and indirect jumps, all with cc_UC (0).
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;
@@ -1377,6 +1462,23 @@ def : Pat<(brind GR16:$src),                  (JMPI 0, GR16:$src)>;
 // Address materialisation.
 // A far access whose segment is a symbol lets the EXTS name it directly.
 multiclass FarSymbolAccess<SDPatternOperator sym> {
+  // Both halves of the address settled at link time: nothing goes in a
+  // register at all.
+  let AddedComplexity = 10 in {
+  def : Pat<(C166farload (i16 (C166Wrapper sym:$off)),
+                         (i16 (C166Wrapper sym:$seg))),
+            (FARLOAD16a sym:$off, sym:$seg)>;
+  def : Pat<(i8 (C166farload (i16 (C166Wrapper sym:$off)),
+                             (i16 (C166Wrapper sym:$seg)))),
+            (FARLOAD8a sym:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR16:$src, (i16 (C166Wrapper sym:$off)),
+                          (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE16a GR16:$src, sym:$off, sym:$seg)>;
+  def : Pat<(C166farstore GR8:$src, (i16 (C166Wrapper sym:$off)),
+                          (i16 (C166Wrapper sym:$seg))),
+            (FARSTORE8a GR8:$src, sym:$off, sym:$seg)>;
+  }
+
   def : Pat<(C166farload GR16:$off, (i16 (C166Wrapper sym:$seg))),
             (FARLOAD16i GR16:$off, sym:$seg)>;
   def : Pat<(i8 (C166farload GR16:$off, (i16 (C166Wrapper sym:$seg)))),

@@ -111,6 +111,11 @@ void C166InstPrinter::printRelTargetOperand(const MCInst *MI, uint64_t Address,
     O << Words;
 }
 
+void C166InstPrinter::printMemRPostIncOperand(const MCInst *MI, unsigned OpNo,
+                                              raw_ostream &O) {
+  O << '[' << getRegisterName(MI->getOperand(OpNo).getReg()) << "+]";
+}
+
 void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
                                          raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);

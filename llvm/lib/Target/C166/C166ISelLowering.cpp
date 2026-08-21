@@ -140,6 +140,14 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
 
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
 
+  // [Rw+] reads and then steps the pointer past what it read, which is what
+  // walking an array wants.  There is no matching post-incrementing store:
+  // the only auto-stepping store form is the pre-decrementing [-Rw].
+  setIndexedLoadAction(ISD::POST_INC, MVT::i8, Legal);
+  setIndexedLoadAction(ISD::POST_INC, MVT::i16, Legal);
+
+  setTargetDAGCombine(ISD::ADD);
+
   // A far pointer is an i32, which is not a legal type, so an access through
   // one is caught while the type legalizer is expanding the pointer operand.
   // Ordinary i32 loads and stores come through the same hook and are handed
@@ -396,6 +404,39 @@ static bool getFarAccessType(EVT MemVT, MVT &AccessVT) {
   return true;
 }
 
+/// [Rw+] steps the pointer by the width of the access and nothing else, so a
+/// load only folds an increment of exactly two for a word or one for a byte.
+bool C166TargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
+                                                    SDValue &Base,
+                                                    SDValue &Offset,
+                                                    ISD::MemIndexedMode &AM,
+                                                    SelectionDAG &DAG) const {
+  auto *LD = dyn_cast<LoadSDNode>(N);
+  if (!LD || LD->getExtensionType() != ISD::NON_EXTLOAD)
+    return false;
+
+  // A far pointer is 32 bits wide and its accesses go through an EXTS, which
+  // this form has no room for.
+  if (LD->getAddressSpace() != C166AS::Near)
+    return false;
+
+  EVT VT = LD->getMemoryVT();
+  if (VT != MVT::i8 && VT != MVT::i16)
+    return false;
+
+  if (Op->getOpcode() != ISD::ADD)
+    return false;
+
+  auto *Step = dyn_cast<ConstantSDNode>(Op->getOperand(1));
+  if (!Step || Step->getZExtValue() != (VT == MVT::i16 ? 2u : 1u))
+    return false;
+
+  Base = Op->getOperand(0);
+  Offset = Op->getOperand(1);
+  AM = ISD::POST_INC;
+  return true;
+}
+
 SDValue C166TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   auto *LD = cast<LoadSDNode>(Op);
   MVT AccessVT;
@@ -444,6 +485,25 @@ SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getMemIntrinsicNode(C166ISD::FAR_STORE, DL,
                                  DAG.getVTList(MVT::Other), Ops,
                                  ST->getMemoryVT(), ST->getMemOperand());
+}
+
+/// A constant added to the address of a far object is part of that address
+/// rather than arithmetic on it: the relocations carry an addend, so the
+/// linker can do the adding.  Without this the offset survives to become a
+/// real 32 bit add, since the near path only folds one at selection time and
+/// by then a far address has been split into its two halves.
+SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() != ISD::ADD)
+    return SDValue();
+
+  auto *GA = dyn_cast<GlobalAddressSDNode>(N->getOperand(0));
+  auto *Offset = dyn_cast<ConstantSDNode>(N->getOperand(1));
+  if (!GA || !Offset || GA->getAddressSpace() != C166AS::Far)
+    return SDValue();
+
+  return DCI.DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N), N->getValueType(0),
+                                  GA->getOffset() + Offset->getSExtValue());
 }
 
 // The address of a symbol in the far address space is only known once the
@@ -559,19 +619,32 @@ C166TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
 MachineBasicBlock *
 C166TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
-  unsigned BranchOpc;
+  // The comparison is a word or a byte one depending on what is being
+  // compared, not on what is being selected, and its right hand side is
+  // either a register or a constant.
+  bool CompareIsByte;
   switch (MI.getOpcode()) {
   default:
     llvm_unreachable("Unexpected instruction for the custom inserter");
   case C166::Select16_16:
   case C166::Select8_16:
-    BranchOpc = C166::BRCC16rr;
+  case C166::Select16_16i:
+  case C166::Select8_16i:
+    CompareIsByte = false;
     break;
   case C166::Select16_8:
   case C166::Select8_8:
-    BranchOpc = C166::BRCC8rr;
+  case C166::Select16_8i:
+  case C166::Select8_8i:
+    CompareIsByte = true;
     break;
   }
+
+  unsigned BranchOpc;
+  if (MI.getOperand(4).isImm())
+    BranchOpc = CompareIsByte ? C166::BRCC8ri : C166::BRCC16ri;
+  else
+    BranchOpc = CompareIsByte ? C166::BRCC8rr : C166::BRCC16rr;
 
   const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
   DebugLoc DL = MI.getDebugLoc();
@@ -610,7 +683,7 @@ C166TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   BuildMI(BB, DL, TII.get(BranchOpc))
       .addMBB(SinkMBB)
       .addReg(MI.getOperand(3).getReg())
-      .addReg(MI.getOperand(4).getReg())
+      .add(MI.getOperand(4))
       .addImm(MI.getOperand(5).getImm());
 
   FalseMBB->addSuccessor(SinkMBB);
@@ -658,13 +731,18 @@ bool C166TargetLowering::isEligibleForTailCall(
     return false;
 
   // A far function was entered with CALLS and has a code segment on the
-  // hardware stack waiting for RETS, so jumping to a near callee would leave
-  // a RET to pop half of it.  Far to far would be sound, but only through
-  // JMPS: JMPA stays inside the current segment, and nothing promises the
-  // linker put both functions in the same one.
+  // hardware stack waiting for RETS, so both ends have to be the same kind:
+  // a near callee's RET would pop half of what a far caller left there, and a
+  // far callee's RETS would pop a segment a near caller never pushed.
   const auto *Callee = dyn_cast<GlobalAddressSDNode>(CLI.Callee);
-  if (Caller.hasFnAttribute("far") ||
-      (Callee && isFarFunction(Callee->getGlobal())))
+  bool CallerIsFar = Caller.hasFnAttribute("far");
+  bool CalleeIsFar = Callee && isFarFunction(Callee->getGlobal());
+  if (CallerIsFar != CalleeIsFar)
+    return false;
+
+  // The far jump names its target segment, and only the direct form does;
+  // CALLI has no inter-segment counterpart to tail call through.
+  if (CallerIsFar && !Callee)
     return false;
 
   if (CLI.IsVarArg || Caller.isVarArg())
@@ -887,7 +965,7 @@ C166TargetLowering::LowerCCCCallTo(TargetLowering::CallLoweringInfo &CLI,
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   SmallVector<SDValue, 8> Ops;
   Ops.push_back(Chain);
-  if (IsFarCall && !CLI.IsTailCall)
+  if (IsFarCall)
     Ops.push_back(CalleeSeg);
   Ops.push_back(Callee);
 
@@ -903,11 +981,10 @@ C166TargetLowering::LowerCCCCallTo(TargetLowering::CallLoweringInfo &CLI,
     Ops.push_back(InGlue);
 
   // A tail call is a jump, so it produces no chain for anything to hang off
-  // and returns whatever the callee returns straight to our caller.  A far one
-  // needs no segment: it stays in the segment this function was called into,
-  // which is where its own caller expects RETS to come back from.
+  // and returns whatever the callee returns straight to our caller.
   if (CLI.IsTailCall)
-    return DAG.getNode(C166ISD::TC_RETURN, DL, MVT::Other, Ops);
+    return DAG.getNode(IsFarCall ? C166ISD::TC_RETURN_SEG : C166ISD::TC_RETURN,
+                       DL, MVT::Other, Ops);
 
   Chain = DAG.getNode(IsFarCall ? C166ISD::CALL_SEG : C166ISD::CALL, DL,
                       NodeTys, Ops);

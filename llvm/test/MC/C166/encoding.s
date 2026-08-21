@@ -120,6 +120,13 @@
 ; CHECK: mov r2, [r3+#0]  ; encoding: [0xd4,0x23,0x00,0x00]
         mov     r2, [r3+#0]
 
+; "[Rw+]" reads and then steps the pointer by the width of the access, and is
+; a third instruction again.
+; CHECK: mov r2, [r3+]    ; encoding: [0x98,0x23]
+        mov     r2, [r3+]
+; CHECK: movb rl2, [r3+]  ; encoding: [0x99,0x43]
+        movb    rl2, [r3+]
+
 ; A short constant is zero extended, so #data4 covers 0 to 15 in two bytes.
 ; CHECK: mov r2, #0       ; encoding: [0xe0,0x02]
         mov     r2, #0
