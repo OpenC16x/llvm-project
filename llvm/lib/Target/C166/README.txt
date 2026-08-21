@@ -244,8 +244,13 @@ choice, or a disassembly stops assembling back to the bytes it came from.
 That is what the soak test catches.
 
 "[Rw]" is a two byte instruction of its own rather than "[Rw + #data16]" with
-nothing added, so the two are separate instructions here and the displacement
-of the long one is always printed, zero included.  A frame slot that turns out
+nothing added, and "[Rw+]", which reads and then steps the pointer by the
+width of the access, is a third.  All three are separate instructions here,
+which is why the displacement of the long one is always printed, zero
+included.  A post-incrementing load is selected by hand in
+C166ISelDAGToDAG.cpp, since writing the stepped pointer back makes it a two
+result instruction that no pattern describes; there is no matching store,
+because the only auto-stepping store form is the pre-decrementing "[-Rw]".  A frame slot that turns out
 to sit at offset zero is switched over by eliminateFrameIndex() once the
 offset is known.  Likewise a constant of 0 to 15 goes in a two byte MOV with
 the value in the high nibble of the second byte; short constants are always

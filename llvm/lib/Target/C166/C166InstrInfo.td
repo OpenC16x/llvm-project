@@ -104,6 +104,12 @@ def MemRAsmOperand : AsmOperandClass {
   let RenderMethod = "addMemROperands";
 }
 
+def MemRPostIncAsmOperand : AsmOperandClass {
+  let Name = "MemRPostInc";
+  let RenderMethod = "addMemROperands";
+  let DiagnosticString = "expected [Rw+]";
+}
+
 // Immediates are range checked so that an out of range value is rejected
 // rather than quietly truncated to the width of its field.  A symbol
 // reference is always accepted: the relocation sorts it out later.
@@ -241,6 +247,15 @@ def memr : Operand<i16> {
   let MIOperandInfo = (ops GR16);
   let DecoderMethod = "decodeMemROperand";
   let ParserMatchClass = MemRAsmOperand;
+}
+
+// [Rw+], which steps the pointer past what it just read by the width of the
+// access: two for a word and one for a byte.
+def memrpi : Operand<i16> {
+  let PrintMethod = "printMemRPostIncOperand";
+  let MIOperandInfo = (ops GR16);
+  let DecoderMethod = "decodeMemROperand";
+  let ParserMatchClass = MemRPostIncAsmOperand;
 }
 
 // A plain 16 bit data address ("mem" in the manual).
@@ -589,6 +604,26 @@ def MOVB8rp  : InstS<0xA9, (outs GR8:$dst), (ins memr:$src),
   let Inst{15-12} = dst;
   let Inst{11-8} = src;
   let AddedComplexity = 10;
+}
+}
+
+// [Rw+] reads and then steps the pointer, which is what an array walk wants.
+// These are selected by hand in C166ISelDAGToDAG.cpp, since the pointer being
+// written back makes them two-result instructions that no pattern describes.
+let mayLoad = 1, Constraints = "$base = $base_wb" in {
+def MOV16rpi  : InstS<0x98, (outs GR16:$dst, GR16:$base_wb),
+                      (ins memrpi:$base), "mov\t$dst, $base", []> {
+  bits<4> dst;
+  bits<4> base;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = base;
+}
+def MOVB8rpi  : InstS<0x99, (outs GR8:$dst, GR16:$base_wb),
+                      (ins memrpi:$base), "movb\t$dst, $base", []> {
+  bits<4> dst;
+  bits<4> base;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = base;
 }
 }
 

@@ -140,6 +140,12 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
 
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
 
+  // [Rw+] reads and then steps the pointer past what it read, which is what
+  // walking an array wants.  There is no matching post-incrementing store:
+  // the only auto-stepping store form is the pre-decrementing [-Rw].
+  setIndexedLoadAction(ISD::POST_INC, MVT::i8, Legal);
+  setIndexedLoadAction(ISD::POST_INC, MVT::i16, Legal);
+
   // A far pointer is an i32, which is not a legal type, so an access through
   // one is caught while the type legalizer is expanding the pointer operand.
   // Ordinary i32 loads and stores come through the same hook and are handed
@@ -393,6 +399,39 @@ static bool getFarAccessType(EVT MemVT, MVT &AccessVT) {
   if (Bits > 16)
     return false;
   AccessVT = Bits > 8 ? MVT::i16 : MVT::i8;
+  return true;
+}
+
+/// [Rw+] steps the pointer by the width of the access and nothing else, so a
+/// load only folds an increment of exactly two for a word or one for a byte.
+bool C166TargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
+                                                    SDValue &Base,
+                                                    SDValue &Offset,
+                                                    ISD::MemIndexedMode &AM,
+                                                    SelectionDAG &DAG) const {
+  auto *LD = dyn_cast<LoadSDNode>(N);
+  if (!LD || LD->getExtensionType() != ISD::NON_EXTLOAD)
+    return false;
+
+  // A far pointer is 32 bits wide and its accesses go through an EXTS, which
+  // this form has no room for.
+  if (LD->getAddressSpace() != C166AS::Near)
+    return false;
+
+  EVT VT = LD->getMemoryVT();
+  if (VT != MVT::i8 && VT != MVT::i16)
+    return false;
+
+  if (Op->getOpcode() != ISD::ADD)
+    return false;
+
+  auto *Step = dyn_cast<ConstantSDNode>(Op->getOperand(1));
+  if (!Step || Step->getZExtValue() != (VT == MVT::i16 ? 2u : 1u))
+    return false;
+
+  Base = Op->getOperand(0);
+  Offset = Op->getOperand(1);
+  AM = ISD::POST_INC;
   return true;
 }
 

@@ -41,6 +41,7 @@ public:
   void printRelTargetOperand(const MCInst *MI, uint64_t Address, unsigned OpNo,
                              raw_ostream &O);
   void printMemROperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printMemRPostIncOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBitOffOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBitAddrOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 };
