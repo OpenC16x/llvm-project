@@ -91,6 +91,11 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &STI) const;
 
+  /// The 8 bit "reg" field of PUSH and POP.
+  unsigned getReg8OpValue(const MCInst &MI, unsigned OpNo,
+                          SmallVectorImpl<MCFixup> &Fixups,
+                          const MCSubtargetInfo &STI) const;
+
   /// An ATOMIC/EXTend instruction range, written as 1 to 4 and encoded as
   /// 0 to 3.
   unsigned getIrang2OpValue(const MCInst &MI, unsigned OpNo,
@@ -219,6 +224,20 @@ unsigned C166MCCodeEmitter::getIrang2OpValue(const MCInst &MI, unsigned OpNo,
   assert(MO.isImm() && MO.getImm() >= 1 && MO.getImm() <= 4 &&
          "Instruction range must be a constant in [1, 4]");
   return static_cast<unsigned>(MO.getImm()) - 1;
+}
+
+unsigned C166MCCodeEmitter::getReg8OpValue(const MCInst &MI, unsigned OpNo,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
+  MCRegister Reg = MI.getOperand(OpNo).getReg();
+
+  // A general purpose register is addressed as F0H + n in an 8 bit "reg"
+  // field, while a special function register already carries its own short
+  // address as its encoding.
+  unsigned Encoding = Ctx.getRegisterInfo()->getEncodingValue(Reg);
+  if (getC166MCRegisterClass(C166::GR16RegClassID).contains(Reg))
+    return 0xF0 + Encoding;
+  return Encoding;
 }
 
 #include "C166GenMCCodeEmitter.inc"

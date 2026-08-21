@@ -52,6 +52,7 @@ class C166Operand : public MCParsedAsmOperand {
     k_Address,
     k_CondCode,
     k_Memory,
+    k_SFR,
   } Kind;
 
   struct MemoryOp {
@@ -71,10 +72,13 @@ public:
   C166Operand(KindTy Kind, SMLoc S, SMLoc E) : Kind(Kind), Start(S), End(E) {}
 
   bool isToken() const override { return Kind == k_Token; }
-  bool isReg() const override { return Kind == k_Register; }
+  // A special function register name is both: PUSH and POP name one in their
+  // "reg" field, and every other instruction that mentions one means the
+  // address it is mapped to.
+  bool isReg() const override { return Kind == k_Register || Kind == k_SFR; }
   bool isImm() const override { return Kind == k_Immediate; }
   bool isMem() const override { return Kind == k_Memory; }
-  bool isAddr() const { return Kind == k_Address; }
+  bool isAddr() const { return Kind == k_Address || Kind == k_SFR; }
   bool isCondCode() const { return Kind == k_CondCode; }
   bool isMemRI() const { return Kind == k_Memory; }
 
@@ -102,7 +106,7 @@ public:
   bool isPag10() const { return isImmInRange(0, 1023, /*AllowSymbol=*/true); }
 
   MCRegister getReg() const override {
-    assert(Kind == k_Register && "Not a register operand");
+    assert((Kind == k_Register || Kind == k_SFR) && "Not a register operand");
     return Reg;
   }
 
@@ -134,6 +138,14 @@ public:
       addExpr(Inst, Imm);
   }
 
+  static std::unique_ptr<C166Operand>
+  createSFR(MCRegister Reg, const MCExpr *Addr, SMLoc S, SMLoc E) {
+    auto Op = std::make_unique<C166Operand>(k_SFR, S, E);
+    Op->Reg = Reg;
+    Op->Imm = Addr;
+    return Op;
+  }
+
   void addMemRIOperands(MCInst &Inst, unsigned N) const {
     assert(N == 2 && "Invalid number of operands");
     Inst.addOperand(MCOperand::createReg(Mem.Base));
@@ -154,6 +166,10 @@ public:
       break;
     case k_Address:
       OS << "Address:";
+      MAI.printExpr(OS, *Imm);
+      break;
+    case k_SFR:
+      OS << "SFR:" << Reg.id() << ':';
       MAI.printExpr(OS, *Imm);
       break;
     case k_CondCode:
@@ -261,10 +277,10 @@ public:
 };
 
 /// The special function registers are memory mapped, and an assembler is
-/// expected to know where.  No instruction here takes an SFR as a register
-/// operand, so an SFR name always stands for its address.  Values are from the
-/// C166 User's Manual register table (and agree with the 8 bit short register
-/// addresses given alongside them).
+/// expected to know where.  Only PUSH and POP name one as a register; anywhere
+/// else an SFR name stands for its address.  Values are from the C166 User's
+/// Manual register table (and agree with the 8 bit short register addresses
+/// the registers carry as their hardware encoding).
 static int64_t matchSpecialFunctionRegister(StringRef Name) {
   return StringSwitch<int64_t>(Name.lower())
       .Case("dpp0", 0xFE00)
@@ -409,8 +425,12 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
     if (int64_t Addr = matchSpecialFunctionRegister(Name); Addr >= 0) {
       SMLoc E = getLexer().getLoc();
       Lex();
-      Operands.push_back(C166Operand::createAddr(
-          MCConstantExpr::create(Addr, getContext()), S, E));
+      // The backend does not model every special function register, so one it
+      // knows only an address for stays a plain address operand.
+      MCRegister Reg = MatchRegisterName(Name.lower());
+      const MCExpr *AddrExpr = MCConstantExpr::create(Addr, getContext());
+      Operands.push_back(Reg ? C166Operand::createSFR(Reg, AddrExpr, S, E)
+                             : C166Operand::createAddr(AddrExpr, S, E));
       return false;
     }
 

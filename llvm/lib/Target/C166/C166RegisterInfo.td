@@ -80,17 +80,22 @@ def R15 : C166Reg<15, "r15">, DwarfRegNum<[15]>;
 // Special function registers
 //===----------------------------------------------------------------------===//
 
+// A special function register carries its 8 bit short address as the hardware
+// encoding, which is how the "reg" field of PUSH and POP names it.  Short
+// address N is FE00H + 2N below 80H and FF00H + 2(N - 80H) above it; the
+// values are from the C166 User's Manual register table.
+
 // The condition flags live in the PSW.
-def PSW   : C166Reg<0, "psw">,   DwarfRegNum<[32]>;
+def PSW   : C166Reg<0x88, "psw">, DwarfRegNum<[32]>; // FF10H
 // Multiply/divide unit registers.
-def MDL   : C166Reg<0, "mdl">,   DwarfRegNum<[33]>;
-def MDH   : C166Reg<0, "mdh">,   DwarfRegNum<[34]>;
-def MDC   : C166Reg<0, "mdc">,   DwarfRegNum<[35]>;
+def MDL   : C166Reg<0x07, "mdl">, DwarfRegNum<[33]>; // FE0EH
+def MDH   : C166Reg<0x06, "mdh">, DwarfRegNum<[34]>; // FE0CH
+def MDC   : C166Reg<0x87, "mdc">, DwarfRegNum<[35]>; // FF0EH
 // The hardware (system) stack pointer.  It only ever holds return addresses
 // and explicitly PUSHed values; the ABI stack lives in R0.
-def SYSSP : C166Reg<0, "sp">,    DwarfRegNum<[36]>;
+def SYSSP : C166Reg<0x09, "sp">,  DwarfRegNum<[36]>; // FE12H
 // Context pointer.
-def CP    : C166Reg<0, "cp">,    DwarfRegNum<[37]>;
+def CP    : C166Reg<0x08, "cp">,  DwarfRegNum<[37]>; // FE10H
 
 //===----------------------------------------------------------------------===//
 // Register classes
@@ -112,6 +117,14 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
   (add PSW, MDL, MDH, MDC, SYSSP, CP)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// Everything the 8 bit "reg" field of PUSH and POP can name.  It exists only
+// to widen those two instructions past the general purpose registers, so it
+// is not an allocation class of its own.
+def GR16orSFR : RegisterClass<"C166", [i16], 16, (add GR16, SFR)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

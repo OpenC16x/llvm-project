@@ -134,6 +134,13 @@ def Pag10AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected a 10 bit page number";
 }
 
+// The 8 bit "reg" field of PUSH and POP, which addresses a general purpose
+// register as F0H + n and a special function register by its short address.
+def reg8 : RegisterOperand<GR16orSFR> {
+  let EncoderMethod = "getReg8OpValue";
+  let DecoderMethod = "decodeReg8Operand";
+}
+
 // A condition code, printed as cc_XX and encoded in a 4 bit field.
 def cc : Operand<i8> {
   let PrintMethod = "printCCOperand";
@@ -851,15 +858,13 @@ def CALLI : InstS<0xAB, (outs), (ins cc:$cond, GR16:$src),
 //===----------------------------------------------------------------------===//
 
 let Defs = [SYSSP], Uses = [SYSSP] in {
-def PUSH : InstS<0xEC, (outs), (ins GR16:$src), "push\t$src", []> {
-  bits<4> src;
-  let Inst{15-12} = 0b1111;
-  let Inst{11-8} = src;
+def PUSH : InstS<0xEC, (outs), (ins reg8:$src), "push\t$src", []> {
+  bits<8> src;
+  let Inst{15-8} = src;
 }
-def POP  : InstS<0xFC, (outs GR16:$dst), (ins), "pop\t$dst", []> {
-  bits<4> dst;
-  let Inst{15-12} = 0b1111;
-  let Inst{11-8} = dst;
+def POP  : InstS<0xFC, (outs reg8:$dst), (ins), "pop\t$dst", []> {
+  bits<8> dst;
+  let Inst{15-8} = dst;
 }
 }
 

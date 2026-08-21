@@ -107,6 +107,31 @@
 ; CHECK: pop r4           ; encoding: [0xfc,0xf4]
         pop     r4
 
+; The 8 bit "reg" field addresses a GPR as F0H + n and a special function
+; register by its short address, so PUSH and POP reach both.
+; CHECK: push mdc         ; encoding: [0xec,0x87]
+        push    mdc
+; CHECK: push mdl         ; encoding: [0xec,0x07]
+        push    mdl
+; CHECK: push mdh         ; encoding: [0xec,0x06]
+        push    mdh
+; CHECK: pop mdh          ; encoding: [0xfc,0x06]
+        pop     mdh
+; CHECK: pop mdl          ; encoding: [0xfc,0x07]
+        pop     mdl
+; CHECK: pop mdc          ; encoding: [0xfc,0x87]
+        pop     mdc
+; CHECK: push psw         ; encoding: [0xec,0x88]
+        push    psw
+; CHECK: push cp          ; encoding: [0xec,0x08]
+        push    cp
+; CHECK: push sp          ; encoding: [0xec,0x09]
+        push    sp
+
+; The same name still stands for the register's address everywhere else.
+; CHECK: mov r2, 65038    ; encoding: [0xf2,0xf2,0x0e,0xfe]
+        mov     r2, mdl
+
 ; The protected instructions repeat their opcode in the second word.
 ; CHECK: srst             ; encoding: [0xb7,0x48,0xb7,0xb7]
         srst
