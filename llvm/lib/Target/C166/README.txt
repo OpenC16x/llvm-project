@@ -125,6 +125,13 @@ displacement is deliberately never folded into a far access: [Rw + #data16]
 wraps inside the segment instead of carrying into it, so the fold would only be
 correct when the sum is known not to cross a 64 KByte boundary.
 
+A constant offset into a far object folds into its address rather than
+becoming arithmetic on it, since both relocations carry an addend.  That only
+applies to an object actually declared in the far address space: a near one
+reached through a cast has the offset added to its 16 bit address before the
+cast widens it, and folding that into the symbol would only be right if the
+addition could not wrap.
+
 An addrspacecast widens or narrows the pointer, which assumes the reset
 configuration of the DPP registers, where a 16 bit address maps onto the
 identical physical address in segment 0.  Code that reprograms the DPPs has to
