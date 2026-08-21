@@ -336,6 +336,8 @@ static int64_t matchSpecialFunctionRegister(StringRef Name) {
       .Case("mdl", 0xFE0E)
       .Case("cp", 0xFE10)
       .Case("sp", 0xFE12)
+      .Case("stkov", 0xFE14)
+      .Case("stkun", 0xFE16)
       .Case("mdc", 0xFF0E)
       .Case("psw", 0xFF10)
       .Default(-1);

@@ -912,6 +912,16 @@ set(avr_SOURCES
   ${GENERIC_SOURCES}
 )
 
+# 16-bit Infineon C166 MCU.  A 16 bit machine has no instruction that shifts a
+# 32 bit value, so the SI mode shifts that a wider target gets for free have to
+# be written out.
+set(c166_SOURCES
+  c166/ashlsi3.c
+  c166/ashrsi3.c
+  c166/lshrsi3.c
+  ${GENERIC_SOURCES}
+)
+
 # hexagon arch
 set(hexagon_SOURCES
   hexagon/common_entry_exit_abi1.S

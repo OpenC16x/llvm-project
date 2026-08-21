@@ -144,6 +144,13 @@
 ; CHECK: mov 65036, r3    ; encoding: [0xf6,0xf3,0x0c,0xfe]
         mov     mdh, r3
 
+; The stack bounds registers, which a startup sequence has to write: STKOV is
+; at FE14H and STKUN at FE16H.
+; CHECK: mov 65044, r1    ; encoding: [0xf6,0xf1,0x14,0xfe]
+        mov     stkov, r1
+; CHECK: mov 65046, r1    ; encoding: [0xf6,0xf1,0x16,0xfe]
+        mov     stkun, r1
+
 ; Control flow.
 ; CHECK: ret              ; encoding: [0xcb,0x00]
         ret

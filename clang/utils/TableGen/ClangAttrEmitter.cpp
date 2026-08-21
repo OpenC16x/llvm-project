@@ -4644,11 +4644,9 @@ static void GenerateAppertainsTo(const Record &Attr, raw_ostream &OS) {
 // Generates the mutual exclusion checks. The checks for parsed attributes are
 // written into OS and the checks for merging declaration attributes are
 // written into MergeOS.
-static void GenerateMutualExclusionsChecks(const Record &Attr,
-                                           const RecordKeeper &Records,
-                                           raw_ostream &OS,
-                                           raw_ostream &MergeDeclOS,
-                                           raw_ostream &MergeStmtOS) {
+static void GenerateMutualExclusionsChecks(
+    const Record &Attr, const ParsedAttrMap &Dupes, const RecordKeeper &Records,
+    raw_ostream &OS, raw_ostream &MergeDeclOS, raw_ostream &MergeStmtOS) {
   // We don't do any of this magic for type attributes yet.
   if (Attr.isSubClassOf("TypeAttr"))
     return;
@@ -4664,6 +4662,21 @@ static void GenerateMutualExclusionsChecks(const Record &Attr,
 
   std::vector<std::string> DeclAttrs, StmtAttrs;
 
+  // Attributes that share a parsed attribute kind are one attribute as far as
+  // the parser is concerned, and which of them ends up standing for the kind
+  // is decided by sorting their names.  An exclusion written against any of
+  // them therefore has to be generated here, or it would quietly stop being
+  // checked as soon as another attribute with an earlier name joined the kind.
+  SmallVector<const Record *, 2> Kin;
+  Kin.push_back(&Attr);
+  if (Attr.isSubClassOf("TargetSpecificAttr") &&
+      !Attr.isValueUnset("ParseKind")) {
+    StringRef APK = Attr.getValueAsString("ParseKind");
+    for (const auto &I : Dupes)
+      if (I.first == APK)
+        Kin.push_back(I.second);
+  }
+
   // Find all of the definitions that inherit from MutualExclusions and include
   // the given attribute in the list of exclusions to generate the
   // diagMutualExclusion() check.
@@ -4671,8 +4684,9 @@ static void GenerateMutualExclusionsChecks(const Record &Attr,
        Records.getAllDerivedDefinitions("MutualExclusions")) {
     std::vector<const Record *> MutuallyExclusiveAttrs =
         Exclusion->getValueAsListOfDefs("Exclusions");
-    auto IsCurAttr = [Attr](const Record *R) {
-      return R->getName() == Attr.getName();
+    auto IsCurAttr = [&Kin](const Record *R) {
+      return llvm::any_of(
+          Kin, [R](const Record *K) { return K->getName() == R->getName(); });
     };
     if (any_of(MutuallyExclusiveAttrs, IsCurAttr)) {
       // This list of exclusions includes the attribute we're looking for, so
@@ -4717,9 +4731,11 @@ static void GenerateMutualExclusionsChecks(const Record &Attr,
     // this code will be executed in the context of a function with parameters:
     // Sema &S, Decl *D, Attr *A and that returns a bool (false on diagnostic,
     // true on success).
-    if (Attr.isSubClassOf("InheritableAttr")) {
+    for (const Record *K : Kin) {
+      if (!K->isSubClassOf("InheritableAttr"))
+        continue;
       MergeDeclOS << "  if (const auto *Second = dyn_cast<"
-                  << (Attr.getName() + "Attr").str() << ">(A)) {\n";
+                  << (K->getName() + "Attr").str() << ">(A)) {\n";
       for (const std::string &A : DeclAttrs) {
         MergeDeclOS << "    if (const auto *First = D->getAttr<" << A
                     << ">()) {\n";
@@ -5120,7 +5136,8 @@ void EmitClangAttrParsedAttrImpl(const RecordKeeper &Records, raw_ostream &OS) {
       OS << "    /*ArgNames=*/{}";
     OS << ") {}\n";
     GenerateAppertainsTo(Attr, OS);
-    GenerateMutualExclusionsChecks(Attr, Records, OS, MergeDeclOS, MergeStmtOS);
+    GenerateMutualExclusionsChecks(Attr, Dupes, Records, OS, MergeDeclOS,
+                                   MergeStmtOS);
     GenerateLangOptRequirements(Attr, OS);
     GenerateTargetRequirements(Attr, Dupes, OS);
     GenerateSpellingTargetRequirements(

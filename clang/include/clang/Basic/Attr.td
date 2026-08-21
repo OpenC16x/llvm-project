@@ -481,6 +481,7 @@ def TargetAMDGPU : TargetArch<["amdgpu", "r600"]>;
 def TargetAnyArm : TargetArch<!listconcat(TargetARM.Arches, TargetAArch64.Arches)>;
 def TargetAVR : TargetArch<["avr"]>;
 def TargetBPF : TargetArch<["bpfel", "bpfeb"]>;
+def TargetC166 : TargetArch<["c166"]>;
 def TargetLoongArch : TargetArch<["loongarch32", "loongarch64"]>;
 def TargetMips32 : TargetArch<["mips", "mipsel"]>;
 def TargetAnyMips : TargetArch<["mips", "mipsel", "mips64", "mips64el"]>;
@@ -1091,6 +1092,13 @@ def AVRSignal : InheritableAttr, TargetSpecificAttr<TargetAVR> {
   let Spellings = [GCC<"signal">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [AVRSignalDocs];
+}
+
+def C166Interrupt : InheritableAttr, TargetSpecificAttr<TargetC166> {
+  let Spellings = [GCC<"interrupt">];
+  let Subjects = SubjectList<[Function]>;
+  let ParseKind = "Interrupt";
+  let Documentation = [C166InterruptDocs];
 }
 
 def AsmLabel : InheritableAttr {
@@ -2257,10 +2265,24 @@ def MicroMips : InheritableAttr, TargetSpecificAttr<TargetMips32> {
 def : MutualExclusions<[Mips16, MicroMips]>;
 
 def MipsLongCall : InheritableAttr, TargetSpecificAttr<TargetAnyMips> {
+  // NOTE: C166Far shares the 'far' spelling and so must share the parse kind;
+  // its spelling list has to keep matching this one.
   let Spellings = [GCC<"long_call">, GCC<"far">];
   let Subjects = SubjectList<[Function]>;
+  let ParseKind = "LongCall";
   let Documentation = [MipsLongCallStyleDocs];
-  let SimpleHandler = 1;
+}
+
+// NOTE: this shares the 'far' spelling, and therefore the parse kind, with
+// MipsLongCall just above.  The two mean the same thing: reach the callee with
+// the wide call sequence rather than the cheap one.  Attributes that share a
+// parse kind must also share a spelling list, so 'long_call' is accepted here
+// too.
+def C166Far : InheritableAttr, TargetSpecificAttr<TargetC166> {
+  let Spellings = [GCC<"long_call">, GCC<"far">];
+  let Subjects = SubjectList<[Function]>;
+  let ParseKind = "LongCall";
+  let Documentation = [C166FarDocs];
 }
 
 def MipsShortCall : InheritableAttr, TargetSpecificAttr<TargetAnyMips> {

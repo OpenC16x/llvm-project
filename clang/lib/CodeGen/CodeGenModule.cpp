@@ -227,6 +227,9 @@ createTargetCodeGenInfo(CodeGenModule &CGM) {
   case llvm::Triple::nvptx64:
     return createNVPTXTargetCodeGenInfo(CGM);
 
+  case llvm::Triple::c166:
+    return createC166TargetCodeGenInfo(CGM);
+
   case llvm::Triple::msp430:
     return createMSP430TargetCodeGenInfo(CGM);
 

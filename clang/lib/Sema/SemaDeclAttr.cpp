@@ -6678,9 +6678,47 @@ BTFDeclTagAttr *Sema::mergeBTFDeclTagAttr(Decl *D, const BTFDeclTagAttr &AL) {
   return ::new (Context) BTFDeclTagAttr(Context, AL, AL.getBTFDeclTag());
 }
 
+static void handleLongCallAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // 'far'/'long_call' means the same thing on MIPS and on C166 -- use the wide
+  // call sequence -- so the two attributes share a spelling and a parse kind.
+  if (S.Context.getTargetInfo().getTriple().isMIPS())
+    D->addAttr(::new (S.Context) MipsLongCallAttr(S.Context, AL));
+  else
+    D->addAttr(::new (S.Context) C166FarAttr(S.Context, AL));
+}
+
+static void handleC166InterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (!isFuncOrMethodForAttrSubject(D)) {
+    S.Diag(D->getLocation(), diag::warn_attribute_wrong_decl_type)
+        << AL << AL.isRegularKeywordAttribute() << ExpectedFunction;
+    return;
+  }
+
+  if (!AL.checkExactlyNumArgs(S, 0))
+    return;
+
+  // A C166 handler is entered by the hardware and left with RETI, so there is
+  // nowhere for arguments to come from and nowhere for a result to go.
+  if (hasFunctionProto(D) && getFunctionOrMethodNumParams(D) != 0) {
+    S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
+        << /*C166*/ 4 << /*interrupt*/ 0 << 0;
+    return;
+  }
+  if (!getFunctionOrMethodResultType(D)->isVoidType()) {
+    S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
+        << /*C166*/ 4 << /*interrupt*/ 0 << 1;
+    return;
+  }
+
+  handleSimpleAttribute<C166InterruptAttr>(S, D, AL);
+}
+
 static void handleInterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Dispatch the interrupt attribute based on the current target.
   switch (S.Context.getTargetInfo().getTriple().getArch()) {
+  case llvm::Triple::c166:
+    handleC166InterruptAttr(S, D, AL);
+    break;
   case llvm::Triple::msp430:
     S.MSP430().handleInterruptAttr(D, AL);
     break;
@@ -7738,6 +7776,9 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_AVRSignal:
     S.AVR().handleSignalAttr(D, AL);
+    break;
+  case ParsedAttr::AT_LongCall:
+    handleLongCallAttr(S, D, AL);
     break;
   case ParsedAttr::AT_BPFPreserveAccessIndex:
     S.BPF().handlePreserveAccessIndexAttr(D, AL);
