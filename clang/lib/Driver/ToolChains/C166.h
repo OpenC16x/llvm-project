@@ -45,6 +45,13 @@ public:
     return UNW_None;
   }
 
+  // LLD is the only linker with a C166 backend.
+  const char *getDefaultLinker() const override { return "ld.lld"; }
+
+  RuntimeLibType GetDefaultRuntimeLibType() const override {
+    return ToolChain::RLT_CompilerRT;
+  }
+
 protected:
   Tool *buildLinker() const override;
 
@@ -57,12 +64,11 @@ private:
 namespace tools {
 namespace c166 {
 
-/// Nothing links C166 objects yet: the relocations this backend emits are
-/// LLVM's own invention and no linker implements them.  Say so rather than
-/// handing the objects to the build machine's ld.
+/// LLD is the only linker that knows the C166 relocations, so that is what
+/// this drives unless -fuse-ld= says otherwise.
 class LLVM_LIBRARY_VISIBILITY Linker final : public Tool {
 public:
-  Linker(const ToolChain &TC) : Tool("C166::Linker", "c166-ld", TC) {}
+  Linker(const ToolChain &TC) : Tool("C166::Linker", "ld.lld", TC) {}
   bool hasIntegratedCPP() const override { return false; }
   bool isLinkJob() const override { return true; }
   void ConstructJob(Compilation &C, const JobAction &JA,

@@ -282,13 +282,12 @@ clang knows the c166 triple, so C sources compile without going through a
 separate front end.  int is 16 bits, long is 32, long long is 64, and nothing
 is aligned to more than a word because the bus is a word wide.
 
-The driver's C166 toolchain does two things.  It passes -nostdsysteminc, since
-the build machine's /usr/include describes the build machine and not a C166
-part, which is what lets clang's own stdint.h and friends be the ones that
-answer an #include.  And it refuses to link: the relocations here are LLVM's
-own invention and nothing implements them, so handing the objects to the build
-machine's ld would only produce nonsense.  Compile with -c and link with
-whatever the part came with.
+The driver's C166 toolchain passes -nostdsysteminc, since the build machine's
+/usr/include describes the build machine and not a C166 part, which is what
+lets clang's own stdint.h and friends be the ones that answer an #include.  It
+links with LLD, which is the only linker that knows these relocations, and
+puts crt0.o first because the reset vector is in it.  There is no default
+linker script: the memory map belongs to the board, so -T is not optional.
 
 There is no frame pointer by default.  Sixteen registers are not enough to
 give one up, and nothing walks the stack anyway.
@@ -308,6 +307,31 @@ is accepted here as well.
 A near pointer converts to a far one without a cast, since the near space is a
 page of the far one.  The reverse needs an explicit cast, because the top
 eight bits have nowhere to go.
+
+Linking, the runtime, and starting up
+------------------------------------
+
+lld/ELF/Arch/C166.cpp resolves the relocations.  Nothing is dynamic, so it is
+a getRelExpr and a relocate; the emulation is "c166elf" and the output format
+name is "elf32-c166", and the OS/ABI is ELFOSABI_STANDALONE, which is what the
+assembler writes.  Padding between functions is "jmpr cc_UC, -1", which
+branches to itself: padding is not meant to be reached, and hanging where the
+mistake happened is more use on a bare part than sliding into whatever comes
+next.  (JMPR itself is not modelled here, so a disassembly shows the padding
+as unknown bytes.)
+
+The compiler-rt builtins build for c166.  Everything in GENERIC_SOURCES
+already compiles, since int_types.h is written in fixed width types; what is
+added is compiler-rt/lib/builtins/c166, which holds the three shifts of a 32
+bit value.  A 32 bit machine gets those from its instruction set and needs
+ashldi3.c and friends for 64 bit ones instead; a 16 bit machine is one size
+down and needs both.  With those, the only things left undefined after linking
+are memcpy, memmove, memset and memcmp, which belong to a C library.
+
+startup/ has the reset vector, a linker script and those four functions, with
+a README of its own.  None of it is built by the LLVM build - it is code for
+the part, not for the machine doing the building - so it is there to be copied
+into a project and adjusted to the board.
 
 Encodings and the MC layer
 --------------------------
@@ -360,8 +384,8 @@ Known limitations / things to do
   them where an address is what is wanted.
 * Outside the "reg" field an SFR is just an address, and the disassembler
   prints it numerically: "mov r2, mdl" comes back as "mov r2, 65038".
-* The far relocations are LLVM's own invention, like the rest of the C166 ELF
-  scheme here: no linker implements them yet.
+* The relocations are LLVM's own invention, like the rest of the C166 ELF
+  scheme here; LLD implements them and nothing else does.
 * A far access always costs an EXTS, even for several accesses in a row to the
   same segment, which one EXTS covering up to four instructions could do.
   Merging two is harder than it sounds: through a register the segment has to
@@ -376,3 +400,11 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * No support for the XC16x MAC unit.
+* JMPR, the two byte relative unconditional jump, is not modelled, so an
+  unconditional branch is always the four byte JMPA.  Selecting it would need
+  branch relaxation, since it only reaches 127 words; the fixup kind and the
+  relocation for a relative branch already exist, because the bit test
+  branches use them.
+* Nothing has been executed.  There is no free C166 simulator, so what the
+  tests check is that the right bytes come out, not that a part does the right
+  thing with them.
