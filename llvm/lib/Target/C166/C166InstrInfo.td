@@ -131,6 +131,13 @@ def Imm4AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected an immediate in the range [0, 15]";
 }
 
+def Imm3AsmOperand : AsmOperandClass {
+  let Name = "Imm3";
+  let RenderMethod = "addImmOperands";
+  let SuperClasses = [Imm4AsmOperand];
+  let DiagnosticString = "expected an immediate in the range [0, 7]";
+}
+
 def Irang2AsmOperand : AsmOperandClass {
   let Name = "Irang2";
   let RenderMethod = "addImmOperands";
@@ -293,6 +300,20 @@ def jseg8 : Operand<i16> {
 def pag10 : Operand<i16> {
   let EncoderMethod = "getPag10OpValue";
   let ParserMatchClass = Pag10AsmOperand;
+}
+
+// The arithmetic instructions have a two byte form taking #data3, which is
+// zero extended like every short constant and so spans 0 to 7.
+def imm3 : Operand<i16>, ImmLeaf<i16, [{
+  return Imm >= 0 && Imm < 8;
+}]> {
+  let ParserMatchClass = Imm3AsmOperand;
+}
+
+def imm3b : Operand<i8>, ImmLeaf<i8, [{
+  return Imm >= 0 && Imm < 8;
+}]> {
+  let ParserMatchClass = Imm3AsmOperand;
 }
 
 // A short constant is zero extended, so #data4 spans 0 to 15 (manual 6.5).
@@ -672,6 +693,20 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
                   SDNode opnode, bit commutable = 0,
                   list<Register> uses = []> {
   let Constraints = "$src1 = $dst", Defs = [PSW], Uses = uses in {
+    // The two byte #data3 form, preferred whenever the constant fits.  Its
+    // opcode is the register/register one plus 8.
+    let AddedComplexity = 10 in
+    def 16ri3 : InstS<!add(opRR, 8), (outs GR16:$dst),
+                      (ins GR16:$src1, imm3:$src2),
+                      !strconcat(mnemonic, "\t$dst, $src2"),
+                      [(set GR16:$dst, (opnode GR16:$src1, imm3:$src2))]> {
+      bits<4> dst;
+      bits<3> src2;
+      let Inst{15-12} = dst;
+      let Inst{11} = 0;
+      let Inst{10-8} = src2;
+    }
+
     let isCommutable = commutable in
     def 16rr : InstS<opRR, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
@@ -707,6 +742,18 @@ multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
 multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
                   SDNode opnode, bit commutable = 0> {
   let Constraints = "$src1 = $dst", Defs = [PSW] in {
+    let AddedComplexity = 10 in
+    def 8ri3 : InstS<!add(opRR, 8), (outs GR8:$dst),
+                     (ins GR8:$src1, imm3b:$src2),
+                     !strconcat(mnemonic, "\t$dst, $src2"),
+                     [(set GR8:$dst, (opnode GR8:$src1, imm3b:$src2))]> {
+      bits<4> dst;
+      bits<3> src2;
+      let Inst{15-12} = dst;
+      let Inst{11} = 0;
+      let Inst{10-8} = src2;
+    }
+
     let isCommutable = commutable in
     def 8rr : InstS<opRR, (outs GR8:$dst), (ins GR8:$src1, GR8:$src2),
                     !strconcat(mnemonic, "\t$dst, $src2"),
@@ -823,6 +870,22 @@ def CMP16rr : InstS<0x40, (outs), (ins GR16:$src1, GR16:$src2),
   let Inst{15-12} = src1;
   let Inst{11-8} = src2;
 }
+
+// The two byte #data3 forms, which expandPostRAPseudo() picks when the fused
+// compare-and-branch it is splitting carries a small enough constant.
+class CompareImm3<bits<8> opcode, string mnemonic, RegisterClass RC,
+                  Operand ImmTy>
+    : InstS<opcode, (outs), (ins RC:$src1, ImmTy:$src2),
+            !strconcat(mnemonic, "\t$src1, $src2"), []> {
+  bits<4> src1;
+  bits<3> src2;
+  let Inst{15-12} = src1;
+  let Inst{11} = 0;
+  let Inst{10-8} = src2;
+}
+
+def CMP16ri3 : CompareImm3<0x48, "cmp", GR16, imm3>;
+def CMPB8ri3 : CompareImm3<0x49, "cmpb", GR8, imm3b>;
 def CMP16ri : InstL<0x46, (outs), (ins GR16:$src1, data16:$src2),
                     "cmp\t$src1, $src2", []> {
   bits<4> src1;
@@ -1282,11 +1345,15 @@ def RETS : InstS<0xDB, (outs), (ins), "rets", [(C166retsglue)]> {
 // the byte extensions - leaves the carry alone.
 def : Pat<(addc GR16:$src1, GR16:$src2), (ADD16rr GR16:$src1, GR16:$src2)>;
 def : Pat<(addc GR16:$src1, imm:$src2),  (ADD16ri GR16:$src1, imm:$src2)>;
+let AddedComplexity = 10 in
+def : Pat<(addc GR16:$src1, imm3:$src2), (ADD16ri3 GR16:$src1, imm3:$src2)>;
 def : Pat<(addc GR16:$src1, (load addrabs:$src2)),
           (ADD16ra GR16:$src1, addrabs:$src2)>;
 
 def : Pat<(subc GR16:$src1, GR16:$src2), (SUB16rr GR16:$src1, GR16:$src2)>;
 def : Pat<(subc GR16:$src1, imm:$src2),  (SUB16ri GR16:$src1, imm:$src2)>;
+let AddedComplexity = 10 in
+def : Pat<(subc GR16:$src1, imm3:$src2), (SUB16ri3 GR16:$src1, imm3:$src2)>;
 def : Pat<(subc GR16:$src1, (load addrabs:$src2)),
           (SUB16ra GR16:$src1, addrabs:$src2)>;
 

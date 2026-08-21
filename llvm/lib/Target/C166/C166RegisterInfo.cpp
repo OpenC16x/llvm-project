@@ -133,12 +133,20 @@ bool C166RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     bool IsDead = Dst.isDead();
     Dst.setIsDead(false);
 
-    unsigned Opc = Offset < 0 ? C166::SUB16ri : C166::ADD16ri;
-    MachineInstrBuilder MIB = BuildMI(MBB, std::next(II), DL, TII.get(Opc))
-                                  .addReg(DstReg, RegState::Define |
-                                                      getDeadRegState(IsDead))
-                                  .addReg(DstReg)
-                                  .addImm(Offset < 0 ? -Offset : Offset);
+    // Seven or less fits the two byte #data3 form, which is also what the
+    // assembler picks when it reads this back.
+    int64_t Size = Offset < 0 ? -Offset : Offset;
+    unsigned Opc;
+    if (Size < 8)
+      Opc = Offset < 0 ? C166::SUB16ri3 : C166::ADD16ri3;
+    else
+      Opc = Offset < 0 ? C166::SUB16ri : C166::ADD16ri;
+
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, std::next(II), DL, TII.get(Opc))
+            .addReg(DstReg, RegState::Define | getDeadRegState(IsDead))
+            .addReg(DstReg)
+            .addImm(Size);
     (void)MIB;
     return false;
   }

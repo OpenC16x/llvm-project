@@ -25,8 +25,32 @@
         cmp     r2, r3
 ; CHECK: cmpb rl2, rl3    ; encoding: [0x41,0x46]
         cmpb    rl2, rl3
-; CHECK: cmp r2, #7       ; encoding: [0x46,0xf2,0x07,0x00]
+
+; Every arithmetic instruction has a two byte #data3 form, whose opcode is the
+; register/register one plus 8 and which the assembler prefers wherever the
+; constant fits.  A short constant is zero extended, so that is 0 to 7.
+; CHECK: cmp r2, #7       ; encoding: [0x48,0x27]
         cmp     r2, #7
+; CHECK: cmp r2, #8       ; encoding: [0x46,0xf2,0x08,0x00]
+        cmp     r2, #8
+; CHECK: add r4, #2       ; encoding: [0x08,0x42]
+        add     r4, #2
+; CHECK: sub r0, #2       ; encoding: [0x28,0x02]
+        sub     r0, #2
+; CHECK: addc r2, #1      ; encoding: [0x18,0x21]
+        addc    r2, #1
+; CHECK: subc r2, #1      ; encoding: [0x38,0x21]
+        subc    r2, #1
+; CHECK: and r2, #3       ; encoding: [0x68,0x23]
+        and     r2, #3
+; CHECK: or r2, #3        ; encoding: [0x78,0x23]
+        or      r2, #3
+; CHECK: xor r2, #3       ; encoding: [0x58,0x23]
+        xor     r2, #3
+; CHECK: cmpb rl2, #5     ; encoding: [0x49,0x45]
+        cmpb    rl2, #5
+; CHECK: addb rl2, #5     ; encoding: [0x09,0x45]
+        addb    rl2, #5
 
 ; Unary operations are encoded as "n0".
 ; CHECK: cpl r3           ; encoding: [0x91,0x30]

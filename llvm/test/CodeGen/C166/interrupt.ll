@@ -11,8 +11,8 @@ define void @isr() #0 {
 ; CHECK-NEXT:    sub r0, #2
 ; CHECK-NEXT:    .cfi_def_cfa_offset 2
 ; CHECK-NEXT:    mov [r0], r2 ; 2-byte Folded Spill
-; CHECK-NEXT:    mov r2, #1
-; CHECK-NEXT:    add r2, count
+; CHECK-NEXT:    mov r2, count
+; CHECK-NEXT:    add r2, #1
 ; CHECK-NEXT:    mov count, r2
 ; CHECK-NEXT:    mov r2, [r0] ; 2-byte Folded Reload
 ; CHECK-NEXT:    add r0, #2

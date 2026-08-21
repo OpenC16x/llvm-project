@@ -58,10 +58,18 @@ static void adjustStackPointer(MachineBasicBlock &MBB,
   if (Amount == 0)
     return;
 
-  unsigned Opc = Amount < 0 ? C166::SUB16ri : C166::ADD16ri;
+  int64_t Size = Amount < 0 ? -Amount : Amount;
+
+  // A frame of seven bytes or less fits the two byte #data3 form.
+  unsigned Opc;
+  if (Size < 8)
+    Opc = Amount < 0 ? C166::SUB16ri3 : C166::ADD16ri3;
+  else
+    Opc = Amount < 0 ? C166::SUB16ri : C166::ADD16ri;
+
   BuildMI(MBB, MBBI, DL, TII.get(Opc), C166::R0)
       .addReg(C166::R0)
-      .addImm(Amount < 0 ? -Amount : Amount)
+      .addImm(Size)
       .setMIFlag(Flag);
 }
 

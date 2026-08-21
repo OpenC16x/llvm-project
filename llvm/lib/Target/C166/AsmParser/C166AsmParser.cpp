@@ -103,6 +103,7 @@ public:
     return CE->getValue() >= Low && CE->getValue() <= High;
   }
 
+  bool isImm3() const { return isImmInRange(0, 7, /*AllowSymbol=*/false); }
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
   bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
@@ -342,7 +343,8 @@ static int64_t matchSpecialFunctionRegister(StringRef Name) {
 /// addressable at all - FE00H to FEFEH, where MDL, MDH, CP, SP and the DPPs
 /// live, is not.
 static int64_t matchBitAddressableWord(StringRef Name) {
-  StringRef Number = Name.lower();
+  std::string Lowered = Name.lower();
+  StringRef Number = Lowered;
   if (Number.consume_front("r")) {
     unsigned N;
     if (!Number.getAsInteger(10, N) && N < 16)

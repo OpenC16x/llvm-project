@@ -228,8 +228,17 @@ Short encodings
 ---------------
 
 Several addressing modes exist in both a two byte and a four byte form, and
-the short one is picked wherever it fits, which is worth about eight percent
-of the code the backend emits.
+the short one is picked wherever it fits, which is worth about a tenth of the
+code the backend emits.
+
+Every arithmetic instruction also has a two byte form taking a three bit
+constant, whose opcode is the register/register one plus eight, and that is
+what a loop counter or a pointer step of two turns into.  The places that
+build one of these by hand rather than selecting it - the frame adjustment,
+the frame address expansion in eliminateFrameIndex(), and the compare that
+expandPostRAPseudo() splits out of a fused branch - have to make the same
+choice, or a disassembly stops assembling back to the bytes it came from.
+That is what the soak test catches.
 
 "[Rw]" is a two byte instruction of its own rather than "[Rw + #data16]" with
 nothing added, so the two are separate instructions here and the displacement

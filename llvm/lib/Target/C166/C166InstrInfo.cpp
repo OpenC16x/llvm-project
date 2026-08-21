@@ -134,19 +134,23 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   case C166::BRCC8ri: {
     // Nothing may come between the compare and the jump that reads its flags,
     // which is exactly why the two travelled together until now.
+    // A constant of 0 to 7 fits the two byte form of the compare.
+    const MachineOperand &Rhs = MI.getOperand(2);
+    bool Short = Rhs.isImm() && Rhs.getImm() >= 0 && Rhs.getImm() < 8;
+
     unsigned CmpOpc;
     switch (MI.getOpcode()) {
     case C166::BRCC16rr:
       CmpOpc = C166::CMP16rr;
       break;
     case C166::BRCC16ri:
-      CmpOpc = C166::CMP16ri;
+      CmpOpc = Short ? C166::CMP16ri3 : C166::CMP16ri;
       break;
     case C166::BRCC8rr:
       CmpOpc = C166::CMPB8rr;
       break;
     default:
-      CmpOpc = C166::CMPB8ri;
+      CmpOpc = Short ? C166::CMPB8ri3 : C166::CMPB8ri;
       break;
     }
 
