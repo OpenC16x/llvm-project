@@ -259,6 +259,8 @@ def err_drv_kcfi_arity_unsupported_target : Error<
   "target '%0' is unsupported by -fsanitize-kcfi-arity">;
 def err_drv_no_linker_llvm_support : Error<
   "'%0': unable to pass LLVM bit-code files to linker">;
+def err_drv_no_linker_for_target : Error<
+  "no linker is available for target '%0'">;
 def err_drv_no_ast_support : Error<
   "'%0': unable to use AST files with this tool">;
 def err_drv_no_module_support : Error<

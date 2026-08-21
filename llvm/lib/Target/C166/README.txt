@@ -275,6 +275,40 @@ inside Data16 - which is what makes the matcher rank the short encoding first.
 Only the first entry of SuperClasses counts towards that ranking, so it has to
 be a chain and not a list.
 
+C front end
+-----------
+
+clang knows the c166 triple, so C sources compile without going through a
+separate front end.  int is 16 bits, long is 32, long long is 64, and nothing
+is aligned to more than a word because the bus is a word wide.
+
+The driver's C166 toolchain does two things.  It passes -nostdsysteminc, since
+the build machine's /usr/include describes the build machine and not a C166
+part, which is what lets clang's own stdint.h and friends be the ones that
+answer an #include.  And it refuses to link: the relocations here are LLVM's
+own invention and nothing implements them, so handing the objects to the build
+machine's ld would only produce nonsense.  Compile with -c and link with
+whatever the part came with.
+
+There is no frame pointer by default.  Sixteen registers are not enough to
+give one up, and nothing walks the stack anyway.
+
+Three things the backend reads are spelled in C as attributes:
+
+  __attribute__((interrupt))  the "interrupt" function attribute
+  __attribute__((far))        the "far" function attribute
+  __far, i.e. address space 1 far data
+
+"far" is applied to declarations as well as definitions, because it is what
+tells a caller in another translation unit to use CALLS rather than CALL.
+Its spelling is shared with MIPS's long_call attribute, which means the same
+thing, so the two share a parse kind and therefore a spelling list; long_call
+is accepted here as well.
+
+A near pointer converts to a far one without a cast, since the near space is a
+page of the far one.  The reverse needs an explicit cast, because the top
+eight bits have nowhere to go.
+
 Encodings and the MC layer
 --------------------------
 
@@ -334,6 +368,10 @@ Known limitations / things to do
   be provably unchanged in between, and through a symbol the two immediates
   are different relocations - seg(g) and seg(g+2) are the same segment in
   practice but nothing says so until the linker has placed g.
+* A widening multiply does the multiply twice.  MUL leaves both halves of the
+  product in MDL and MDH, but mul and mulhs are separate nodes here and each
+  expands to a MUL and one move, so "(long)a * b" issues two.  Custom lowering
+  SMUL_LOHI and UMUL_LOHI would let one MUL feed both halves.
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.

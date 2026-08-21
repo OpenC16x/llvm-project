@@ -3303,6 +3303,52 @@ does not insert a SEI instruction.
   }];
 }
 
+def C166InterruptDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "interrupt (C166)";
+  let Content = [{
+Clang supports the GNU style ``__attribute__((interrupt))`` attribute on C166
+targets. This attribute may be attached to a function definition and instructs
+the backend to generate an entry and exit sequence suitable for use directly as
+an interrupt service routine: every register the handler touches is saved and
+restored, and the function returns with ``RETI`` instead of ``RET``.
+
+A C166 interrupt handler must take no parameters and return ``void``. Because
+the handler runs on top of arbitrary interrupted code, it may not be called
+directly from C, and it is never inlined.
+
+Placing the handler in the vector table is left to the linker script or to a
+hand written vector, exactly as it is for the vendor toolchains.
+  }];
+}
+
+def C166FarDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "far (C166)";
+  let Content = [{
+Clang supports the GNU style ``__attribute__((far))`` attribute on C166 targets.
+A function carrying this attribute is placed in the ``.fartext`` section, is
+called with ``CALLS`` and returns with ``RETS``, so it can live in a segment
+other than the one the caller is in. The extra stack word and the wider call
+sequence are the price of being reachable across the full 24 bit address space.
+
+The attribute is honoured on declarations as well as definitions: it is what
+tells a caller in another translation unit which call sequence to use. It is
+also spelled ``__attribute__((long_call))``, which is the MIPS name for the
+same idea.
+
+Far *data* is not spelled with this attribute. Use the address space qualifier
+instead, for which ``__far`` is predefined as a shorthand::
+
+  __far int x;              // in .farbss, reached through a 32 bit pointer
+  int read(__far int *p) { return *p; }
+
+A near pointer converts to a far one without a cast, since the near space is a
+page of the far one; the reverse needs an explicit cast, because the top eight
+bits have nowhere to go.
+  }];
+}
+
 def AVRSignalDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
