@@ -153,3 +153,18 @@
 0x2d 0x04
 # CHECK: jmpr cc_ULE, -128
 0xfd 0x80
+
+# An address where one of the special function registers is mapped is named
+# rather than spelled out, and the assembler takes the name back as the same
+# address, so this still reassembles to the bytes it came from.
+# CHECK: mov r2, mdl
+0xf2 0xf2 0x0e 0xfe
+# CHECK: mov mdh, r3
+0xf6 0xf3 0x0c 0xfe
+# CHECK: mov r1, stkov
+0xf2 0xf1 0x14 0xfe
+# CHECK: mov psw, r5
+0xf6 0xf5 0x10 0xff
+# Anything else stays a number.
+# CHECK: mov r4, 4660
+0xf2 0xf4 0x34 0x12

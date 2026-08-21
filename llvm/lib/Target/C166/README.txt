@@ -408,6 +408,12 @@ for the address it is mapped to (MDL is FE0EH, MDH is FE0CH).  The parser
 produces one operand that can be either and lets the matcher decide, since
 which one is meant is a property of the instruction rather than of the name.
 
+Where those addresses are written down is C166MCTargetDesc, so that what the
+assembler accepts and what the disassembler prints back cannot drift apart:
+"mov r2, mdl" disassembles as itself rather than as "mov r2, 65038", and still
+assembles to the bytes it came from.  An address with no register at it stays
+a number.
+
 Known limitations / things to do
 --------------------------------
 
@@ -424,8 +430,6 @@ Known limitations / things to do
   modelled, so "push t0" is not understood and its encoding does not decode.
   The assembler does know the address of a few more, which is enough to name
   them where an address is what is wanted.
-* Outside the "reg" field an SFR is just an address, and the disassembler
-  prints it numerically: "mov r2, mdl" comes back as "mov r2, 65038".
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * A far access always costs an EXTS, even for several accesses in a row to the

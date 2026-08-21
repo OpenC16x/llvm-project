@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "C166InstPrinter.h"
+#include "C166MCTargetDesc.h"
 #include "C166.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
@@ -73,8 +74,15 @@ void C166InstPrinter::printAddr16Operand(const MCInst *MI, unsigned OpNo,
                                          raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isImm()) {
-    // A data address is an unsigned 16 bit quantity.
-    O << (static_cast<uint64_t>(Op.getImm()) & 0xffff);
+    // A data address is an unsigned 16 bit quantity.  Where one of the special
+    // function registers is mapped, name it: the assembler takes the name back
+    // as the same address, so this still reassembles to the bytes it came
+    // from, and "mov r2, mdl" says what it is doing.
+    uint64_t Addr = static_cast<uint64_t>(Op.getImm()) & 0xffff;
+    if (StringRef Name = C166::getSFRName(Addr); !Name.empty())
+      O << Name;
+    else
+      O << Addr;
   } else {
     assert(Op.isExpr() && "unknown operand kind in printAddr16Operand");
     MAI.printExpr(O, *Op.getExpr());

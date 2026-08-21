@@ -137,19 +137,24 @@
 ; CHECK: mov r2, #16      ; encoding: [0xe6,0xf2,0x10,0x00]
         mov     r2, #16
 
-; An SFR name stands for its address, so this assembles as MOV reg, mem and
-; prints back with the address spelled out.  MDL is at FE0EH and MDH at FE0CH.
-; CHECK: mov r2, 65038    ; encoding: [0xf2,0xf2,0x0e,0xfe]
+; An SFR name stands for its address, so this assembles as MOV reg, mem, and
+; prints back by name because the two share one table.  MDL is at FE0EH and
+; MDH at FE0CH.
+; CHECK: mov r2, mdl      ; encoding: [0xf2,0xf2,0x0e,0xfe]
         mov     r2, mdl
-; CHECK: mov 65036, r3    ; encoding: [0xf6,0xf3,0x0c,0xfe]
+; CHECK: mov mdh, r3      ; encoding: [0xf6,0xf3,0x0c,0xfe]
         mov     mdh, r3
 
 ; The stack bounds registers, which a startup sequence has to write: STKOV is
 ; at FE14H and STKUN at FE16H.
-; CHECK: mov 65044, r1    ; encoding: [0xf6,0xf1,0x14,0xfe]
+; CHECK: mov stkov, r1    ; encoding: [0xf6,0xf1,0x14,0xfe]
         mov     stkov, r1
-; CHECK: mov 65046, r1    ; encoding: [0xf6,0xf1,0x16,0xfe]
+; CHECK: mov stkun, r1    ; encoding: [0xf6,0xf1,0x16,0xfe]
         mov     stkun, r1
+
+; An address that is not one of them is still a number.
+; CHECK: mov r2, 4660     ; encoding: [0xf2,0xf2,0x34,0x12]
+        mov     r2, 0x1234
 
 ; JMPR is two bytes with the condition in the high nibble of the opcode: the
 ; whole xD row of the opcode map is JMPR, one entry per condition.  The
@@ -275,8 +280,9 @@ bit_target:
 ; CHECK: push sp          ; encoding: [0xec,0x09]
         push    sp
 
-; The same name still stands for the register's address everywhere else.
-; CHECK: mov r2, 65038    ; encoding: [0xf2,0xf2,0x0e,0xfe]
+; The same name still stands for the register's address everywhere else, and
+; the two encode differently: as a "reg" field above, as an address here.
+; CHECK: mov r2, mdl      ; encoding: [0xf2,0xf2,0x0e,0xfe]
         mov     r2, mdl
 
 ; The protected instructions repeat their opcode in the second word.

@@ -37,10 +37,23 @@ define i16 @load_element() {
   ret i16 %v
 }
 
+; A fixed address is printed as the number it is.  FFC0H is port 2, which is
+; not one of the registers the backend models.
 define i16 @load_from_fixed_address() {
 ; CHECK-LABEL: load_from_fixed_address:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r2, 65024
+; CHECK-NEXT:    mov r2, 65472
+; CHECK-NEXT:    ret
+  %v = load volatile i16, ptr inttoptr (i16 -64 to ptr)
+  ret i16 %v
+}
+
+; One that is, though, is named: the assembler reads the name back as the same
+; address, so this still assembles to what it came from.  FE00H is DPP0.
+define i16 @load_from_sfr() {
+; CHECK-LABEL: load_from_sfr:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    mov r2, dpp0
 ; CHECK-NEXT:    ret
   %v = load volatile i16, ptr inttoptr (i16 -512 to ptr)
   ret i16 %v
