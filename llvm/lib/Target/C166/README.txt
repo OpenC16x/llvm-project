@@ -263,6 +263,12 @@ Known limitations / things to do
 * PUSH and POP are the only instructions whose 8 bit "reg" field reaches the
   special function registers.  Everything else that could put an SFR there -
   "ADD MDL, #1" and friends - can be neither assembled nor disassembled.
+  Widening them means the operand class has to hold both kinds of register,
+  which PUSH and POP can do because they have no pattern to satisfy: a class
+  covering GPRs and SFRs cannot be the result of a codegen pattern without
+  becoming what the register allocator constrains those results to.  Word and
+  byte forms would need one such class each, since "reg" F0H + n names a word
+  register in a word instruction and a byte register in a byte one.
 * Only the handful of special function registers the backend has a use for are
   modelled, so "push t0" is not understood and its encoding does not decode.
   The assembler does know the address of a few more, which is enough to name
