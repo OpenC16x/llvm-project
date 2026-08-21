@@ -9,7 +9,7 @@ define i16 @dense(i16 %x) {
 ; CHECK-LABEL: dense:
 ; CHECK:       ; %bb.0: ; %entry
 ; CHECK-NEXT:    cmp r2, #5
-; CHECK-NEXT:    jmpa cc_UGT, .LBB0_8
+; CHECK-NEXT:    jmpr cc_UGT, .LBB0_8
 ; CHECK-NEXT:  ; %bb.1: ; %entry
 ; CHECK-NEXT:    shl r2, #1
 ; CHECK-NEXT:    mov r2, [r2+#.LJTI0_0]
@@ -59,13 +59,13 @@ define i16 @sparse(i16 %x) {
 ; CHECK-LABEL: sparse:
 ; CHECK:       ; %bb.0: ; %entry
 ; CHECK-NEXT:    cmp r2, #30000
-; CHECK-NEXT:    jmpa cc_EQ, .LBB1_5
+; CHECK-NEXT:    jmpr cc_EQ, .LBB1_5
 ; CHECK-NEXT:  ; %bb.1: ; %entry
 ; CHECK-NEXT:    cmp r2, #1000
-; CHECK-NEXT:    jmpa cc_EQ, .LBB1_4
+; CHECK-NEXT:    jmpr cc_EQ, .LBB1_4
 ; CHECK-NEXT:  ; %bb.2: ; %entry
 ; CHECK-NEXT:    cmp r2, #1
-; CHECK-NEXT:    jmpa cc_NE, .LBB1_6
+; CHECK-NEXT:    jmpr cc_NE, .LBB1_6
 ; CHECK-NEXT:  ; %bb.3: ; %a
 ; CHECK-NEXT:    mov r2, #1
 ; CHECK-NEXT:    ret

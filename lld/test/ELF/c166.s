@@ -17,10 +17,6 @@ _start:
 ;; (0x8010 - 0x8006) / 2 == 5
   jb r5.3, target
 
-;; R_C166_PCREL8W2: the same, in a two byte instruction, so it is one byte
-;; short of the end rather than two.  (0x8010 - 0x8008) / 2 == 4
-  jmpr cc_UC, target
-
 ;; R_C166_ABS16
   mov r2, near
 
@@ -39,12 +35,11 @@ _start:
 ; TEXT-LABEL: <_start>:
 ; TEXT-NEXT: 8000: cc 00        nop
 ; TEXT-NEXT: 8002: 8a f5 05 30  jb   r5.3, 0x8010
-; TEXT-NEXT: 8006: 0d 04        jmpr cc_UC, 0x8010
-; TEXT-NEXT: 8008: f2 f2 42 42  mov  r2, 16962
-; TEXT-NEXT: 800c: d7 00 12 00  exts #18, #1
-; TEXT-NEXT: 8010: e6 f3 56 34  mov  r3, #13398
-; TEXT-NEXT: 8014: d7 40 48 00  extp #72, #1
-; TEXT-NEXT: 8018: e6 f4 56 34  mov  r4, #13398
+; TEXT-NEXT: 8006: f2 f2 42 42  mov  r2, 16962
+; TEXT-NEXT: 800a: d7 00 12 00  exts #18, #1
+; TEXT-NEXT: 800e: e6 f3 56 34  mov  r3, #13398
+; TEXT-NEXT: 8012: d7 40 48 00  extp #72, #1
+; TEXT-NEXT: 8016: e6 f4 56 34  mov  r4, #13398
 
   .data
 ;; R_C166_ABS8

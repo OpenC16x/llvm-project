@@ -56,7 +56,6 @@ RelExpr C166::getRelExpr(RelType type, const Symbol &s,
   case R_C166_PCREL16:
   case R_C166_PCREL32:
   case R_C166_PCREL8W:
-  case R_C166_PCREL8W2:
     return R_PC;
   case R_C166_NONE:
     return R_NONE;
@@ -85,23 +84,12 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_C166_ABS64:
     write64le(loc, val);
     break;
-  case R_C166_PCREL8W:
-  case R_C166_PCREL8W2: {
-    // The field counts words from the instruction after the branch, so val is
-    // short of the distance the hardware measures by however far the byte is
-    // from the end of the instruction: two bytes in a four byte branch and one
-    // in a two byte one.
-    int64_t toEnd = rel.type == R_C166_PCREL8W ? 2 : 1;
-    int64_t distance = static_cast<int64_t>(val) - toEnd;
-    if (distance & 1) {
-      // checkAlignment() would print this as an unsigned quantity, and a
-      // backward branch is negative, so say it directly instead.
-      Err(ctx) << getErrorLoc(ctx, loc) << "improper alignment for relocation "
-               << rel.type << ": " << distance
-               << " is not a whole number of words";
-      break;
-    }
-    int64_t offset = distance >> 1;
+  case R_C166_PCREL8W: {
+    // The field counts words from the instruction after the branch, and sits
+    // in the branch's second word, so val is two bytes short of the distance
+    // the hardware measures.
+    checkAlignment(ctx, loc, val, 2, rel);
+    int64_t offset = (static_cast<int64_t>(val) >> 1) - 1;
     checkInt(ctx, loc, offset, 8, rel);
     *loc = offset & 0xff;
     break;

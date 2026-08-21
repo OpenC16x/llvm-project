@@ -1107,8 +1107,8 @@ def RETI : InstS<0xFB, (outs), (ins), "reti", [(C166retiglue)]> {
 
 // A two byte relative jump.  The low nibble of the opcode is fixed and the
 // high one is the condition.
-class JumpRel<dag ins, string asmstr>
-    : C166Inst<(outs), ins, 2, asmstr, []> {
+class JumpRel<dag ins, string asmstr, list<dag> pattern = []>
+    : C166Inst<(outs), ins, 2, asmstr, pattern> {
   bits<8> dst;
   let Inst{3-0} = 0b1101;
   let Inst{15-8} = dst;
@@ -1121,7 +1121,7 @@ let isBranch = 1, isTerminator = 1 in {
   // both print the same text, so nothing is lost.
   let isBarrier = 1, isCodeGenOnly = 1 in
   def JMPA : InstL<0xEA, (outs), (ins brtarget:$dst), "jmpa\tcc_UC, $dst",
-                   [(br bb:$dst)]> {
+                   []> {
     bits<16> dst;
     let Inst{15-12} = 0b0000;   // cc_UC
     let Inst{11-8} = 0;
@@ -1144,13 +1144,12 @@ let isBranch = 1, isTerminator = 1 in {
   // the opcode - the whole xD row of the opcode map is JMPR, one entry per
   // condition, in the same order as the cc encoding - and the displacement
   // counts words from the instruction after it, so it reaches 127 words either
-  // way.  Nothing selects it: choosing between it and JMPA needs branch
-  // relaxation, since a target out of range has to fall back to the four byte
-  // form.  It is here so that hand written assembly can use it, and so that a
-  // disassembly of the padding LLD writes between functions - "jmpr cc_UC, -1",
-  // which branches to itself - reads as what it is.
+  // way.  This is what a branch is selected as; whether the target is close
+  // enough is not known until the layout is, so C166AsmBackend grows the ones
+  // that are not into JMPA.
   let isBarrier = 1, isCodeGenOnly = 1 in
-  def JMPR : JumpRel<(ins reltarget8:$dst), "jmpr\tcc_UC, $dst"> {
+  def JMPR : JumpRel<(ins reltarget8:$dst), "jmpr\tcc_UC, $dst",
+                     [(br bb:$dst)]> {
     let Inst{7-4} = 0b0000;   // cc_UC
   }
 

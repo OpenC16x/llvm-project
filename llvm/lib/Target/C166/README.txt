@@ -233,10 +233,15 @@ swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
 
 The bit test branches JB, JNB, JBC and JNBS take a target that is a signed 8
 bit count of words from the instruction after them, which reaches 127 words
-either way.  JMPR counts the same way.  There are two fixup kinds and two
-relocations for it rather than one, because how far the displacement byte is
-from the end of the instruction is what has to be added back: two bytes in the
-four byte bit test branches, one in the two byte JMPR.  A disassembly names the target address, but only
+either way.  JMPR counts the same way, and there are two fixup kinds because
+how far the displacement byte is from the end of the instruction differs: two
+bytes in the four byte bit test branches, one in the two byte JMPR.
+
+There is only one relocation for the two, though, because only one of them can
+need it.  A bit test branch has no long form, so a target the assembler cannot
+place has to become R_C166_PCREL8W and let the linker check the range.  JMPR
+does have one, so the same target grows it into a JMPA instead and no
+relocation is left behind.  A disassembly names the target address, but only
 llvm-objdump asks for that; left to itself the printer gives the distance,
 which is what can be handed back to the assembler.
 
@@ -250,6 +255,13 @@ Short encodings
 Several addressing modes exist in both a two byte and a four byte form, and
 the short one is picked wherever it fits, which is worth about a tenth of the
 code the backend emits.
+
+A branch is selected as the two byte JMPR.  Whether the target is within the
+127 words it reaches is not known until the layout is, so C166AsmBackend grows
+the ones that are not into the four byte JMPA; the two take their operands in
+the same order, so that is only a change of opcode.  A displacement written as
+a number rather than a label is left alone, since it is a distance and the
+long form takes an address.
 
 Every arithmetic instruction also has a two byte form taking a three bit
 constant, whose opcode is the register/register one plus eight, and that is
@@ -426,11 +438,6 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * No support for the XC16x MAC unit.
-* JMPR is assembled, disassembled and simulated, but nothing selects it, so a
-  branch is still always the four byte JMPA even where the two byte form would
-  reach.  Choosing between them needs branch relaxation: a target more than
-  127 words away has to fall back to the long form, and whether it is that far
-  is not known until the layout is.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

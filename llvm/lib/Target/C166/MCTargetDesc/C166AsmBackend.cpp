@@ -62,7 +62,66 @@ public:
 
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override;
+
+  // JMPR reaches 127 words either way, and whether the target is that close
+  // is not known until the layout is.  So the short form is what gets emitted
+  // and the assembler grows it into the long one where it has to.
+  bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand> Operands,
+                         const MCSubtargetInfo &STI) const override;
+  bool fixupNeedsRelaxationAdvanced(const MCFragment &, const MCFixup &,
+                                    const MCValue &, uint64_t Value,
+                                    bool Resolved) const override;
+  void relaxInstruction(MCInst &Inst,
+                        const MCSubtargetInfo &STI) const override;
 };
+
+/// The long form of a relative jump, or 0 if there is not one.
+static unsigned getRelaxedOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case C166::JMPR:
+    return C166::JMPA;
+  case C166::JMPRcc:
+    return C166::JMPAcc;
+  default:
+    return 0;
+  }
+}
+
+bool C166AsmBackend::mayNeedRelaxation(unsigned Opcode,
+                                       ArrayRef<MCOperand> Operands,
+                                       const MCSubtargetInfo &STI) const {
+  if (!getRelaxedOpcode(Opcode))
+    return false;
+  // A displacement written as a number is a distance, and the long form takes
+  // an address, so there would be nothing to turn it into.  Only a reference
+  // to a label can be relaxed.
+  return !Operands.empty() && Operands[0].isExpr();
+}
+
+bool C166AsmBackend::fixupNeedsRelaxationAdvanced(const MCFragment &,
+                                                  const MCFixup &Fixup,
+                                                  const MCValue &,
+                                                  uint64_t Value,
+                                                  bool Resolved) const {
+  if (Fixup.getKind() != C166::fixup_c166_rel8w_short)
+    return false;
+  // Somewhere else entirely, so the distance is whatever the linker makes it.
+  if (!Resolved)
+    return true;
+  int64_t Distance = static_cast<int64_t>(Value) - 1;
+  int64_t Offset = Distance >> 1;
+  return (Distance & 1) || Offset < -128 || Offset > 127;
+}
+
+void C166AsmBackend::relaxInstruction(MCInst &Inst,
+                                      const MCSubtargetInfo &STI) const {
+  // The two forms take their operands in the same order, so this is only a
+  // change of opcode: a relative target becomes an absolute one, and the code
+  // emitter writes the other relocation for it.
+  unsigned Relaxed = getRelaxedOpcode(Inst.getOpcode());
+  assert(Relaxed && "relaxInstruction() on something with no long form");
+  Inst.setOpcode(Relaxed);
+}
 
 void C166AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
                                 const MCValue &Target, uint8_t *Data,
