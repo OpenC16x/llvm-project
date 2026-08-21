@@ -1405,6 +1405,13 @@ add_subdirectory(lib)
 
 if( LLVM_INCLUDE_UTILS )
   add_subdirectory(utils/FileCheck)
+  # An instruction set simulator for the C166, so that the backend's output can
+  # be executed rather than only inspected.  Only useful when that target is
+  # built, and it needs its disassembler to decode with.
+  if("C166" IN_LIST LLVM_TARGETS_TO_BUILD OR
+     "C166" IN_LIST LLVM_EXPERIMENTAL_TARGETS_TO_BUILD)
+    add_subdirectory(utils/C166Sim)
+  endif()
   add_subdirectory(utils/PerfectShuffle)
   add_subdirectory(utils/count)
   add_subdirectory(utils/not)

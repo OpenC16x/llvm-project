@@ -333,6 +333,31 @@ a README of its own.  None of it is built by the LLVM build - it is code for
 the part, not for the machine doing the building - so it is there to be copied
 into a project and adjusted to the board.
 
+Running it
+----------
+
+llvm/utils/C166Sim is an instruction set simulator for this target, so the
+backend's output can be executed and not only read.  It decodes with this
+target's own MCDisassembler, which means it cannot decode an instruction
+differently from the way the backend encodes it, and an instruction it does
+not know stops the run and says so rather than doing something quietly wrong.
+
+Its differential tests are the useful part: each program is compiled twice,
+once for the C166 and once for the machine running the test, and the two
+outputs have to match.  That covers the backend, the compiler-rt builtins, the
+linker, crt0 and the simulator in one go.  Between them the two programs there
+cover every comparison over every pair of a set of awkward values, word and
+byte arithmetic including the overflow edges, shifts of every count, 32 and 64
+bit arithmetic and the libcalls under it, recursion, structures passed and
+returned by value, jump tables, varargs, the block functions including
+overlapping moves, and far objects.
+
+That is also what established the condition codes.  Table 5 of the instruction
+set manual, where the boolean form of each one is written down, did not survive
+the extraction this backend was written against; the sixteen conditions were
+taken as the conventional readings of their names and then checked by running
+them.
+
 Encodings and the MC layer
 --------------------------
 
@@ -405,6 +430,7 @@ Known limitations / things to do
   branch relaxation, since it only reaches 127 words; the fixup kind and the
   relocation for a relative branch already exist, because the bit test
   branches use them.
-* Nothing has been executed.  There is no free C166 simulator, so what the
-  tests check is that the right bytes come out, not that a part does the right
-  thing with them.
+* Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
+  out, and its differential tests agree with a host compiler over the whole
+  language, but a simulator agreeing with itself about the manual is not the
+  same as a part agreeing with both.
