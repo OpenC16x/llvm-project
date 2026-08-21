@@ -52,6 +52,8 @@ protected:
     switch (Fixup.getKind()) {
     case C166::fixup_c166_rel8w:
       return ELF::R_C166_PCREL8W;
+    case C166::fixup_c166_rel8w_short:
+      return ELF::R_C166_PCREL8W2;
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
     case FK_Data_2:

@@ -15,9 +15,13 @@ _start:
   jb r5.3, toofar
 # CHECK: error: {{.*}} relocation R_C166_PCREL8W out of range: 382 is not in [-128, 127]; references 'toofar'
 
+## The two byte form reaches the same distance and is checked the same way.
+  jmpr cc_UC, toofar
+# CHECK: error: {{.*}} relocation R_C166_PCREL8W2 out of range: 381 is not in [-128, 127]; references 'toofar'
+
 ## It counts words, so an odd target is not expressible at all.
   jb r5.3, odd
-# CHECK: error: {{.*}} improper alignment for relocation R_C166_PCREL8W: 0x3 is not aligned to 2 bytes
+# CHECK: error: {{.*}} improper alignment for relocation R_C166_PCREL8W: -1 is not a whole number of words
 
 ## A near address is one word.
   mov r2, big

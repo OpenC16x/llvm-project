@@ -32,8 +32,11 @@ ELF_RELOC(R_C166_PCREL16,   6)
 ELF_RELOC(R_C166_PCREL32,   7)
 
 // A relative branch displacement: (S + A - P) / 2 truncated to 8 bits, where
-// P is the address of the instruction following the one being relocated.
+// P is the address of the instruction following the one being relocated.  The
+// two differ only in how far that is from the byte being written: a four byte
+// instruction holds it in the third byte and a two byte one in the second.
 ELF_RELOC(R_C166_PCREL8W,  12)
+ELF_RELOC(R_C166_PCREL8W2, 13)
 ELF_RELOC(R_C166_SEG8,      8)
 ELF_RELOC(R_C166_SOF16,     9)
 ELF_RELOC(R_C166_PAG10,    10)

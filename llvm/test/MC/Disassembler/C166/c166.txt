@@ -143,3 +143,13 @@
 0x98 0x23
 # CHECK: movb rl2, [r3+]
 0x99 0x43
+
+# The two byte relative jump.  The condition is the high nibble of the opcode
+# and the displacement counts words from the instruction after it, so -1
+# branches to the instruction itself; that is what LLD writes as padding.
+# CHECK: jmpr cc_UC, -1
+0x0d 0xff
+# CHECK: jmpr cc_EQ, 4
+0x2d 0x04
+# CHECK: jmpr cc_ULE, -128
+0xfd 0x80

@@ -151,6 +151,18 @@
 ; CHECK: mov 65046, r1    ; encoding: [0xf6,0xf1,0x16,0xfe]
         mov     stkun, r1
 
+; JMPR is two bytes with the condition in the high nibble of the opcode: the
+; whole xD row of the opcode map is JMPR, one entry per condition.  The
+; displacement counts words from the instruction after it.
+; CHECK: jmpr cc_UC, -1   ; encoding: [0x0d,0xff]
+        jmpr    cc_UC, -1
+; CHECK: jmpr cc_EQ, 4    ; encoding: [0x2d,0x04]
+        jmpr    cc_EQ, 4
+; CHECK: jmpr cc_NE, -8   ; encoding: [0x3d,0xf8]
+        jmpr    cc_NE, -8
+; CHECK: jmpr cc_ULE, 127 ; encoding: [0xfd,0x7f]
+        jmpr    cc_ULE, 127
+
 ; Control flow.
 ; CHECK: ret              ; encoding: [0xcb,0x00]
         ret

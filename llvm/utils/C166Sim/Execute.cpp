@@ -48,44 +48,47 @@ namespace {
 /// in C166InstrInfo.td.
 enum class Op {
   Unknown,
-#define OPS(X)                                                                          \
-  X(ADD16rr)                                                                            \
-  X(ADD16ri) X(ADD16ri3) X(ADD16ra) X(ADDB8rr) X(ADDB8ri) X(ADDB8ri3) X(                \
-      ADDB8ra) X(ADDC16rr) X(ADDC16ri) X(ADDC16ri3) X(ADDC16ra) X(SUB16rr)              \
-      X(SUB16ri) X(SUB16ri3) X(SUB16ra) X(SUBB8rr) X(SUBB8ri) X(SUBB8ri3) X(            \
-          SUBB8ra) X(SUBC16rr) X(SUBC16ri) X(SUBC16ri3) X(SUBC16ra) X(AND16rr)          \
-          X(AND16ri) X(AND16ri3) X(AND16ra) X(ANDB8rr) X(ANDB8ri) X(ANDB8ri3) X(        \
-              ANDB8ra) X(OR16rr) X(OR16ri) X(OR16ri3) X(OR16ra) X(ORB8rr)               \
-              X(ORB8ri) X(ORB8ri3) X(ORB8ra) X(XOR16rr) X(XOR16ri) X(XOR16ri3) X(       \
-                  XOR16ra) X(XORB8rr) X(XORB8ri) X(XORB8ri3) X(XORB8ra)                 \
-                  X(CMP16rr) X(CMP16ri) X(CMP16ri3) X(CMPB8rr) X(CMPB8ri) X(            \
-                      CMPB8ri3) X(SHL16rr) X(SHL16ri) X(SHR16rr) X(SHR16ri)             \
-                      X(ASHR16rr) X(ASHR16ri) X(ROL16rr) X(ROL16ri) X(ROR16rr) X(       \
-                          ROR16ri) X(CPL16r) X(CPLB8r) X(NEG16r) X(NEGB8r)              \
-                          X(MULrr) X(MULUrr) X(DIVr) X(DIVUr) X(MOVfromMDL) X(          \
-                              MOVfromMDH) X(MOVtoMDL) X(MOVtoMDH) X(MOV16rr)            \
-                              X(MOV16ri) X(MOV16ri4) X(MOV16ra) X(MOV16ar) X(           \
-                                  MOV16rm) X(MOV16mr) X(MOV16rp) X(MOV16pr) X(MOV16rpi) \
-                                  X(MOVB8rr) X(MOVB8ri) X(MOVB8ri4) X(                  \
-                                      MOVB8ra) X(MOVB8ar) X(MOVB8rm) X(MOVB8mr)         \
-                                      X(MOVB8rp) X(MOVB8pr) X(MOVB8rpi) X(MOVBS16r8) X( \
-                                          MOVBZ16r8) X(JMPA) X(JMPAcc) X(JMPI) X(JMPS)  \
-                                          X(CALLA) X(CALLI) X(CALLS) X(                 \
-                                              RET) X(RETI) X(RETS) X(PUSH) X(POP)       \
-                                              X(JB) X(JNB) X(                           \
-                                                  JBC) X(JNBS) X(BSET) X(BCLR) X(BAND)  \
-                                                  X(BOR) X(BXOR) X(BMOV) X(             \
-                                                      BMOVN) X(BCMP) X(BFLDL)           \
-                                                      X(BFLDH) X(EXTSi) X(EXTSr) X(     \
-                                                          EXTSRi) X(EXTSRr) X(EXTPi)    \
-                                                          X(EXTPr) X(EXTPRi) X(         \
-                                                              EXTPRr) X(EXTR)           \
-                                                              X(ATOMIC) X(NOP) X(       \
-                                                                  DISWDT) X(EINIT)      \
-                                                                  X(SRVWDT) X(          \
-                                                                      SRST)             \
-                                                                      X(IDLE)           \
-                                                                          X(PWRDN)
+#define OPS(X)                                                                           \
+  X(ADD16rr)                                                                             \
+  X(ADD16ri)                                                                             \
+  X(ADD16ri3) X(ADD16ra) X(ADDB8rr) X(ADDB8ri) X(ADDB8ri3) X(ADDB8ra) X(                 \
+      ADDC16rr) X(ADDC16ri) X(ADDC16ri3) X(ADDC16ra) X(SUB16rr) X(SUB16ri)               \
+      X(SUB16ri3) X(SUB16ra) X(SUBB8rr) X(SUBB8ri) X(SUBB8ri3) X(SUBB8ra) X(             \
+          SUBC16rr) X(SUBC16ri) X(SUBC16ri3) X(SUBC16ra) X(AND16rr) X(AND16ri)           \
+          X(AND16ri3) X(AND16ra) X(ANDB8rr) X(ANDB8ri) X(ANDB8ri3) X(ANDB8ra) X(         \
+              OR16rr) X(OR16ri) X(OR16ri3) X(OR16ra) X(ORB8rr) X(ORB8ri)                 \
+              X(ORB8ri3) X(ORB8ra) X(XOR16rr) X(XOR16ri) X(XOR16ri3) X(                  \
+                  XOR16ra) X(XORB8rr) X(XORB8ri) X(XORB8ri3) X(XORB8ra)                  \
+                  X(CMP16rr) X(CMP16ri) X(CMP16ri3) X(CMPB8rr) X(CMPB8ri) X(             \
+                      CMPB8ri3) X(SHL16rr) X(SHL16ri) X(SHR16rr) X(SHR16ri)              \
+                      X(ASHR16rr) X(ASHR16ri) X(ROL16rr) X(ROL16ri) X(ROR16rr) X(        \
+                          ROR16ri) X(CPL16r) X(CPLB8r) X(NEG16r) X(NEGB8r)               \
+                          X(MULrr) X(MULUrr) X(DIVr) X(DIVUr) X(MOVfromMDL) X(           \
+                              MOVfromMDH) X(MOVtoMDL) X(MOVtoMDH) X(MOV16rr)             \
+                              X(MOV16ri) X(MOV16ri4) X(MOV16ra) X(MOV16ar) X(            \
+                                  MOV16rm) X(MOV16mr) X(MOV16rp) X(MOV16pr)              \
+                                  X(MOV16rpi) X(MOVB8rr) X(MOVB8ri) X(                   \
+                                      MOVB8ri4) X(MOVB8ra) X(MOVB8ar) X(MOVB8rm)         \
+                                      X(MOVB8mr) X(MOVB8rp) X(MOVB8pr) X(                \
+                                          MOVB8rpi) X(MOVBS16r8) X(MOVBZ16r8)            \
+                                          X(JMPA) X(JMPAcc) X(JMPR) X(                   \
+                                              JMPRcc) X(JMPI) X(JMPS) X(CALLA)           \
+                                              X(CALLI) X(CALLS) X(RET) X(                \
+                                                  RETI) X(RETS) X(PUSH) X(POP)           \
+                                                  X(JB) X(JNB) X(JBC) X(JNBS) X(         \
+                                                      BSET) X(BCLR) X(BAND)              \
+                                                      X(BOR) X(BXOR) X(BMOV) X(          \
+                                                          BMOVN) X(BCMP) X(BFLDL)        \
+                                                          X(BFLDH) X(EXTSi) X(EXTSr) X(  \
+                                                              EXTSRi) X(EXTSRr) X(EXTPi) \
+                                                              X(EXTPr) X(EXTPRi) X(      \
+                                                                  EXTPRr) X(EXTR)        \
+                                                                  X(ATOMIC) X(NOP) X(    \
+                                                                      DISWDT) X(EINIT)   \
+                                                                      X(SRVWDT) X(       \
+                                                                          SRST)          \
+                                                                          X(IDLE)        \
+                                                                              X(PWRDN)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -944,6 +947,16 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     if (E.testCond(Imm(1)))
       M.IP = uint16_t(Imm(0));
     break;
+  case Op::JMPR:
+  case Op::JMPRcc: {
+    // The displacement counts words from the instruction after this one, which
+    // is where IP already is.  JMPRcc lists its target before its condition,
+    // the same way JMPAcc does.
+    int8_t Rel = int8_t(Imm(0));
+    if (O == Op::JMPR || E.testCond(Imm(1)))
+      M.IP = uint16_t(M.IP + 2 * Rel);
+    break;
+  }
   case Op::JMPI:
     if (E.testCond(Imm(0)))
       M.IP = W(1);

@@ -207,7 +207,17 @@ def bitaddr : Operand<i16> {
   let ParserMatchClass = BitAddrAsmOperand;
 }
 
-// The target of a relative branch, an 8 bit signed count of words from the
+// The target of a relative branch in a two byte instruction, where the
+// displacement sits one byte in rather than two, so it needs its own encoder
+// and its own fixup.
+def reltarget8 : Operand<OtherVT> {
+  let PrintMethod = "printRelTargetOperand";
+  let EncoderMethod = "getShortRel8OpValue";
+  let ParserMatchClass = AddrAsmOperand;
+  let OperandType = "OPERAND_PCREL";
+}
+
+// The same in a four byte instruction: an 8 bit signed count of words from the
 // instruction that follows.
 def reltarget : Operand<OtherVT> {
   let PrintMethod = "printRelTargetOperand";
@@ -1095,6 +1105,16 @@ def RETI : InstS<0xFB, (outs), (ins), "reti", [(C166retiglue)]> {
 }
 }
 
+// A two byte relative jump.  The low nibble of the opcode is fixed and the
+// high one is the condition.
+class JumpRel<dag ins, string asmstr>
+    : C166Inst<(outs), ins, 2, asmstr, []> {
+  bits<8> dst;
+  let Inst{3-0} = 0b1101;
+  let Inst{15-8} = dst;
+  let Inst{31-16} = 0;
+}
+
 let isBranch = 1, isTerminator = 1 in {
   // A plain jump is JMPAcc with cc_UC hardwired.  It is marked codegen-only so
   // that it does not collide with JMPAcc in the decoder and the asm matcher;
@@ -1118,6 +1138,26 @@ let isBranch = 1, isTerminator = 1 in {
     let Inst{15-12} = cond;
     let Inst{11-8} = 0;
     let Inst{31-16} = dst;
+  }
+
+  // JMPR is the two byte relative jump.  The condition is the high nibble of
+  // the opcode - the whole xD row of the opcode map is JMPR, one entry per
+  // condition, in the same order as the cc encoding - and the displacement
+  // counts words from the instruction after it, so it reaches 127 words either
+  // way.  Nothing selects it: choosing between it and JMPA needs branch
+  // relaxation, since a target out of range has to fall back to the four byte
+  // form.  It is here so that hand written assembly can use it, and so that a
+  // disassembly of the padding LLD writes between functions - "jmpr cc_UC, -1",
+  // which branches to itself - reads as what it is.
+  let isBarrier = 1, isCodeGenOnly = 1 in
+  def JMPR : JumpRel<(ins reltarget8:$dst), "jmpr\tcc_UC, $dst"> {
+    let Inst{7-4} = 0b0000;   // cc_UC
+  }
+
+  let Uses = [PSW] in
+  def JMPRcc : JumpRel<(ins reltarget8:$dst, cc:$cond), "jmpr\t$cond, $dst"> {
+    bits<4> cond;
+    let Inst{7-4} = cond;
   }
 
   // Fused compare-and-branch.  Expanded into a cmp/jmpa pair by

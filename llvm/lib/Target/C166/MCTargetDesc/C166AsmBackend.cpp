@@ -39,8 +39,9 @@ public:
     // This table must be kept in the same order as the enum in
     // C166FixupKinds.h.
     const static MCFixupKindInfo Infos[C166::NumTargetFixupKinds] = {
-        // name                offset bits flags
+        // name                      offset bits flags
         {"fixup_c166_rel8w", 0, 8, 0},
+        {"fixup_c166_rel8w_short", 0, 8, 0},
     };
     static_assert(std::size(Infos) == C166::NumTargetFixupKinds,
                   "Not all fixup kinds added to Infos array");
@@ -75,19 +76,22 @@ void C166AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
   Value = C166::applySpecifier(Target.getSpecifier(), Value);
 
   // A relative branch counts words from the instruction after the one it sits
-  // in, while the fixup was measured to the displacement byte itself, which is
-  // two bytes into the instruction.  Halving turns bytes into words and the
-  // decrement moves the origin on to the next instruction.
-  if (Fixup.getKind() == C166::fixup_c166_rel8w) {
+  // in, while the fixup was measured to the displacement byte itself.  How far
+  // that byte is from the end of the instruction is what the two kinds differ
+  // by: two bytes in a four byte instruction, one in a two byte one.
+  if (Fixup.getKind() == C166::fixup_c166_rel8w ||
+      Fixup.getKind() == C166::fixup_c166_rel8w_short) {
     // When the target is not known yet the relocation above carries the whole
     // distance and the linker does this instead; Value has been zeroed and
     // must stay that way.
     if (!IsResolved)
       return;
-    if (Value & 1)
+    int64_t ToEnd = Fixup.getKind() == C166::fixup_c166_rel8w ? 2 : 1;
+    int64_t Distance = static_cast<int64_t>(Value) - ToEnd;
+    if (Distance & 1)
       getContext().reportError(Fixup.getLoc(),
                                "branch target must be 2-byte aligned");
-    int64_t Offset = (static_cast<int64_t>(Value) >> 1) - 1;
+    int64_t Offset = Distance >> 1;
     if (Offset < -128 || Offset > 127)
       getContext().reportError(Fixup.getLoc(), "branch target out of range");
     Value = static_cast<uint64_t>(Offset) & 0xff;

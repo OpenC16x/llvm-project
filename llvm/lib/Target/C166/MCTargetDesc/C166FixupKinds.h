@@ -18,8 +18,12 @@ namespace C166 {
 // C166AsmBackend::getFixupKindInfo().
 enum Fixups {
   // The relative branch displacement: a signed 8 bit count of words from the
-  // instruction following the one holding it.
+  // instruction following the one holding it.  There are two of these because
+  // the distance from the byte to the end of the instruction differs: the bit
+  // test branches are four bytes with the displacement in the third, and JMPR
+  // is two bytes with it in the second.
   fixup_c166_rel8w = FirstTargetFixupKind,
+  fixup_c166_rel8w_short,
 
   LastTargetFixupKind,
   NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind

@@ -97,6 +97,11 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
 
+  /// The same in a two byte instruction, where it is the second byte.
+  unsigned getShortRel8OpValue(const MCInst &MI, unsigned OpNo,
+                               SmallVectorImpl<MCFixup> &Fixups,
+                               const MCSubtargetInfo &STI) const;
+
   /// A bit address, packed as (bitpos << 8) | bitoff so that one value can
   /// feed both fields of the instruction.
   unsigned getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
@@ -274,6 +279,21 @@ unsigned C166MCCodeEmitter::getRel8OpValue(const MCInst &MI, unsigned OpNo,
   // the distance to it into a word count from the instruction that follows.
   Fixups.push_back(MCFixup::create(SecondWordOffset, MO.getExpr(),
                                    C166::fixup_c166_rel8w, /*PCRel=*/true));
+  return 0;
+}
+
+unsigned
+C166MCCodeEmitter::getShortRel8OpValue(const MCInst &MI, unsigned OpNo,
+                                       SmallVectorImpl<MCFixup> &Fixups,
+                                       const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm())
+    return static_cast<unsigned>(MO.getImm()) & 0xff;
+
+  // JMPR is two bytes, so its displacement byte is the second one.
+  Fixups.push_back(MCFixup::create(1, MO.getExpr(),
+                                   C166::fixup_c166_rel8w_short,
+                                   /*PCRel=*/true));
   return 0;
 }
 

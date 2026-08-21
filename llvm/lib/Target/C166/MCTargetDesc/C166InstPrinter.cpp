@@ -100,15 +100,18 @@ void C166InstPrinter::printRelTargetOperand(const MCInst *MI, uint64_t Address,
     return;
   }
 
-  // The displacement counts words from the instruction after this one, which
-  // is four bytes on: every relative branch here is a long one.  Naming the
-  // target instead is what a disassembly wants, but only the distance can be
-  // fed back to the assembler, so it stays the default.
+  // The displacement counts words from the instruction after this one, so
+  // naming the target means knowing how long this one is: the bit test
+  // branches are four bytes and JMPR is two.  Naming it is what a disassembly
+  // wants, but only the distance can be fed back to the assembler, so the
+  // distance stays the default.
   int64_t Words = SignExtend64<8>(Op.getImm());
-  if (PrintBranchImmAsAddress)
-    O << formatHex((Address + 4 + 2 * Words) & 0xffff);
-  else
+  if (PrintBranchImmAsAddress) {
+    uint64_t Size = MII.get(MI->getOpcode()).getSize();
+    O << formatHex((Address + Size + 2 * Words) & 0xffff);
+  } else {
     O << Words;
+  }
 }
 
 void C166InstPrinter::printMemRPostIncOperand(const MCInst *MI, unsigned OpNo,

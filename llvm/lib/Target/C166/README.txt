@@ -233,9 +233,10 @@ swapped with respect to each other: BFLDL is "0A QQ @@ ##" and BFLDH is
 
 The bit test branches JB, JNB, JBC and JNBS take a target that is a signed 8
 bit count of words from the instruction after them, which reaches 127 words
-either way.  That is the one relative field in the instruction set, so it has
-the one target fixup kind, fixup_c166_rel8w, and the one relocation that is not
-plain data, R_C166_PCREL8W.  A disassembly names the target address, but only
+either way.  JMPR counts the same way.  There are two fixup kinds and two
+relocations for it rather than one, because how far the displacement byte is
+from the end of the instruction is what has to be added back: two bytes in the
+four byte bit test branches, one in the two byte JMPR.  A disassembly names the target address, but only
 llvm-objdump asks for that; left to itself the printer gives the distance,
 which is what can be handed back to the assembler.
 
@@ -322,8 +323,7 @@ name is "elf32-c166", and the OS/ABI is ELFOSABI_STANDALONE, which is what the
 assembler writes.  Padding between functions is "jmpr cc_UC, -1", which
 branches to itself: padding is not meant to be reached, and hanging where the
 mistake happened is more use on a bare part than sliding into whatever comes
-next.  (JMPR itself is not modelled here, so a disassembly shows the padding
-as unknown bytes.)
+next.
 
 The compiler-rt builtins build for c166.  Everything in GENERIC_SOURCES
 already compiles, since int_types.h is written in fixed width types; what is
@@ -426,11 +426,11 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * No support for the XC16x MAC unit.
-* JMPR, the two byte relative unconditional jump, is not modelled, so an
-  unconditional branch is always the four byte JMPA.  Selecting it would need
-  branch relaxation, since it only reaches 127 words; the fixup kind and the
-  relocation for a relative branch already exist, because the bit test
-  branches use them.
+* JMPR is assembled, disassembled and simulated, but nothing selects it, so a
+  branch is still always the four byte JMPA even where the two byte form would
+  reach.  Choosing between them needs branch relaxation: a target more than
+  127 words away has to fall back to the long form, and whether it is that far
+  is not known until the layout is.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
