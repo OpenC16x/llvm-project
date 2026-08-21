@@ -97,25 +97,38 @@ def MemRIAsmOperand : AsmOperandClass {
   let RenderMethod = "addMemRIOperands";
 }
 
+def MemRAsmOperand : AsmOperandClass {
+  let Name = "MemR";
+  let RenderMethod = "addMemROperands";
+}
+
 // Immediates are range checked so that an out of range value is rejected
 // rather than quietly truncated to the width of its field.  A symbol
 // reference is always accepted: the relocation sorts it out later.
-def Imm4AsmOperand : AsmOperandClass {
-  let Name = "Imm4";
+//
+// The three widths form a chain, narrowest last, which is what makes the
+// assembler prefer the two byte encoding for a constant that fits in four
+// bits: that is what the compiler emits, so it is what a disassembly has to
+// assemble back to.  It has to be a chain rather than a list, because only the
+// first superclass counts towards the hierarchy the matcher ranks by.
+def Data16AsmOperand : AsmOperandClass {
+  let Name = "Data16";
   let RenderMethod = "addImmOperands";
-  let DiagnosticString = "expected an immediate in the range [0, 15]";
+  let DiagnosticString = "expected a 16 bit immediate";
 }
 
 def Data8AsmOperand : AsmOperandClass {
   let Name = "Data8";
   let RenderMethod = "addImmOperands";
+  let SuperClasses = [Data16AsmOperand];
   let DiagnosticString = "expected an 8 bit immediate";
 }
 
-def Data16AsmOperand : AsmOperandClass {
-  let Name = "Data16";
+def Imm4AsmOperand : AsmOperandClass {
+  let Name = "Imm4";
   let RenderMethod = "addImmOperands";
-  let DiagnosticString = "expected a 16 bit immediate";
+  let SuperClasses = [Data8AsmOperand];
+  let DiagnosticString = "expected an immediate in the range [0, 15]";
 }
 
 def Irang2AsmOperand : AsmOperandClass {
@@ -212,6 +225,15 @@ def memri : Operand<i16> {
   let ParserMatchClass = MemRIAsmOperand;
 }
 
+// [Rw] on its own, which is a two byte instruction rather than the four byte
+// [Rw + #data16] with nothing added.
+def memr : Operand<i16> {
+  let PrintMethod = "printMemROperand";
+  let MIOperandInfo = (ops GR16);
+  let DecoderMethod = "decodeMemROperand";
+  let ParserMatchClass = MemRAsmOperand;
+}
+
 // A plain 16 bit data address ("mem" in the manual).
 def addr16 : Operand<i16> {
   let PrintMethod = "printAddr16Operand";
@@ -273,6 +295,13 @@ def pag10 : Operand<i16> {
   let ParserMatchClass = Pag10AsmOperand;
 }
 
+// A short constant is zero extended, so #data4 spans 0 to 15 (manual 6.5).
+def imm4b : Operand<i8>, ImmLeaf<i8, [{
+  return Imm >= 0 && Imm < 16;
+}]> {
+  let ParserMatchClass = Imm4AsmOperand;
+}
+
 // Shift and rotate counts are #data4.
 def imm4 : Operand<i16>, ImmLeaf<i16, [{
   return Imm >= 0 && Imm < 16;
@@ -284,6 +313,7 @@ def imm4 : Operand<i16>, ImmLeaf<i16, [{
 // Complex Patterns
 //===----------------------------------------------------------------------===//
 
+def addrr   : ComplexPattern<iPTR, 1, "SelectAddrR", [], []>;
 def addrri  : ComplexPattern<iPTR, 2, "SelectAddrRI", [frameindex], []>;
 def addrabs : ComplexPattern<iPTR, 1, "SelectAddrAbs", [], []>;
 
@@ -444,6 +474,26 @@ def MOVB8rr : InstS<0xF1, (outs GR8:$dst), (ins GR8:$src),
 }
 
 let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
+// MOV Rwn, #data4 / MOVB Rbn, #data4, two bytes with the constant in the high
+// nibble ahead of the register.  A short constant is zero extended, so these
+// cover 0 to 15.
+def MOV16ri4 : InstS<0xE0, (outs GR16:$dst), (ins imm4:$src),
+                     "mov\t$dst, $src", [(set GR16:$dst, imm4:$src)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
+}
+def MOVB8ri4 : InstS<0xE1, (outs GR8:$dst), (ins imm4b:$src),
+                     "movb\t$dst, $src", [(set GR8:$dst, imm4b:$src)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
+}
+
 // MOV reg, #data16  /  MOVB reg, #data8
 def MOV16ri : InstL<0xE6, (outs GR16:$dst), (ins data16:$src),
                     "mov\t$dst, $src", [(set GR16:$dst, imm:$src)]> {
@@ -461,6 +511,53 @@ def MOVB8ri : InstL<0xE7, (outs GR8:$dst), (ins data8:$src),
   let Inst{11-8} = dst;
   let Inst{23-16} = src;
   let Inst{31-24} = 0;
+}
+}
+
+// The two byte [Rw] forms of everything that would otherwise go through the
+// four byte [Rw + #data16].  They are preferred by AddedComplexity whenever the
+// displacement would have been zero, which in a pointer walking loop is every
+// access.  eliminateFrameIndex() switches to them as well when a frame slot
+// turns out to sit at offset zero.
+let mayLoad = 1 in {
+def MOV16rp  : InstS<0xA8, (outs GR16:$dst), (ins memr:$src),
+                         "mov\t$dst, $src",
+                         [(set GR16:$dst, (load addrr:$src))]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = src;
+  let AddedComplexity = 10;
+}
+def MOVB8rp  : InstS<0xA9, (outs GR8:$dst), (ins memr:$src),
+                         "movb\t$dst, $src",
+                         [(set GR8:$dst, (load addrr:$src))]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = src;
+  let AddedComplexity = 10;
+}
+}
+
+let mayStore = 1 in {
+def MOV16pr : InstS<0xB8, (outs), (ins memr:$dst, GR16:$src),
+                          "mov\t$dst, $src",
+                          [(store GR16:$src, addrr:$dst)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
+}
+def MOVB8pr : InstS<0xB9, (outs), (ins memr:$dst, GR8:$src),
+                          "movb\t$dst, $src",
+                          [(store GR8:$src, addrr:$dst)]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = dst;
+  let AddedComplexity = 10;
 }
 }
 

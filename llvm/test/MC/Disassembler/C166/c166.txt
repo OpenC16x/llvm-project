@@ -45,8 +45,23 @@
 0xd4 0x23 0x08 0x00
 # CHECK: mov [r0+#4], r2
 0xc4 0x20 0x04 0x00
-# CHECK: mov r2, [r3]
+# The four byte form always prints its displacement, because "[Rw]" on its own
+# is the two byte instruction below rather than the same one with nothing
+# added.
+# CHECK: mov r2, [r3+#0]
 0xd4 0x23 0x00 0x00
+# CHECK: mov r2, [r3]
+0xa8 0x23
+# CHECK: mov [r3], r2
+0xb8 0x23
+# CHECK: movb rl2, [r3]
+0xa9 0x43
+# CHECK: movb [r3], rl2
+0xb9 0x43
+# CHECK: mov r2, #15
+0xe0 0xf2
+# CHECK: movb rl2, #9
+0xe1 0x94
 
 # A conditional jump keeps its condition code.
 # CHECK: jmpa cc_ULT, 4660

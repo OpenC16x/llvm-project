@@ -59,6 +59,9 @@ class C166Operand : public MCParsedAsmOperand {
   struct MemoryOp {
     MCRegister Base;
     const MCExpr *Disp;
+    // "[Rw]" and "[Rw + #0]" are different instructions with different
+    // lengths, so which one was written has to survive parsing.
+    bool HasDisp;
   };
 
   StringRef Tok;
@@ -83,7 +86,8 @@ public:
   bool isMem() const override { return Kind == k_Memory; }
   bool isAddr() const { return Kind == k_Address || Kind == k_SFR; }
   bool isCondCode() const { return Kind == k_CondCode; }
-  bool isMemRI() const { return Kind == k_Memory; }
+  bool isMemR() const { return Kind == k_Memory && !Mem.HasDisp; }
+  bool isMemRI() const { return Kind == k_Memory && Mem.HasDisp; }
 
   /// True when this is an immediate whose value is known and in [Low, High].
   /// A symbol reference is accepted for the wider fields, which can hold a
@@ -172,6 +176,11 @@ public:
     addExpr(Inst, Mem.Disp);
   }
 
+  void addMemROperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands");
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
+  }
+
   void print(raw_ostream &OS, const MCAsmInfo &MAI) const override {
     switch (Kind) {
     case k_Token:
@@ -240,11 +249,14 @@ public:
     return Op;
   }
 
-  static std::unique_ptr<C166Operand>
-  createMem(MCRegister Base, const MCExpr *Disp, SMLoc S, SMLoc E) {
+  static std::unique_ptr<C166Operand> createMem(MCRegister Base,
+                                                const MCExpr *Disp,
+                                                bool HasDisp, SMLoc S,
+                                                SMLoc E) {
     auto Op = std::make_unique<C166Operand>(k_Memory, S, E);
     Op->Mem.Base = Base;
     Op->Mem.Disp = Disp;
+    Op->Mem.HasDisp = HasDisp;
     return Op;
   }
 };
@@ -396,6 +408,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
     return Error(RegStart, "expected a base register");
 
   const MCExpr *Disp = MCConstantExpr::create(0, getContext());
+  bool HasDisp = false;
   if (getLexer().is(AsmToken::Plus)) {
     Lex(); // eat '+'
     if (getLexer().isNot(AsmToken::Hash))
@@ -403,6 +416,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
     Lex(); // eat '#'
     if (parseExpressionWithSpecifier(Disp))
       return true;
+    HasDisp = true;
   }
 
   if (getLexer().isNot(AsmToken::RBrac))
@@ -410,7 +424,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   SMLoc E = getLexer().getLoc();
   Lex();
 
-  Operands.push_back(C166Operand::createMem(Base, Disp, S, E));
+  Operands.push_back(C166Operand::createMem(Base, Disp, HasDisp, S, E));
   return false;
 }
 

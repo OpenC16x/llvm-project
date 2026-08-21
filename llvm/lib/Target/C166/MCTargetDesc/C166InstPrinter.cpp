@@ -52,17 +52,21 @@ void C166InstPrinter::printMemRIOperand(const MCInst *MI, unsigned OpNo,
   const MCOperand &Base = MI->getOperand(OpNo);
   const MCOperand &Disp = MI->getOperand(OpNo + 1);
 
-  O << '[' << getRegisterName(Base.getReg());
-  if (Disp.isImm()) {
-    int64_t Imm = Disp.getImm();
-    if (Imm != 0)
-      O << "+#" << Imm;
-  } else {
+  // The displacement is always printed, zero included: "[Rw]" is the shorter
+  // instruction rather than the same one with nothing added.
+  O << '[' << getRegisterName(Base.getReg()) << "+#";
+  if (Disp.isImm())
+    O << Disp.getImm();
+  else {
     assert(Disp.isExpr() && "unknown displacement in printMemRIOperand");
-    O << "+#";
     MAI.printExpr(O, *Disp.getExpr());
   }
   O << ']';
+}
+
+void C166InstPrinter::printMemROperand(const MCInst *MI, unsigned OpNo,
+                                       raw_ostream &O) {
+  O << '[' << getRegisterName(MI->getOperand(OpNo).getReg()) << ']';
 }
 
 void C166InstPrinter::printAddr16Operand(const MCInst *MI, unsigned OpNo,

@@ -79,10 +79,32 @@
         mov     r2, [r3+#8]
 ; CHECK: mov [r0+#4], r2  ; encoding: [0xc4,0x20,0x04,0x00]
         mov     [r0+#4], r2
-; CHECK: mov r2, [r3]     ; encoding: [0xd4,0x23,0x00,0x00]
-        mov     r2, [r3]
 ; CHECK: movb rl2, [r3+#1] ; encoding: [0xf4,0x43,0x01,0x00]
         movb    rl2, [r3+#1]
+
+; "[Rw]" is a two byte instruction of its own, not the four byte one with a
+; zero displacement, so the two spellings assemble differently and the
+; displacement is always printed back.
+; CHECK: mov r2, [r3]     ; encoding: [0xa8,0x23]
+        mov     r2, [r3]
+; CHECK: mov [r3], r2     ; encoding: [0xb8,0x23]
+        mov     [r3], r2
+; CHECK: movb rl2, [r3]   ; encoding: [0xa9,0x43]
+        movb    rl2, [r3]
+; CHECK: movb [r3], rl2   ; encoding: [0xb9,0x43]
+        movb    [r3], rl2
+; CHECK: mov r2, [r3+#0]  ; encoding: [0xd4,0x23,0x00,0x00]
+        mov     r2, [r3+#0]
+
+; A short constant is zero extended, so #data4 covers 0 to 15 in two bytes.
+; CHECK: mov r2, #0       ; encoding: [0xe0,0x02]
+        mov     r2, #0
+; CHECK: mov r2, #15      ; encoding: [0xe0,0xf2]
+        mov     r2, #15
+; CHECK: movb rl2, #9     ; encoding: [0xe1,0x94]
+        movb    rl2, #9
+; CHECK: mov r2, #16      ; encoding: [0xe6,0xf2,0x10,0x00]
+        mov     r2, #16
 
 ; An SFR name stands for its address, so this assembles as MOV reg, mem and
 ; prints back with the address spelled out.  MDL is at FE0EH and MDH at FE0CH.

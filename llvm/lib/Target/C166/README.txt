@@ -224,6 +224,29 @@ Nothing generates any of these: whether an address is bit addressable is not
 something the compiler can see from the IR, so it would take an intrinsic or
 an address space to express it.
 
+Short encodings
+---------------
+
+Several addressing modes exist in both a two byte and a four byte form, and
+the short one is picked wherever it fits, which is worth about eight percent
+of the code the backend emits.
+
+"[Rw]" is a two byte instruction of its own rather than "[Rw + #data16]" with
+nothing added, so the two are separate instructions here and the displacement
+of the long one is always printed, zero included.  A frame slot that turns out
+to sit at offset zero is switched over by eliminateFrameIndex() once the
+offset is known.  Likewise a constant of 0 to 15 goes in a two byte MOV with
+the value in the high nibble of the second byte; short constants are always
+zero extended (manual 6.5), so that is the whole range.
+
+The assembler has to agree with the compiler about which form a given piece of
+text means, otherwise a disassembly would not assemble back to the bytes it
+came from.  For "[Rw]" the syntax settles it.  For a constant it does not, so
+the immediate operand classes are chained narrowest last - Imm4 inside Data8
+inside Data16 - which is what makes the matcher rank the short encoding first.
+Only the first entry of SuperClasses counts towards that ranking, so it has to
+be a chain and not a list.
+
 Encodings and the MC layer
 --------------------------
 

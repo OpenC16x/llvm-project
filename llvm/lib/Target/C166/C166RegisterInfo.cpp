@@ -143,6 +143,34 @@ bool C166RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     return false;
   }
 
+  // A frame slot that turns out to sit at offset zero can use the two byte
+  // [Rw] form instead of the four byte one with nothing added.
+  if (Offset == 0) {
+    unsigned Short = 0;
+    switch (MI.getOpcode()) {
+    case C166::MOV16rm:
+      Short = C166::MOV16rp;
+      break;
+    case C166::MOVB8rm:
+      Short = C166::MOVB8rp;
+      break;
+    case C166::MOV16mr:
+      Short = C166::MOV16pr;
+      break;
+    case C166::MOVB8mr:
+      Short = C166::MOVB8pr;
+      break;
+    default:
+      break;
+    }
+    if (Short) {
+      MI.setDesc(TII.get(Short));
+      MI.getOperand(FIOperandNum).ChangeToRegister(BaseReg, /*isDef=*/false);
+      MI.removeOperand(FIOperandNum + 1);
+      return false;
+    }
+  }
+
   MI.getOperand(FIOperandNum).ChangeToRegister(BaseReg, /*isDef=*/false);
   MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
   return false;

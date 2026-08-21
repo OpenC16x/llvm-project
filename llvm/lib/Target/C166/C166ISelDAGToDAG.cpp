@@ -44,6 +44,7 @@ public:
                                     std::vector<SDValue> &OutOps) override;
 
   // Complex pattern selectors.
+  bool SelectAddrR(SDValue Addr, SDValue &Base);
   bool SelectAddrRI(SDValue Addr, SDValue &Base, SDValue &Disp);
   bool SelectAddrAbs(SDValue Addr, SDValue &Address);
 
@@ -144,6 +145,22 @@ bool C166DAGToDAGISel::SelectAddrAbs(SDValue Addr, SDValue &Address) {
 }
 
 /// Match [Rw] and [Rw + #data16] addressing.
+bool C166DAGToDAGISel::SelectAddrR(SDValue Addr, SDValue &Base) {
+  // Only a bare register.  An absolute address, a frame index and anything
+  // with something added to it all have a better instruction waiting for them,
+  // and this one has no field to put the rest in.
+  SDValue AbsBase;
+  int64_t AbsOffset;
+  if (matchAbsoluteAddress(*CurDAG, Addr, AbsBase, AbsOffset))
+    return false;
+  if (isa<FrameIndexSDNode>(Addr) || Addr.getOpcode() == ISD::ADD ||
+      Addr.getOpcode() == ISD::OR)
+    return false;
+
+  Base = Addr;
+  return true;
+}
+
 bool C166DAGToDAGISel::SelectAddrRI(SDValue Addr, SDValue &Base,
                                     SDValue &Disp) {
   SDLoc DL(Addr);

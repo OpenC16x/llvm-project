@@ -99,6 +99,12 @@ static DecodeStatus decodeMemRIOperand(MCInst &MI, uint64_t Imm,
 }
 
 /// An instruction range is encoded as 0 to 3 and written as 1 to 4.
+static DecodeStatus decodeMemROperand(MCInst &MI, uint64_t Imm,
+                                      uint64_t Address,
+                                      const MCDisassembler *Decoder) {
+  return DecodeGR16RegisterClass(MI, Imm & 0xf, Address, Decoder);
+}
+
 static DecodeStatus decodeBitOffOperand(MCInst &MI, uint64_t Imm,
                                         uint64_t Address,
                                         const MCDisassembler *Decoder) {
