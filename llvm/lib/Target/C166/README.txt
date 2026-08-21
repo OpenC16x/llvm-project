@@ -168,6 +168,15 @@ one will read the wrong place.  There is also only one instruction counter, so
 inline assembly must not wrap a far access in an ATOMIC or EXTend sequence of
 its own.
 
+Switches
+--------
+
+A dense switch becomes a table of 16 bit block addresses in .rodata, indexed
+by the scaled selector and jumped through with JMPI.  The table's address is a
+relocatable constant, so the lookup folds into the displacement of a single
+[Rw + #data16] load rather than building the address in a register first.
+Sparse switches still become chains of compares.
+
 Bit addressing
 --------------
 
@@ -257,5 +266,4 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* Jump tables are disabled; switches become compare and branch chains.
 * No tail calls, and no support for the XC16x MAC unit.

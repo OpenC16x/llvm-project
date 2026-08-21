@@ -116,9 +116,9 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
-  // Jump tables would need a 16 bit indirect jump through a table in code
-  // memory; plain compare-and-branch chains are used instead.
-  setMinimumJumpTableEntries(std::numeric_limits<unsigned>::max());
+  // A jump table is a run of 16 bit block addresses that BR_JT indexes into
+  // and jumps through; the generic expansion produces exactly the shift, add,
+  // load and JMPI the machine wants.
 
   setOperationAction(ISD::GlobalAddress, MVT::i16, Custom);
   setOperationAction(ISD::BlockAddress, MVT::i16, Custom);
