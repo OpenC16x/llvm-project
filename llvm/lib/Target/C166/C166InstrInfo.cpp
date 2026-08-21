@@ -262,6 +262,20 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(High ? C166::MOVfromMDH : C166::MOVfromMDL).addDef(Dst);
     break;
   }
+  case C166::SMUL16rrLOHI:
+  case C166::UMUL16rrLOHI: {
+    // One MUL, then both halves out of the register pair it left them in.
+    Register Lo = MI.getOperand(0).getReg();
+    Register Hi = MI.getOperand(1).getReg();
+    Register Src1 = MI.getOperand(2).getReg();
+    Register Src2 = MI.getOperand(3).getReg();
+    bool Unsigned = MI.getOpcode() == C166::UMUL16rrLOHI;
+
+    Emit(Unsigned ? C166::MULUrr : C166::MULrr).addReg(Src1).addReg(Src2);
+    Emit(C166::MOVfromMDL).addDef(Lo);
+    Emit(C166::MOVfromMDH).addDef(Hi);
+    break;
+  }
   case C166::SDIV16rr:
   case C166::UDIV16rr:
   case C166::SREM16rr:

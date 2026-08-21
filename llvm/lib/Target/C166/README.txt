@@ -73,6 +73,11 @@ every pass that could have inserted an instruction in between has run.
 Multiply and divide go through the MDL/MDH register pair and are expanded from
 pseudos at the same point.
 
+One MUL leaves both halves of the product behind, so SMUL_LOHI and UMUL_LOHI
+are kept whole rather than expanded: a widening multiply is one MUL and two
+moves.  Splitting them would make mul and mulhs separate nodes again, and each
+would issue a MUL of its own.
+
 The carry is different, and the difference is what makes wide arithmetic
 cheap.  MOV, MOVB, MOVBZ, MOVBS, PUSH and POP are all documented as leaving V
 and C alone, and those - plus the branches, the calls and the EXTend
@@ -417,10 +422,6 @@ Known limitations / things to do
   be provably unchanged in between, and through a symbol the two immediates
   are different relocations - seg(g) and seg(g+2) are the same segment in
   practice but nothing says so until the linker has placed g.
-* A widening multiply does the multiply twice.  MUL leaves both halves of the
-  product in MDL and MDH, but mul and mulhs are separate nodes here and each
-  expands to a MUL and one move, so "(long)a * b" issues two.  Custom lowering
-  SMUL_LOHI and UMUL_LOHI would let one MUL feed both halves.
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.

@@ -23,13 +23,12 @@ define i32 @mul32(i32 %a, i32 %b) {
 ; CHECK-NEXT:    mul r2, r5
 ; CHECK-NEXT:    mov r5, mdl
 ; CHECK-NEXT:    mulu r2, r4
+; CHECK-NEXT:    mov r2, mdl
 ; CHECK-NEXT:    mov r6, mdh
 ; CHECK-NEXT:    add r6, r5
 ; CHECK-NEXT:    mul r3, r4
 ; CHECK-NEXT:    mov r3, mdl
 ; CHECK-NEXT:    add r3, r6
-; CHECK-NEXT:    mul r2, r4
-; CHECK-NEXT:    mov r2, mdl
 ; CHECK-NEXT:    ret
   %r = mul i32 %a, %b
   ret i32 %r

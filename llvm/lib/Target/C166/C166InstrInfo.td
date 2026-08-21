@@ -521,6 +521,21 @@ def MULHS16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
 def MULHU16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                        "#MULHU16rr",
                        [(set GR16:$dst, (mulhu GR16:$src1, GR16:$src2))]>;
+
+// One MUL leaves both halves of the product behind, in MDL and MDH, so a
+// widening multiply is one instruction and two moves rather than two of each.
+// These are what makes that happen: without them mul and mulhs are separate
+// nodes and each expands to a MUL of its own.
+def SMUL16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                          (ins GR16:$src1, GR16:$src2),
+                          "#SMUL16rrLOHI",
+                          [(set GR16:$lo, GR16:$hi,
+                                (smullohi GR16:$src1, GR16:$src2))]>;
+def UMUL16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                          (ins GR16:$src1, GR16:$src2),
+                          "#UMUL16rrLOHI",
+                          [(set GR16:$lo, GR16:$hi,
+                                (umullohi GR16:$src1, GR16:$src2))]>;
 def SDIV16rr  : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                        "#SDIV16rr",
                        [(set GR16:$dst, (sdiv GR16:$src1, GR16:$src2))]>;
