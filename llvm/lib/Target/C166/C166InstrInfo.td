@@ -72,6 +72,8 @@ def C166farload  : SDNode<"C166ISD::FAR_LOAD", SDT_C166FarLoad,
                           [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
                           [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -361,6 +363,36 @@ def FARSTORE16i : Pseudo<(outs), (ins GR16:$src, GR16:$off, i16imm:$seg),
                          "#FARSTORE16i", []>;
 def FARSTORE8i  : Pseudo<(outs), (ins GR8:$src, GR16:$off, i16imm:$seg),
                          "#FARSTORE8i", []>;
+}
+
+// A tail call is a jump to the callee once this function's frame is gone, so
+// the callee's RET goes straight back to our caller.  They are pseudos so that
+// the prolog/epilog inserter treats them as returns and tears the frame down
+// in front of them; expandPostRAPseudo() then turns them into the jumps below.
+//
+// The jumps need opcodes of their own rather than reusing JMPA and JMPI: their
+// target is a symbol, not a basic block, so anything that reads the control
+// flow graph must not take them for branches.
+let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1,
+    Uses = [R0] in {
+def TCRETURNa : Pseudo<(outs), (ins calltarget:$dst), "#TCRETURNa", []>;
+def TCRETURNi : Pseudo<(outs), (ins GR16:$dst), "#TCRETURNi", []>;
+
+let isCodeGenOnly = 1 in {
+def TAILJMPa : InstL<0xEA, (outs), (ins calltarget:$dst), "jmpa\tcc_UC, $dst",
+                     []> {
+  bits<16> dst;
+  let Inst{15-12} = 0b0000;   // cc_UC
+  let Inst{11-8} = 0;
+  let Inst{31-16} = dst;
+}
+def TAILJMPi : InstS<0x9C, (outs), (ins GR16:$dst), "jmpi\tcc_UC, [$dst]",
+                     []> {
+  bits<4> dst;
+  let Inst{15-12} = 0b0000;   // cc_UC
+  let Inst{11-8} = dst;
+}
+}
 }
 
 // Multiply and divide go through the MDL/MDH register pair.  These pseudos are
@@ -1160,6 +1192,10 @@ def : Pat<(subc GR16:$src1, GR16:$src2), (SUB16rr GR16:$src1, GR16:$src2)>;
 def : Pat<(subc GR16:$src1, imm:$src2),  (SUB16ri GR16:$src1, imm:$src2)>;
 def : Pat<(subc GR16:$src1, (load addrabs:$src2)),
           (SUB16ra GR16:$src1, addrabs:$src2)>;
+
+def : Pat<(C166tcret (i16 tglobaladdr:$dst)),  (TCRETURNa tglobaladdr:$dst)>;
+def : Pat<(C166tcret (i16 texternalsym:$dst)), (TCRETURNa texternalsym:$dst)>;
+def : Pat<(C166tcret GR16:$dst),               (TCRETURNi GR16:$dst)>;
 
 // Direct and indirect calls, and indirect jumps, all with cc_UC (0).
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;

@@ -156,6 +156,14 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addImm(MI.getOperand(3).getImm());
     break;
   }
+  case C166::TCRETURNa:
+  case C166::TCRETURNi: {
+    // The frame is already gone by the time this runs, so all that is left is
+    // the jump that the callee will return from on our behalf.
+    bool Indirect = MI.getOpcode() == C166::TCRETURNi;
+    Emit(Indirect ? C166::TAILJMPi : C166::TAILJMPa).add(MI.getOperand(0));
+    break;
+  }
   case C166::FARLOAD16:
   case C166::FARLOAD8:
   case C166::FARSTORE16:
@@ -322,6 +330,11 @@ bool C166InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
   if (I == MBB.end() || !isUnpredicatedTerminator(*I))
     return false;
+
+  // A tail call ends the block like a return does, but it names a callee
+  // rather than a basic block, so there is nothing here to describe.
+  if (I->getOpcode() == C166::TCRETURNa || I->getOpcode() == C166::TCRETURNi)
+    return true;
 
   // Count the terminators and remember the first branch that ends the block
   // unconditionally.

@@ -87,13 +87,7 @@ public:
                               MachineBasicBlock *BB) const override;
 
 private:
-  SDValue LowerCCCCallTo(SDValue Chain, SDValue Callee,
-                         CallingConv::ID CallConv, bool IsVarArg,
-                         bool IsTailCall,
-                         const SmallVectorImpl<ISD::OutputArg> &Outs,
-                         const SmallVectorImpl<SDValue> &OutVals,
-                         const SmallVectorImpl<ISD::InputArg> &Ins,
-                         const SDLoc &DL, SelectionDAG &DAG,
+  SDValue LowerCCCCallTo(TargetLowering::CallLoweringInfo &CLI,
                          SmallVectorImpl<SDValue> &InVals) const;
 
   SDValue LowerCCCArguments(SDValue Chain, CallingConv::ID CallConv,
@@ -113,6 +107,10 @@ private:
                        const SmallVectorImpl<ISD::InputArg> &Ins,
                        const SDLoc &DL, SelectionDAG &DAG,
                        SmallVectorImpl<SDValue> &InVals) const override;
+
+  bool isEligibleForTailCall(const TargetLowering::CallLoweringInfo &CLI,
+                             const SmallVectorImpl<CCValAssign> &ArgLocs,
+                             unsigned StackSize) const;
 
   SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
