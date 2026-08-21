@@ -459,8 +459,9 @@ def MOVB8ar : InstL<0xF7, (outs), (ins addr16:$dst, GR8:$src),
 }
 
 // Byte to word conversions.  Note the reversed nibble order: the manual gives
-// the format as "mn", so the byte source sits in the high nibble.
-let Defs = [PSW] in {
+// the format as "mn", so the byte source sits in the high nibble.  Like the
+// moves these leave the carry alone, so they do not write PSW as it is
+// modelled here.
 def MOVBZ16r8 : InstS<0xC0, (outs GR16:$dst), (ins GR8:$src),
                       "movbz\t$dst, $src",
                       [(set GR16:$dst, (zext GR8:$src))]> {
@@ -477,7 +478,6 @@ def MOVBS16r8 : InstS<0xD0, (outs GR16:$dst), (ins GR8:$src),
   let Inst{15-12} = src;
   let Inst{11-8} = dst;
 }
-}
 
 //===----------------------------------------------------------------------===//
 // Arithmetic and Logical Instructions
@@ -488,8 +488,9 @@ def MOVBS16r8 : InstS<0xD0, (outs GR16:$dst), (ins GR8:$src),
 // 16 bit absolute address.  The three opcodes of a group differ only in the
 // low nibble (x0 / x6 / x2 for words, x1 / x7 / x3 for bytes).
 multiclass ArithW<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
-                  SDNode opnode, bit commutable = 0> {
-  let Constraints = "$src1 = $dst", Defs = [PSW] in {
+                  SDNode opnode, bit commutable = 0,
+                  list<Register> uses = []> {
+  let Constraints = "$src1 = $dst", Defs = [PSW], Uses = uses in {
     let isCommutable = commutable in
     def 16rr : InstS<opRR, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                      !strconcat(mnemonic, "\t$dst, $src2"),
@@ -569,23 +570,12 @@ defm ANDB : ArithB<"andb", 0x61, 0x67, 0x63, and, 1>;
 defm ORB  : ArithB<"orb",  0x71, 0x77, 0x73, or,  1>;
 defm XORB : ArithB<"xorb", 0x51, 0x57, 0x53, xor, 1>;
 
-// Add/subtract with carry, used when expanding wider integer arithmetic.
-let Constraints = "$src1 = $dst", Defs = [PSW], Uses = [PSW] in {
-def ADDC16rr : InstS<0x10, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
-                     "addc\t$dst, $src2", []> {
-  bits<4> dst;
-  bits<4> src2;
-  let Inst{15-12} = dst;
-  let Inst{11-8} = src2;
-}
-def SUBC16rr : InstS<0x30, (outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
-                     "subc\t$dst, $src2", []> {
-  bits<4> dst;
-  bits<4> src2;
-  let Inst{15-12} = dst;
-  let Inst{11-8} = src2;
-}
-}
+// Add and subtract with carry.  Their opcodes are the plain ones plus 10H,
+// and they are what carries a wider addition or subtraction from one word to
+// the next: the carry lives in the PSW, which is why these read it as well as
+// write it.
+defm ADDC : ArithW<"addc", 0x10, 0x16, 0x12, adde, 1, [PSW]>;
+defm SUBC : ArithW<"subc", 0x30, 0x36, 0x32, sube, 0, [PSW]>;
 
 // Unary operations, encoded as "n0".
 class UnaryInst<bits<8> opcode, string mnemonic, RegisterClass RC,
@@ -1006,6 +996,22 @@ def RETS : InstS<0xDB, (outs), (ins), "rets", [(C166retsglue)]> {
 //===----------------------------------------------------------------------===//
 // Non-Instruction Patterns
 //===----------------------------------------------------------------------===//
+
+// ADD and SUB always leave a carry behind, so the low word of a wider
+// addition or subtraction is a plain one and only the words above it need
+// ADDC/SUBC.  The carry travels from one to the next as glue, which keeps
+// them together through instruction selection; after that only the register
+// allocator can come between them, and everything it inserts - MOV, MOVB and
+// the byte extensions - leaves the carry alone.
+def : Pat<(addc GR16:$src1, GR16:$src2), (ADD16rr GR16:$src1, GR16:$src2)>;
+def : Pat<(addc GR16:$src1, imm:$src2),  (ADD16ri GR16:$src1, imm:$src2)>;
+def : Pat<(addc GR16:$src1, (load addrabs:$src2)),
+          (ADD16ra GR16:$src1, addrabs:$src2)>;
+
+def : Pat<(subc GR16:$src1, GR16:$src2), (SUB16rr GR16:$src1, GR16:$src2)>;
+def : Pat<(subc GR16:$src1, imm:$src2),  (SUB16ri GR16:$src1, imm:$src2)>;
+def : Pat<(subc GR16:$src1, (load addrabs:$src2)),
+          (SUB16ra GR16:$src1, addrabs:$src2)>;
 
 // Direct and indirect calls, and indirect jumps, all with cc_UC (0).
 def : Pat<(C166call (i16 tglobaladdr:$dst)),  (CALLA 0, tglobaladdr:$dst)>;
