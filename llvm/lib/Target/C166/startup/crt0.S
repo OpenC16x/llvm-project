@@ -38,13 +38,14 @@ _start:
         mov     stkov, #__system_stack_limit
 
         // The data page pointers map the top two bits of a 16 bit address onto
-        // a 10 bit page.  0, 1, 2, 3 is the identity over the first 64 KByte,
-        // which is what a near address means to the compiler.  It is also the
-        // reset state, so this only matters if something ran before us.
-        mov     dpp0, #0
-        mov     dpp1, #1
-        mov     dpp2, #2
-        mov     dpp3, #3
+        // a 10 bit page, which is what decides where a near address lands.
+        // The linker script picks the pages, because it is what knows where
+        // the memory is: on a part whose ROM is not in segment 0 these are not
+        // the identity and not the reset values either.
+        mov     dpp0, #__dpp0_page
+        mov     dpp1, #__dpp1_page
+        mov     dpp2, #__dpp2_page
+        mov     dpp3, #__dpp3_page
 
         // CP is left where reset put it.  It says where R0 to R15 are, so an
         // instruction that moves it changes the meaning of every register

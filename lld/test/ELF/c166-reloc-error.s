@@ -19,9 +19,11 @@ _start:
   jb r5.3, odd
 # CHECK: error: {{.*}} improper alignment for relocation R_C166_PCREL8W: 0x3 is not aligned to 2 bytes
 
-## A near address is one word.
-  mov r2, big
-# CHECK: error: {{.*}} relocation R_C166_ABS16 out of range: 131071 is not in [-32768, 65535]; references 'big'
+## A near address is not checked, because there is nothing to check: it is the
+## offset within a segment, and every 16 bit value is one.  Which segment it
+## lands in is what the data page pointers decide at run time, and what keeps a
+## program honest about it is the size of the region it is linked into, not a
+## relocation.  So "mov r2, big" is deliberately absent from this test.
 
 ## The bus is 24 bits, so there is no segment above 0xff and no page above
 ## 0x3ff.

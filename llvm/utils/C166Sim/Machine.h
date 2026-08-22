@@ -139,6 +139,15 @@ public:
 
   // Registers that are not in memory.
   uint16_t PSW = 0;
+  // Where the interrupt vector table is and how far apart its entries are.
+  // The table is at the low end of the segment VECSEG names, and CPUCON1's
+  // VECSC field scales the space between entries; both are XC16x registers
+  // that the older parts did without, which is why a trap on those always
+  // reached segment 0 at four bytes a vector.  The reset value of VECSEG is a
+  // property of how the part was started, so the loader sets it to the segment
+  // the reset vector came from.
+  uint16_t VECSEG = 0;
+  uint16_t CPUCON1 = 0x0007;
   uint16_t CP = ResetCP;
   uint16_t SP = ResetSP;
   uint16_t STKOV = ResetSTKOV;

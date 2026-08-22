@@ -24,6 +24,7 @@ static constexpr uint32_t SFR_MDH = 0xFE0C, SFR_MDL = 0xFE0E;
 static constexpr uint32_t SFR_CP = 0xFE10, SFR_SP = 0xFE12;
 static constexpr uint32_t SFR_STKOV = 0xFE14, SFR_STKUN = 0xFE16;
 static constexpr uint32_t SFR_MDC = 0xFF0E, SFR_PSW = 0xFF10;
+static constexpr uint32_t SFR_CPUCON1 = 0xFE18, SFR_VECSEG = 0xFF12;
 
 /// True when Phys names one of the CPU registers rather than storage.
 static bool isCPUSFR(uint32_t Phys) {
@@ -41,6 +42,8 @@ static bool isCPUSFR(uint32_t Phys) {
   case SFR_STKUN:
   case SFR_MDC:
   case SFR_PSW:
+  case SFR_CPUCON1:
+  case SFR_VECSEG:
     return true;
   default:
     return false;
@@ -75,6 +78,10 @@ uint16_t Machine::read16(uint32_t Phys) {
       return STKUN;
     case SFR_MDC:
       return MDC;
+    case SFR_CPUCON1:
+      return CPUCON1;
+    case SFR_VECSEG:
+      return VECSEG;
     case SFR_PSW:
       return PSW;
     }
@@ -118,6 +125,12 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
       return;
     case SFR_STKUN:
       STKUN = V;
+      return;
+    case SFR_CPUCON1:
+      CPUCON1 = V;
+      return;
+    case SFR_VECSEG:
+      VECSEG = V & 0xFF;
       return;
     case SFR_MDC:
       MDC = V;

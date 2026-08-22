@@ -1131,19 +1131,26 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.IP = M.pop();
     M.CSP = M.pop();
     break;
-  case Op::TRAP:
+  case Op::TRAP: {
     // A trap saves what a hardware interrupt saves and then branches to the
     // vector table entry itself - it does not read a vector through it.  The
-    // entry for trap n is the double word at 4n, which is where a project puts
-    // a jump to its handler.  CSP is pushed and cleared because segmentation is
-    // on, which is the only mode this simulator runs in, and RETI undoes all
-    // three pushes in the opposite order.
+    // entry is where a project puts a jump to its handler.  CSP is pushed
+    // because segmentation is on, which is the only mode this simulator runs
+    // in, and RETI undoes all three pushes in the opposite order.
+    //
+    // Where the entry is comes from two registers on this core rather than
+    // being fixed: the table is at the low end of the segment VECSEG names,
+    // and CPUCON1's VECSC field says how many words apart the entries are - 2,
+    // 4, 8 or 16, so 4 bytes a vector at its reset value.  An older part had
+    // neither, and behaved as these do out of reset.
+    unsigned Space = 4u << ((M.CPUCON1 >> 5) & 3);
     M.push(M.PSW);
     M.push(M.CSP);
-    M.CSP = 0;
+    M.CSP = M.VECSEG;
     M.push(M.IP);
-    M.IP = uint16_t(4 * (Imm(0) & 0x7F));
+    M.IP = uint16_t(Space * (Imm(0) & 0x7F));
     break;
+  }
   case Op::RETI:
     // The interrupted state is IP, then CSP while segmentation is on, then
     // PSW.  Segmentation is enabled out of reset, which is the only mode this

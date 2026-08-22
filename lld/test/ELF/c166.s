@@ -17,8 +17,11 @@ _start:
 ;; (0x8010 - 0x8006) / 2 == 5
   jb r5.3, target
 
-;; R_C166_ABS16
+;; R_C166_SOF16 through a plain near reference: a near address is the offset
+;; within a segment, so a symbol above segment 0 keeps only its low 16 bits and
+;; the data page pointers decide at run time which page that is.
   mov r2, near
+  mov r3, far
 
 ;; R_C166_SEG8 and R_C166_SOF16: 0x123456 splits into segment 0x12 and
 ;; offset 0x3456.
@@ -36,10 +39,12 @@ _start:
 ; TEXT-NEXT: 8000: cc 00        nop
 ; TEXT-NEXT: 8002: 8a f5 05 30  jb   r5.3, 0x8010
 ; TEXT-NEXT: 8006: f2 f2 42 42  mov  r2, 16962
-; TEXT-NEXT: 800a: d7 00 12 00  exts #18, #1
-; TEXT-NEXT: 800e: e6 f3 56 34  mov  r3, #13398
-; TEXT-NEXT: 8012: d7 40 48 00  extp #72, #1
-; TEXT-NEXT: 8016: e6 f4 56 34  mov  r4, #13398
+;; 0x123456 keeps its low word; the page it lands in is a run time matter.
+; TEXT-NEXT: 800a: f2 f3 56 34  mov  r3, 13398
+; TEXT-NEXT: 800e: d7 00 12 00  exts #18, #1
+; TEXT-NEXT: 8012: e6 f3 56 34  mov  r3, #13398
+; TEXT-NEXT: 8016: d7 40 48 00  extp #72, #1
+; TEXT-NEXT: 801a: e6 f4 56 34  mov  r4, #13398
 
   .data
 ;; R_C166_ABS8

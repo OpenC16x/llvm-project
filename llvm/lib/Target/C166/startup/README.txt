@@ -50,11 +50,30 @@ is not optional.
 What to change for a particular part
 ------------------------------------
 
-The linker script is written for the smallest thing this family comes in: the
-8 KByte of internal ROM at the bottom of code segment 0 and the 1 KByte of
-internal RAM at 00'FA00H that an SAB 83C166 has, with nothing outside the
-chip.  Almost every real board has external memory, and the MEMORY block at
-the top of c166.ld is where that goes.
+The linker script is written for an XC164CM with nothing outside the chip: the
+64 KByte of program Flash at C0'0000H and the 2 KByte of DPRAM at 00'F600H.
+The MEMORY block at the top of c166.ld is where a board's own memory goes.
+
+Only 48 KByte of that Flash is in the rom region, and the reason is the thing
+to understand before changing any of this.  A 16 bit address does not name a
+physical location on a C166: the data page pointers map each quarter of it onto
+a 16 KByte page, so what an instruction carries is an offset and the DPPs say
+where it lands.  This script points DPP0 to DPP2 at the first three pages of
+the Flash and leaves DPP3 at page 3, which is 00'C000H to 00'FFFFH - the DSRAM,
+the DPRAM and both register spaces.  So a near address of 0000H to BFFFH is
+Flash and C000H to FFFFH is RAM and registers, and in both cases it is the low
+16 bits of the physical address.  The top 16 KByte of the Flash has no near
+address left to give it, which is why the region stops at 48 KByte; anything up
+there has to be reached far.  Overflowing the region is an error from the
+linker, which is what keeps a program honest about the limit.
+
+The pages are named by the script, not by crt0.S:
+
+  __dpp0_page  __dpp1_page  __dpp2_page  __dpp3_page
+
+so moving the memory means changing the MEMORY block and nothing else.  A part
+whose ROM really is in segment 0 sets them to 0, 1, 2 and 3, which is the
+identity and also the reset state.
 
 Three symbols in the script are addresses the hardware already knows, because
 SP, STKUN, STKOV and CP come out of reset holding them:
@@ -66,9 +85,10 @@ SP, STKUN, STKOV and CP come out of reset holding them:
 The system stack is the hardware one, which holds return addresses and is not
 addressable by the compiler.  The other stack, the one the ABI uses for
 arguments, locals and spills, is addressed through R0 and grows down from
-__user_stack_top, which the script puts at the top of RAM.  Both are in the
-same 1 KByte to start with, which does not leave much; a board with external
-RAM should move the user stack out there and give the system stack the room.
+__user_stack_top, which the script puts at the top of RAM.  On an XC164CM that
+leaves the ABI stack the KByte from 00'F600H to 00'F9FFH and the system stack
+the two below FC00H, which is not much; a board with external RAM should move
+the user stack out there.
 
 crt0.S writes SP, STKUN, STKOV and the DPPs with a plain "mov sp, #..." each,
 which the assembler can do because the 8 bit "reg" field of MOV reaches the
@@ -116,9 +136,10 @@ whatever follows.
 On an XC164CM this is the layout the part has at reset.  Two of its registers
 can change it: CPUCON1.VECSC sets the space between vectors, and resets to 00,
 which is the two words assumed here; VECSEG selects the segment the table lives
-in, and its reset value depends on how the part was started.  A program that
-writes either wants a different script from this one.  Both are protected after
-EINIT, so a startup sequence that changes them has to do it before that.
+in, and resets to C0H for a standard start from internal program memory, which
+is where this script puts the Flash.  A program that writes either wants a
+different script from this one.  Both are protected after EINIT, so a startup
+sequence that changes them has to do it before that.
 
 What is missing
 ---------------

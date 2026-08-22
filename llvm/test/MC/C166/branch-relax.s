@@ -28,5 +28,5 @@ far:
         jmpr    cc_UC, 127
 
 ; RELOC:      Section ({{.*}}) .rela.text {
-; RELOC-NEXT:   0x8 R_C166_ABS16 .text 0x10A
+; RELOC-NEXT:   0x8 R_C166_SOF16 .text 0x10A
 ; RELOC-NEXT: }

@@ -450,33 +450,23 @@ PSW, then CSP while segmentation is on, then IP - which is why RETI returns
 from either.  Nothing selects it; it is there so that a handler is reachable
 and so that the path through a vector can be tested.
 
+Where the vector is comes from two registers rather than being fixed: the table
+sits at the low end of the segment VECSEG names, and CPUCON1's VECSC field says
+how many words apart the entries are.  Out of reset that is four bytes a vector
+in whichever segment the part was started from, which is what an older C166
+does unconditionally.
+
 Known limitations / things to do
 --------------------------------
 
-* Nothing here can boot an XC164CM yet, and this is the thing standing in the
-  way of running on that part.  Its program Flash is at C0'0000H, and VECSEG
-  comes out of reset holding C0H, so that is where the part fetches its reset
-  vector from; there is no memory at 00'0000H at all.  The near addressing
-  model here assumes everything lives in segment 0 - a near reference to a
-  symbol becomes R_C166_ABS16 of the symbol's whole address - so linking with
-  the ROM at C0'0000H fails on every rodata and every intra-segment call with
-  "relocation R_C166_ABS16 out of range".
-
-  What it wants is the model the architecture is built for: a near address is
-  an offset that the DPPs (for data) and CSP (for code) turn into a physical
-  one.  With DPP0 to DPP2 holding pages 300H to 302H and DPP3 left at 3, the
-  16 bit space is the low 48 KByte of the Flash plus 00'C000H to 00'FFFFH,
-  which is the DSRAM, the DPRAM and the SFRs - everything a program needs,
-  reachable near.  Getting there means a near reference relocating as SOF16
-  rather than ABS16, a linker script that separates the address a section is
-  loaded at from the one it is addressed by, and a crt0 that programs the DPPs
-  to match and reads the ROM image of .data through an EXTS.  It is a change to
-  the memory model rather than a fix, which is why it is written down here
-  rather than half done.
-
-  c166.ld is still the segment 0 map it always was, which the simulator runs
-  and no silicon does.
-
+* The near addressing model is the XC164CM's: a near reference relocates as
+  SOF16, the offset within a segment, and the data page pointers decide which
+  page that offset lands in.  DPP0 to DPP2 cover the Flash and DPP3 the RAM and
+  the register spaces, which leaves the top 16 KByte of a 64 KByte Flash with
+  no near address; c166.ld stops its rom region at 48 KByte for that reason and
+  the linker reports an overflow rather than wrapping.  Nothing yet places
+  anything in the part that is left, so a program that outgrows 48 KByte of
+  code and read-only data has nowhere to put the rest.
 * MOV mem, reg keeps its narrow field, because widening it would make
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between

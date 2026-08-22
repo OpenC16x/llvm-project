@@ -49,6 +49,15 @@ protected:
 
     // Everything else is plain data: a 16 bit near pointer in the second word
     // of an instruction, or a data word.
+    //
+    // A near reference is 16 bits of a 24 bit address, and which 16 is decided
+    // by the hardware rather than by the linker: the DPPs supply the page for
+    // a data access and CSP the segment for a branch, and both leave the low
+    // 16 bits of the address to the instruction.  So what a near reference
+    // wants is the offset within the segment, not the whole address, which is
+    // why FK_Data_2 relocates as SOF16.  For anything in segment 0 the two are
+    // the same value, so this only starts to matter once something is linked
+    // above 00'FFFFH.
     switch (Fixup.getKind()) {
     case C166::fixup_c166_rel8w:
       return ELF::R_C166_PCREL8W;
@@ -63,7 +72,7 @@ protected:
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
     case FK_Data_2:
-      return IsPCRel ? ELF::R_C166_PCREL16 : ELF::R_C166_ABS16;
+      return IsPCRel ? ELF::R_C166_PCREL16 : ELF::R_C166_SOF16;
     case FK_Data_4:
       return IsPCRel ? ELF::R_C166_PCREL32 : ELF::R_C166_ABS32;
     case FK_Data_8:
