@@ -148,6 +148,15 @@ public:
   // the reset vector came from.
   uint16_t VECSEG = 0;
   uint16_t CPUCON1 = 0x0007;
+  // The PLL, as far as this models it: what was written to PLLCON, and the step
+  // at which the VCO is considered locked, which is all SYSSTAT's PLLLOCK is
+  // derived from.  The reset value of PLLCON is the part's, which has the VCO
+  // running with the CPU on the oscillator, so lock arrives on its own even for
+  // a program that never writes the register.
+  static constexpr uint64_t PLLLockDelay = 100;
+  static constexpr uint64_t NeverLocks = ~uint64_t(0);
+  uint16_t PLLCON = 0x2700;
+  uint64_t PLLLockStep = PLLLockDelay;
   uint16_t CP = ResetCP;
   uint16_t SP = ResetSP;
   uint16_t STKOV = ResetSTKOV;

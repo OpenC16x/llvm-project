@@ -176,6 +176,11 @@ typedef volatile unsigned int c166_sfr;
 #define EXISEL0     C166_SFR(0xF1DAU)
 #define SYSCON1     C166_SFR(0xF1DCU)
 
+/* What the oscillator and the PLL report.  This one has no short address, so
+ * unlike the registers above it there is no way to reach it other than by its
+ * address - which is what every access from C is anyway. */
+#define SYSSTAT     C166_SFR(0xF1E4U)
+
 /* The on-chip X-peripherals, at E800H and up.  These have no short address at
  * all, so no instruction reaches one by register name - but the addresses are
  * inside the page DPP3 selects, so from C they are ordinary near accesses like

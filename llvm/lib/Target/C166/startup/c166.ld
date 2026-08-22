@@ -30,6 +30,81 @@ __system_stack_top   = 0xFC00;
 __system_stack_limit = 0xFA00;
 __register_bank      = 0xFC00;
 
+/* The clock, which is the other thing besides the memory map that belongs to
+ * the board rather than to the part.  Only the crystal below is a fact about a
+ * particular board; the three dividers are a choice, and the arithmetic and
+ * the checks that follow are the part's.
+ *
+ * The PLL takes the oscillator through three stages:
+ *
+ *   fIN  = fOSC / P      P = __pll_p,  1 to 4,   and fIN must be 4 to 35 MHz
+ *   fVCO = fIN  * N      N = __pll_n,  1 to 32,  and fVCO must be in a band
+ *   fMC  = fVCO / K      K = __pll_k,  1 to 16,  and fMC must be at most 40 MHz
+ *
+ * and fCPU is fMC, or half of it when __cpsys is 1.  crt0.S programs this from
+ * __pllcon below and waits for the PLL to lock; nothing else here is read at
+ * run time, so the checks are the point of the rest.
+ *
+ * The default is an 8 MHz crystal taken to the 40 MHz this part runs at, which
+ * is 8 / 1 * 20 / 4.  A board with a different crystal changes __fosc_hz and
+ * whichever of the three dividers gets it back to 40 MHz; getting it wrong is
+ * a link error rather than a part that runs at the wrong speed or not at all.
+ */
+__fosc_hz = 8000000;
+__pll_p   = 1;
+__pll_n   = 20;
+__pll_k   = 4;
+__cpsys   = 0;
+
+__fin_hz  = __fosc_hz / __pll_p;
+__fvco_hz = __fin_hz * __pll_n;
+__fmc_hz  = __fvco_hz / __pll_k;
+__fcpu_hz = __fmc_hz / (__cpsys + 1);
+
+/* The same two frequencies in halves, because a program cannot use the symbols
+ * above.  A reference to a symbol is sixteen bits wide here - that is what a
+ * near address is - so "mov r2, #__fcpu_hz" would load 5A00H and say nothing
+ * about the 0262H it dropped.  These are what a baud rate divisor or a timer
+ * reload value is computed from; see README.txt for how to reach them from C.
+ */
+__fmc_hz_lo  = __fmc_hz & 0xFFFF;
+__fmc_hz_hi  = (__fmc_hz >> 16) & 0xFFFF;
+__fcpu_hz_lo = __fcpu_hz & 0xFFFF;
+__fcpu_hz_hi = (__fcpu_hz >> 16) & 0xFFFF;
+
+/* Which of the VCO's three bands covers fVCO.  This is derived rather than
+ * chosen because it is not a choice: the bands are 100 to 150, 150 to 200 and
+ * 200 to 250 MHz and the field has to name the one fVCO is in.  They meet at
+ * their endpoints, where either value is legal and this takes the upper. */
+__pll_vb = __fvco_hz < 150000000 ? 0 : (__fvco_hz < 200000000 ? 1 : 2);
+
+ASSERT(__pll_p >= 1 && __pll_p <= 4, "__pll_p is the input divider, 1 to 4")
+ASSERT(__pll_n >= 1 && __pll_n <= 32, "__pll_n is the VCO multiplier, 1 to 32")
+ASSERT(__pll_k >= 1 && __pll_k <= 16, "__pll_k is the output divider, 1 to 16")
+ASSERT(__cpsys == 0 || __cpsys == 1, "__cpsys is 0 for fMC or 1 for fMC/2")
+ASSERT(__fin_hz >= 4000000 && __fin_hz <= 35000000,
+       "fOSC / __pll_p is outside the 4 to 35 MHz the PLL input takes")
+ASSERT(__fvco_hz >= 100000000 && __fvco_hz <= 250000000,
+       "fIN * __pll_n is outside the 100 to 250 MHz the VCO covers")
+ASSERT(__fmc_hz <= 40000000, "fVCO / __pll_k is above the 40 MHz fMC maximum")
+ASSERT(__fcpu_hz <= 40000000, "fMC / (__cpsys + 1) is above the 40 MHz fCPU maximum")
+
+/* PLLCON, which is one write: the three dividers are held one less than they
+ * multiply or divide by, the band goes in the middle, and PLLCTRL at the top
+ * says what the CPU is running on.  11B is the PLL, 01B is the oscillator with
+ * the VCO running beside it, which is where the CPU waits while the PLL locks.
+ *
+ * PLLWRI, bit 15, is set by the hardware and not by this. */
+__pllcon = (3 << 13) | ((__pll_n - 1) << 8) | (__pll_vb << 6) |
+           ((__pll_p - 1) << 4) | (__pll_k - 1);
+__pllcon_bypass = (1 << 13) | ((__pll_n - 1) << 8) | (__pll_vb << 6) |
+                  ((__pll_p - 1) << 4) | (__pll_k - 1);
+
+/* CPSYS is bit 8 of SYSCON1, already in place: crt0.S ORs this in rather than
+ * shifting, because an assembler cannot fold an expression over a symbol the
+ * linker has not defined yet. */
+__cpsys_bit = __cpsys << 8;
+
 MEMORY
 {
   /* Only the first 48 KByte of the Flash fits under the three data page

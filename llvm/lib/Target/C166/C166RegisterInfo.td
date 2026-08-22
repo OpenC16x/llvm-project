@@ -322,27 +322,32 @@ def EXISEL0     : C166Reg<0xED, "exisel0">; // F1DAH
 def SYSCON1     : C166Reg<0xEE, "syscon1">; // F1DCH
 
 //===----------------------------------------------------------------------===//
-// X-peripheral registers
+// Registers with no short address
 //===----------------------------------------------------------------------===//
 
-// The on-chip X-peripherals are mapped at E800H and up, which is inside the
-// page DPP3 selects, so an ordinary near address reaches them.  What they do
-// not have is a short address - the manual writes it as "--" - so no "reg"
-// field can name one and nothing below is in a class that a "reg" field uses.
-// These carry their 16 bit address as the hardware encoding rather than a
-// short address, because that is all there is to carry.
-//
-// This is what the XC164CM Peripheral Units manual names in the per-register
-// form: the CAPCOM6 unit and the interrupt jump table cache.  Three more
-// addresses it annotates - E8AEH, E8C4H and E8CEH - are left out because the
-// name that goes with each did not come out of the document.  The CAN module's
-// registers are not here either; that part has its own manual.
+// These have no short address at all - the manual writes it as "--" - so no
+// "reg" field can name one, and nothing below is in a class that a "reg" field
+// uses.  They carry their 16 bit address as the hardware encoding rather than
+// a short address, because that is all there is to carry.  All of them are
+// inside the page DPP3 selects, so an ordinary near address reaches them.
+
+// Where the oscillator and the PLL report what they are doing; crt0.S waits on
+// its PLLLOCK, bit 14, before switching the CPU onto the PLL.  This one is not
+// an X-peripheral - it is in the extended space beside PLLCON and SYSCON1 -
+// and is here only because it is reachable the same way they are and no other.
+def SYSSTAT       : C166Reg<0xF1E4, "sysstat">; // F1E4H, no short address
+
+// The rest are the on-chip X-peripherals, mapped at E800H and up.  This is
+// what the XC164CM Peripheral Units manual names in the per-register form: the
+// CAPCOM6 unit and the interrupt jump table cache.  Three more addresses it
+// annotates - E8AEH, E8C4H and E8CEH - are left out because the name that goes
+// with each did not come out of the document.  The CAN module's registers are
+// not here either; that part has its own manual.
 //
 // ADDRSEL7 and TCONCS7 are the LXBus controller's, which is the on-chip bus
 // the X-peripherals hang off.  That is a different thing from the external bus
 // whose ADDRSEL1 to ADDRSEL4 are absent from this part, and the reason both
 // statements are true at once.
-
 def CCU6_T12      : C166Reg<0xE890, "ccu6_t12">; // X-peripheral
 def CCU6_T12PR    : C166Reg<0xE892, "ccu6_t12pr">; // X-peripheral
 def CCU6_T12DTC   : C166Reg<0xE894, "ccu6_t12dtc">; // X-peripheral
@@ -438,30 +443,32 @@ def ESFR : RegisterClass<"C166", [i16], 16,
   let CopyCost = -1;
 }
 
-// The X-peripheral registers.  Like the extended ones these are reachable by
-// address only, and for a stronger reason: they have no short address at all.
-// What CoSTORE can name.  These are addressed by a five bit code of their own
-// rather than by a short address, so this class exists to say which registers
-// the code covers; the encoder maps each to its code.
 // The two pointers the MAC unit's indirect forms run on.
 def CoIDX : RegisterClass<"C166", [i16], 16, (add IDX0, IDX1)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
 
+// What CoSTORE can name.  These are addressed by a five bit code of their own
+// rather than by a short address, so this class exists to say which registers
+// the code covers; the encoder maps each to its code.
 def CoREG : RegisterClass<"C166", [i16], 16,
   (add MSW, MAH, MAS, MAL, MCW, MRW)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
 
+// The registers reachable by address only.  Like the extended ones above they
+// are not reachable through a "reg" field, and for a stronger reason: they have
+// no short address at all, so there is nothing a "reg" field could carry.
 def XSFR : RegisterClass<"C166", [i16], 16,
   (add
       CCU6_T12, CCU6_T12PR, CCU6_T12DTC, CCU6_CC60R, CCU6_CC61R,
       CCU6_CC62R, CCU6_TCTR4, CCU6_CMPSTAT, CCU6_TCTR0, CCU6_T13,
       CCU6_T13PR, CCU6_CC63R, CCU6_MODCTR, CCU6_TRPCTR, CCU6_T12MSEL,
       CCU6_MCMOUT, CCU6_IS, CCU6_ISS, CCU6_ISR, CCU6_INP, CCU6_IEN,
-      FINT0CSP, FINT0ADDR, FINT1CSP, FINT1ADDR, TCONCS7, ADDRSEL7)> {
+      FINT0CSP, FINT0ADDR, FINT1CSP, FINT1ADDR, TCONCS7, ADDRSEL7,
+      SYSSTAT)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

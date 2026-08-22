@@ -146,6 +146,80 @@ instruction that changes it changes what every register operand around it
 means; a program that wants a different register bank is better off doing that
 deliberately than having the startup code do it quietly.
 
+The clock
+---------
+
+The other thing in c166.ld that belongs to the board rather than to the part is
+the crystal, and everything downstream of it is arithmetic:
+
+  __fosc_hz = 8000000;
+  __pll_p   = 1;
+  __pll_n   = 20;
+  __pll_k   = 4;
+  __cpsys   = 0;
+
+The PLL divides the oscillator by P, multiplies by N and divides by K, so
+
+  fIN  = fOSC / P    which the PLL takes only between 4 and 35 MHz
+  fVCO = fIN  * N    which the VCO covers only between 100 and 250 MHz
+  fMC  = fVCO / K    which this part runs at up to 40 MHz
+
+and fCPU is fMC, or half of it when __cpsys is 1.  The default is an 8 MHz
+crystal taken to the 40 MHz the part runs at, which is 8 / 1 * 20 / 4.
+
+The script works those three out, checks every one of them, and turns them into
+the single word crt0.S writes to PLLCON.  So a board with a different crystal
+changes __fosc_hz and whichever of the dividers gets it back to the speed it
+wants, and a combination that does not work is a link error naming which of the
+limits it missed rather than a part that runs at the wrong speed or does not
+start.  A 4 MHz crystal reaches the same 40 MHz as 4 / 1 * 30 / 3, and a 20 MHz
+one as 20 / 2 * 20 / 5.
+
+The VCO's band is not among the parameters because it is not a choice: the
+three bands are 100 to 150, 150 to 200 and 200 to 250 MHz, and the field has to
+name the one fVCO landed in.  __pll_vb is derived from fVCO for that reason.
+
+The script also publishes what came out:
+
+  __fosc_hz  __fin_hz  __fvco_hz  __fmc_hz  __fcpu_hz
+
+but those are for the arithmetic and the checks above them and not for a
+program to load.  A reference to a symbol is sixteen bits wide on this part -
+that is what a near address is - so "mov r2, #__fcpu_hz" loads 5A00H and says
+nothing at all about the 0262H it dropped.
+
+The two a program actually computes from are published in halves for that
+reason, and those do fit:
+
+  __fmc_hz_lo  __fmc_hz_hi  __fcpu_hz_lo  __fcpu_hz_hi
+
+An absolute symbol is one whose address is the value, so from C:
+
+  extern char __fcpu_hz_lo[], __fcpu_hz_hi[];
+  #define FCPU (((unsigned long)(unsigned)__fcpu_hz_hi << 16) | \
+                (unsigned long)(unsigned)__fcpu_hz_lo)
+
+which is what a baud rate divisor or a timer reload value is computed from.
+
+crt0.S does three things with all of this, in an order that matters.  It sets
+CPSYS first, while the CPU is still on the oscillator, so that the divider is
+right before the faster clock arrives rather than after.  Then it starts the
+VCO with PLLCTRL = 01B, which runs the VCO while leaving the CPU on the
+oscillator, and waits for SYSSTAT's PLLLOCK.  Only then does it write PLLCON
+again with PLLCTRL = 11B, which is what puts the CPU on the PLL.
+
+All of that is before EINIT, and has to be: PLLCON and SYSCON1 are protected
+registers, and the protection is off between reset and EINIT and on afterwards.
+
+The wait is bounded.  The CPU is on the bypass clock while it waits, which is
+fOSC/(P*K), and the checks above hold that above 250 kHz - fOSC/P is at least
+4 MHz and K is at most 16 - so the 65535 turns the loop allows are seconds
+rather than microseconds.  That is far longer than the PLL takes to lock, which
+leaves an oscillator that never started as the only way to reach the end of it.
+When it is reached crt0.S jumps to __pll_lock_failed, which is a weak symbol
+whose default is to hang; a program with something to say about a dead crystal
+defines its own and gets control on the bypass clock.
+
 Naming the registers from C
 ---------------------------
 

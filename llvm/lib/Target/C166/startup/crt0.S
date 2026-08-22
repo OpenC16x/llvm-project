@@ -61,6 +61,51 @@ _start:
         mov     dpp2, #__dpp2_page
         mov     dpp3, #__dpp3_page
 
+        // The clock.  Out of reset the CPU runs on the oscillator rather than
+        // on the PLL, so everything above has been running at a fraction of
+        // fOSC and everything below runs at fCPU.  The linker script is what
+        // knows the crystal and the dividers, and has already checked that
+        // they add up to something the part can run at; what is left here is
+        // the order to write them in.
+
+        // CPSYS decides whether fCPU is fMC or half of it, and it has to be
+        // right before the faster clock arrives rather than after.  SYSCON1
+        // holds other things too, so this changes the one bit and leaves them.
+        mov     r4, syscon1
+        and     r4, #0xFEFF
+        or      r4, #__cpsys_bit
+        mov     syscon1, r4
+
+        // Start the VCO but leave the CPU on the oscillator, which is what
+        // PLLCTRL = 01B means.  The wait below then runs on a clock that is
+        // already good, rather than on one that is about to change.
+        mov     r4, #__pllcon_bypass
+        mov     pllcon, r4
+
+        // Wait for the PLL to lock.  That is SYSSTAT's PLLLOCK, bit 14, and
+        // neither the register nor the bit is in the bit-addressable space, so
+        // this is a load and a mask rather than a JNB.
+        //
+        // The count is a bound and not a delay.  The CPU is on the bypass
+        // clock here, which is fOSC/(P*K), and the checks in the script hold
+        // that above 250 kHz - fOSC/P is at least 4 MHz and K is at most 16 -
+        // so 65535 turns of this loop is seconds rather than microseconds.
+        // That is far longer than the PLL takes to lock, which leaves an
+        // oscillator that never started as the only way to reach the end.
+        mov     r5, #0
+.Lpll_wait:
+        mov     r4, sysstat
+        and     r4, #0x4000
+        jmpa    cc_nz, .Lpll_locked
+        sub     r5, #1
+        jmpa    cc_nz, .Lpll_wait
+        jmpa    cc_UC, __pll_lock_failed
+.Lpll_locked:
+
+        // Switch the CPU onto the PLL: the same word again with PLLCTRL = 11B.
+        mov     r4, #__pllcon
+        mov     pllcon, r4
+
         // CP is left where reset put it.  It says where R0 to R15 are, so an
         // instruction that moves it changes the meaning of every register
         // operand around it; a program that wants a different bank is better
@@ -134,3 +179,15 @@ _start:
 __c166_exit:
         jmpa    cc_UC, __c166_exit
         .size _start, .-_start
+
+        // Where the startup code goes when the PLL never locked.  There is
+        // nothing useful to do about that here - the oscillator is the only
+        // clock there is - so this hangs, and it is weak so that a program
+        // with something to say about it can say so instead.  Such a handler
+        // is entered on the bypass clock, which is fOSC/(P*K), and has no
+        // reason to return: everything after the wait assumes fCPU.
+        .weak __pll_lock_failed
+        .type __pll_lock_failed,@function
+__pll_lock_failed:
+        jmpa    cc_UC, __pll_lock_failed
+        .size __pll_lock_failed, .-__pll_lock_failed
