@@ -510,12 +510,15 @@ Known limitations / things to do
   would be nothing for a disassembly to go on.  Three of them are missing
   because the manual contradicts itself about where they are; the register file
   names which.
-* The interrupt jump table cache is not used.  This part can hold two 24 bit
-  pointers in FINT0ADDR/FINT0CSP and FINT1ADDR/FINT1CSP and branch straight to
-  those two service routines, skipping the vector table's second branch
-  entirely.  Nothing here writes them, and they are in the XSFR space at
-  EC00H and up, which is a fourth register space this backend does not model
-  at all - it has no short address, so only a far pointer reaches it.
+* The interrupt jump table cache is reachable but not used.  This part can
+  hold two 24 bit pointers in FINT0ADDR/FINT0CSP and FINT1ADDR/FINT1CSP and
+  branch straight to those two service routines, skipping the vector table's
+  second branch entirely.  Nothing here writes them, and nothing decides which
+  two interrupts would deserve them, which is a policy question rather than a
+  missing encoding.
+* Only the X-peripheral registers the XC164CM's own two manuals name are
+  modelled.  The CAN module has a manual of its own that this was not built
+  from, so its registers have to be written as addresses.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

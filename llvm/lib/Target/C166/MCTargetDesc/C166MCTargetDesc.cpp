@@ -99,6 +99,11 @@ int64_t C166::getSFRAddress(const MCRegisterInfo &MRI, StringRef Name) {
   for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
     if (Lowered == C166InstPrinter::getRegisterName(Reg))
       return getESFRAddressForShort(MRI.getEncodingValue(Reg));
+
+  // An X-peripheral register carries its whole address, having no short one.
+  for (MCPhysReg Reg : MRI.getRegClass(C166::XSFRRegClassID))
+    if (Lowered == C166InstPrinter::getRegisterName(Reg))
+      return MRI.getEncodingValue(Reg);
   return -1;
 }
 
@@ -108,6 +113,9 @@ StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr) {
       return C166InstPrinter::getRegisterName(Reg);
   for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
     if (getESFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)
+      return C166InstPrinter::getRegisterName(Reg);
+  for (MCPhysReg Reg : MRI.getRegClass(C166::XSFRRegClassID))
+    if (MRI.getEncodingValue(Reg) == Addr)
       return C166InstPrinter::getRegisterName(Reg);
   return StringRef();
 }

@@ -175,9 +175,12 @@ name, since the disassembler prints an address it recognises by name.
 
 turning "SYSCON1 = 0x1000" into "mov syscon1, r2" rather than a bare address.
 
-Both register spaces are inside the page DPP3 selects, so these are ordinary
-near accesses: no EXTR, no far pointer, and nothing to set up beyond the DPP3
-that crt0.S already writes.
+All three register spaces are inside the page DPP3 selects, so these are
+ordinary near accesses: no EXTR, no far pointer, and nothing to set up beyond
+the DPP3 that crt0.S already writes.  That includes the on-chip X-peripherals
+at E800H and up - the CAPCOM6 unit, the LXBus controller and the interrupt jump
+table cache - which have no short address at all and so can only be reached
+this way.
 
 Which trap number a peripheral raises is not in the header; it is in
 xc164cm-vectors.inc, because a vector is claimed from assembly rather than
