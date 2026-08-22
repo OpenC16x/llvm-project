@@ -79,7 +79,7 @@ enum class Op {
                                                   MOVB8rp) X(MOVB8pr) X(MOVB8rpi) X(MOVBS16r8)      \
                                                   X(MOVBZ16r8) X(JMPA) X(JMPAcc) X(JMPR) X(         \
                                                       JMPRcc) X(JMPI) X(JMPS)                       \
-                                                      X(CALLA) X(CALLI) X(CALLS) X(                 \
+                                                      X(TRAP) X(CALLA) X(CALLI) X(CALLS) X(                 \
                                                           RET) X(RETI) X(RETS) X(PUSH) X(POP)       \
                                                           X(JB) X(JNB) X(                           \
                                                               JBC) X(JNBS) X(BSET) X(BCLR) X(BAND)  \
@@ -1130,6 +1130,19 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   case Op::RETS:
     M.IP = M.pop();
     M.CSP = M.pop();
+    break;
+  case Op::TRAP:
+    // A trap saves what a hardware interrupt saves and then branches to the
+    // vector table entry itself - it does not read a vector through it.  The
+    // entry for trap n is the double word at 4n, which is where a project puts
+    // a jump to its handler.  CSP is pushed and cleared because segmentation is
+    // on, which is the only mode this simulator runs in, and RETI undoes all
+    // three pushes in the opposite order.
+    M.push(M.PSW);
+    M.push(M.CSP);
+    M.CSP = 0;
+    M.push(M.IP);
+    M.IP = uint16_t(4 * (Imm(0) & 0x7F));
     break;
   case Op::RETI:
     // The interrupted state is IP, then CSP while segmentation is on, then

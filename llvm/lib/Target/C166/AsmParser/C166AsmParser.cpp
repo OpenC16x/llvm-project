@@ -117,6 +117,7 @@ public:
   bool isBitOff() const { return isImmInRange(0, 255, /*AllowSymbol=*/false); }
   bool isMask8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
   bool isIrang2() const { return isImmInRange(1, 4, /*AllowSymbol=*/false); }
+  bool isTrap7() const { return isImmInRange(0, 127, /*AllowSymbol=*/false); }
   bool isSeg8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
   bool isPag10() const { return isImmInRange(0, 1023, /*AllowSymbol=*/true); }
 

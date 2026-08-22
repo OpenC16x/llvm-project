@@ -346,6 +346,18 @@ bit_target:
 ; CHECK: movb mdl, mdh    ; encoding: [0xf3,0x07,0x0c,0xfe]
         movb    mdl, mdh
 
+; TRAP branches to a vector table entry rather than through it, so the number
+; it carries is half the entry's address: it sits in bits 7 to 1 of the second
+; byte and the low bit is zero.
+; CHECK: trap #0          ; encoding: [0x9b,0x00]
+        trap    #0
+; CHECK: trap #2          ; encoding: [0x9b,0x04]
+        trap    #2
+; CHECK: trap #34         ; encoding: [0x9b,0x44]
+        trap    #0x22
+; CHECK: trap #127        ; encoding: [0x9b,0xfe]
+        trap    #127
+
 ; The protected instructions repeat their opcode in the second word.
 ; CHECK: srst             ; encoding: [0xb7,0x48,0xb7,0xb7]
         srst

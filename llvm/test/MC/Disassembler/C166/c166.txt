@@ -189,6 +189,13 @@
 # CHECK: mov mdl, mdh
 0xf2 0x07 0x0c 0xfe
 
+# TRAP carries half its vector's address, so these come back as the trap
+# numbers they were written as.
+# CHECK: trap #2
+0x9b 0x04
+# CHECK: trap #127
+0x9b 0xfe
+
 # In a byte instruction the same field names a byte register instead, so these
 # opcodes come back with the byte mnemonic and the byte register name.
 # CHECK: addb mdl, #1

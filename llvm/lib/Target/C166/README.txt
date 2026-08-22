@@ -435,6 +435,13 @@ assembles to the bytes it came from.  An address with no register at it stays
 a number, and so does a bit-addressable word with nothing mapped at it, while
 "bset psw.10" and "bclr mdc.0" say what they mean.
 
+TRAP is the software entry to a vector.  It does not read a vector through the
+table: it branches to the table entry itself, at 4 * the trap number, so the
+entry has to hold a jump.  What it saves is what a hardware interrupt saves -
+PSW, then CSP while segmentation is on, then IP - which is why RETI returns
+from either.  Nothing selects it; it is there so that a handler is reachable
+and so that the path through a vector can be tested.
+
 Known limitations / things to do
 --------------------------------
 
@@ -457,6 +464,9 @@ Known limitations / things to do
 * The SFR map follows the C167 where the derivatives disagree, and three names
   are at different addresses on an 80C166; C166RegisterInfo.td lists them.
   Nothing selects a derivative, so nothing warns about it.
+* Nothing builds the interrupt vector table.  TRAP reaches a slot and RETI
+  comes back, but which sources a part has is a property of the part, so a
+  project still writes its own .vectors section and places it.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
