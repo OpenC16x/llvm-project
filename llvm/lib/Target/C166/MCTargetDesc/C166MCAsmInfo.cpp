@@ -17,7 +17,16 @@ void C166MCAsmInfo::anchor() {}
 
 C166MCAsmInfo::C166MCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
     : MCAsmInfoELF(Options) {
-  CodePointerSize = 2;
+  // This is the size of an address in the debug information, and it is four
+  // rather than the two a pointer takes.  A C166 pointer is a 16 bit offset
+  // that the data page pointers or CSP place somewhere in the 16 MByte the
+  // part actually addresses, so two bytes cannot say where anything is: on a
+  // part whose Flash is at C0'0000H the whole program would be described as
+  // living in segment 0.  Debug information wants the physical address rather
+  // than the offset, so it gets four bytes and relocates as ABS32, which is
+  // the full 24 bit value.  DW_AT_byte_size of a pointer type comes from the
+  // source type and is unaffected.
+  CodePointerSize = 4;
   CalleeSaveStackSlotSize = 2;
 
   CommentString = ";";
