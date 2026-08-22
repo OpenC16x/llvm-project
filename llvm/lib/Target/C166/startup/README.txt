@@ -141,6 +141,14 @@ written the way it is in the manual:
   DP3 = 0xFF;          /* port 3 all outputs */
   P3  = 0x0055;
 
+What is here is what an XC164CM has.  A register whose address appears nowhere
+in that part's two manuals has been left out rather than offered to be written
+to by mistake, so the classic CAPCOM1 block, the PWM unit and ports 0, 2, 4, 6,
+7 and 8 are absent - this part has CAPCOM1 and CAPCOM2 under other names and
+addresses, CAPCOM6 in the X-peripheral space that no short address reaches, and
+only ports 1, 3, 5 and 9.  Writing to one that is not here is a compile error
+rather than a store to whatever the address turned out to be.
+
 The addresses are the ones C166RegisterInfo.td holds, which is what the
 assembler and the disassembler use, so the two cannot disagree about where a
 register is.  That is worth knowing because it is checkable: compiling a store

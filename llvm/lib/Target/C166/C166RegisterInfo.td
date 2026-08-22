@@ -111,6 +111,16 @@ def R15 : C166Reg<15, "r15">, DwarfRegNum<[15]>;
 // prefixes them with the module - GPT12E_T2CON for T2CON, ADC_CON for ADCON,
 // CC2_M4 for CCM4 - but names the same addresses, so the two spellings differ
 // only in what a datasheet calls them.
+//
+// What is here is what that part has.  A register whose address appears
+// nowhere in either XC164CM manual has been taken out rather than left to be
+// written to by mistake, which removed the classic CAPCOM1 block (T0, T1,
+// T01CON, CC0 to CC15, CCM0 to CCM3 and their interrupt control registers),
+// the PWM unit, and ports 0, 2, 4, 6, 7 and 8.  This part has CAPCOM1 and
+// CAPCOM2 under CC1_ and CC2_ names at other addresses, has CAPCOM6 in the
+// X-peripheral space at E8xxH where no short address reaches, and has only
+// ports 1, 3, 5 and 9.  Another derivative wanting the old names back should
+// add them from its own manual rather than assume these were right for it.
 
 // CPU core: the data page pointers, the code segment pointer, the multiply/
 // divide unit, the context pointer and the system stack and its bounds.
@@ -154,28 +164,7 @@ def T6CON    : C166Reg<0xA4, "t6con">; // FF48H
 
 // CAPCOM1 and CAPCOM2: the timers, their reloads, the capture/compare
 // registers and the mode control registers.
-def T0       : C166Reg<0x28, "t0">; // FE50H
-def T1       : C166Reg<0x29, "t1">; // FE52H
-def T0REL    : C166Reg<0x2A, "t0rel">; // FE54H
-def T1REL    : C166Reg<0x2B, "t1rel">; // FE56H
-def T01CON   : C166Reg<0xA8, "t01con">; // FF50H
 def T78CON   : C166Reg<0x90, "t78con">; // FF20H
-def CC0      : C166Reg<0x40, "cc0">; // FE80H
-def CC1      : C166Reg<0x41, "cc1">; // FE82H
-def CC2      : C166Reg<0x42, "cc2">; // FE84H
-def CC3      : C166Reg<0x43, "cc3">; // FE86H
-def CC4      : C166Reg<0x44, "cc4">; // FE88H
-def CC5      : C166Reg<0x45, "cc5">; // FE8AH
-def CC6      : C166Reg<0x46, "cc6">; // FE8CH
-def CC7      : C166Reg<0x47, "cc7">; // FE8EH
-def CC8      : C166Reg<0x48, "cc8">; // FE90H
-def CC9      : C166Reg<0x49, "cc9">; // FE92H
-def CC10     : C166Reg<0x4A, "cc10">; // FE94H
-def CC11     : C166Reg<0x4B, "cc11">; // FE96H
-def CC12     : C166Reg<0x4C, "cc12">; // FE98H
-def CC13     : C166Reg<0x4D, "cc13">; // FE9AH
-def CC14     : C166Reg<0x4E, "cc14">; // FE9CH
-def CC15     : C166Reg<0x4F, "cc15">; // FE9EH
 def CC16     : C166Reg<0x30, "cc16">; // FE60H
 def CC17     : C166Reg<0x31, "cc17">; // FE62H
 def CC18     : C166Reg<0x32, "cc18">; // FE64H
@@ -192,27 +181,16 @@ def CC28     : C166Reg<0x3C, "cc28">; // FE78H
 def CC29     : C166Reg<0x3D, "cc29">; // FE7AH
 def CC30     : C166Reg<0x3E, "cc30">; // FE7CH
 def CC31     : C166Reg<0x3F, "cc31">; // FE7EH
-def CCM0     : C166Reg<0xA9, "ccm0">; // FF52H
-def CCM1     : C166Reg<0xAA, "ccm1">; // FF54H
-def CCM2     : C166Reg<0xAB, "ccm2">; // FF56H
-def CCM3     : C166Reg<0xAC, "ccm3">; // FF58H
 def CCM4     : C166Reg<0x91, "ccm4">; // FF22H
 def CCM5     : C166Reg<0x92, "ccm5">; // FF24H
 def CCM6     : C166Reg<0x93, "ccm6">; // FF26H
 def CCM7     : C166Reg<0x94, "ccm7">; // FF28H
 
 // The PWM module.
-def PW0      : C166Reg<0x18, "pw0">; // FE30H
-def PW1      : C166Reg<0x19, "pw1">; // FE32H
-def PW2      : C166Reg<0x1A, "pw2">; // FE34H
-def PW3      : C166Reg<0x1B, "pw3">; // FE36H
-def PWMCON0  : C166Reg<0x98, "pwmcon0">; // FF30H
-def PWMCON1  : C166Reg<0x99, "pwmcon1">; // FF32H
 
 // The A/D converter and the watchdog.
 def ADDAT    : C166Reg<0x50, "addat">; // FEA0H
 def ADCON    : C166Reg<0xD0, "adcon">; // FFA0H
-def WDT      : C166Reg<0x57, "wdt">; // FEAEH
 def WDTCON   : C166Reg<0xD7, "wdtcon">; // FFAEH
 
 // Serial channel 0 (ASC0) and the synchronous serial channel (SSC).
@@ -245,47 +223,22 @@ def S0EIC    : C166Reg<0xB8, "s0eic">; // FF70H
 def SSCTIC   : C166Reg<0xB9, "ssctic">; // FF72H
 def SSCRIC   : C166Reg<0xBA, "sscric">; // FF74H
 def SSCEIC   : C166Reg<0xBB, "ssceic">; // FF76H
-def CC0IC    : C166Reg<0xBC, "cc0ic">; // FF78H
-def CC1IC    : C166Reg<0xBD, "cc1ic">; // FF7AH
-def CC2IC    : C166Reg<0xBE, "cc2ic">; // FF7CH
-def CC3IC    : C166Reg<0xBF, "cc3ic">; // FF7EH
-def CC4IC    : C166Reg<0xC0, "cc4ic">; // FF80H
-def CC5IC    : C166Reg<0xC1, "cc5ic">; // FF82H
-def CC6IC    : C166Reg<0xC2, "cc6ic">; // FF84H
-def CC7IC    : C166Reg<0xC3, "cc7ic">; // FF86H
 def CC8IC    : C166Reg<0xC4, "cc8ic">; // FF88H
 def CC9IC    : C166Reg<0xC5, "cc9ic">; // FF8AH
 def CC10IC   : C166Reg<0xC6, "cc10ic">; // FF8CH
 def CC11IC   : C166Reg<0xC7, "cc11ic">; // FF8EH
 def CC12IC   : C166Reg<0xC8, "cc12ic">; // FF90H
 def CC13IC   : C166Reg<0xC9, "cc13ic">; // FF92H
-def CC14IC   : C166Reg<0xCA, "cc14ic">; // FF94H
-def CC15IC   : C166Reg<0xCB, "cc15ic">; // FF96H
 def ADCIC    : C166Reg<0xCC, "adcic">; // FF98H
 def ADEIC    : C166Reg<0xCD, "adeic">; // FF9AH
-def T0IC     : C166Reg<0xCE, "t0ic">; // FF9CH
-def T1IC     : C166Reg<0xCF, "t1ic">; // FF9EH
 
 // The ports and their direction registers.
-def P0L      : C166Reg<0x80, "p0l">; // FF00H
-def P0H      : C166Reg<0x81, "p0h">; // FF02H
 def P1L      : C166Reg<0x82, "p1l">; // FF04H
 def P1H      : C166Reg<0x83, "p1h">; // FF06H
-def P1DIDIS  : C166Reg<0x52, "p1didis">; // FEA4H
-def P2       : C166Reg<0xE0, "p2">; // FFC0H
-def DP2      : C166Reg<0xE1, "dp2">; // FFC2H
 def P3       : C166Reg<0xE2, "p3">; // FFC4H
 def DP3      : C166Reg<0xE3, "dp3">; // FFC6H
-def P4       : C166Reg<0xE4, "p4">; // FFC8H
-def DP4      : C166Reg<0xE5, "dp4">; // FFCAH
 def P5       : C166Reg<0xD1, "p5">; // FFA2H
 def P5DIDIS  : C166Reg<0xD2, "p5didis">; // FFA4H
-def P6       : C166Reg<0xE6, "p6">; // FFCCH
-def DP6      : C166Reg<0xE7, "dp6">; // FFCEH
-def P7       : C166Reg<0xE8, "p7">; // FFD0H
-def DP7      : C166Reg<0xE9, "dp7">; // FFD2H
-def P8       : C166Reg<0xEA, "p8">; // FFD4H
-def DP8      : C166Reg<0xEB, "dp8">; // FFD6H
 // Port 9 sits in the block the external bus registers occupy on a part that
 // has an external bus; the XC164CM has none.
 def P9       : C166Reg<0x8B, "p9">; // FF16H
@@ -370,22 +323,18 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
-  (add DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
-       CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9,
-       PSW, MDC, ZEROS, ONES, TFR, T2, T3, T4,
-       T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON, T6CON, T0, T1, T0REL,
-       T1REL, T01CON, T78CON, CC0, CC1, CC2, CC3, CC4, CC5, CC6, CC7, CC8,
-       CC9, CC10, CC11, CC12, CC13, CC14, CC15, CC16, CC17, CC18, CC19,
-       CC20, CC21, CC22, CC23, CC24, CC25, CC26, CC27, CC28, CC29, CC30,
-       CC31, CCM0, CCM1, CCM2, CCM3, CCM4, CCM5, CCM6, CCM7, PW0, PW1,
-       PW2, PW3, PWMCON0, PWMCON1, ADDAT, ADCON, WDT, WDTCON, S0TBUF,
-       S0RBUF, S0BG, S0CON, SSCCON, PECC0, PECC1, PECC2, PECC3, PECC4,
-       PECC5, PECC6, PECC7, T2IC, T3IC, T4IC, T5IC, T6IC, CRIC, S0TIC,
-       S0RIC, S0EIC, SSCTIC, SSCRIC, SSCEIC, CC0IC, CC1IC, CC2IC, CC3IC,
-       CC4IC, CC5IC, CC6IC, CC7IC, CC8IC, CC9IC, CC10IC, CC11IC, CC12IC,
-       CC13IC, CC14IC, CC15IC, ADCIC, ADEIC, T0IC, T1IC, P0L, P0H, P1L,
-       P1H, P1DIDIS, P2, DP2, P3, DP3, P4, DP4, P5, P5DIDIS, P6, DP6, P7,
-       DP7, P8, DP8, FOCON)> {
+  (add 
+      DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
+      CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9, PSW, MDC, ZEROS,
+      ONES, TFR, T2, T3, T4, T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON,
+      T6CON, T78CON, CC16, CC17, CC18, CC19, CC20, CC21, CC22, CC23, CC24,
+      CC25, CC26, CC27, CC28, CC29, CC30, CC31, CCM4, CCM5, CCM6, CCM7,
+      ADDAT, ADCON, WDTCON, S0TBUF, S0RBUF, S0BG, S0CON, SSCCON, PECC0,
+      PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC, T3IC, T4IC,
+      T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC, SSCEIC,
+      CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC, P1L,
+      P1H, P3, DP3, P5, P5DIDIS, FOCON
+  )> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
