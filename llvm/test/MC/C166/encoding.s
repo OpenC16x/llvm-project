@@ -192,18 +192,26 @@
         bset    r5.3
 ; CHECK: bclr r5.3        ; encoding: [0x3e,0xf5]
         bclr    r5.3
-; CHECK: bset 136.10      ; encoding: [0xaf,0x88]
+; CHECK: bset psw.10      ; encoding: [0xaf,0x88]
         bset    psw.10
-; CHECK: bclr 135.0       ; encoding: [0x0e,0x87]
+; CHECK: bclr mdc.0       ; encoding: [0x0e,0x87]
         bclr    mdc.0
 
 ; A word written as a number closes up with its bit position in decimal, but a
 ; hexadecimal one has to be spaced out: the lexer reads "0x88.15" as a broken
-; floating point literal before the target ever sees it.
-; CHECK: bset 136.10      ; encoding: [0xaf,0x88]
+; floating point literal before the target ever sees it.  Either way a word a
+; register is mapped at comes back by name.
+; CHECK: bset psw.10      ; encoding: [0xaf,0x88]
         bset    136.10
-; CHECK: bset 136.15      ; encoding: [0xff,0x88]
+; CHECK: bset psw.15      ; encoding: [0xff,0x88]
         bset    0x88 . 15
+
+; Bit-addressable RAM is FD00H to FDFEH, which is bitoff 00H to 7FH.  Nothing
+; is mapped there to name, so it stays a number.
+; CHECK: bset 0.3         ; encoding: [0x3f,0x00]
+        bset    0 . 3
+; CHECK: bset 127.0       ; encoding: [0x0f,0x7f]
+        bset    127.0
 
 ; The two operand bit instructions name the destination first but encode the
 ; source first, and pack the source bit position into the high nibble of the
@@ -232,7 +240,7 @@
 ; instruction after them, which is what the disassembler prints back.
 ; CHECK: jb r5.3, -3      ; encoding: [0x8a,0xf5,0xfd,0x30]
         jb      r5.3, -3
-; CHECK: jnb 136.10, 4    ; encoding: [0x9a,0x88,0x04,0xa0]
+; CHECK: jnb psw.10, 4    ; encoding: [0x9a,0x88,0x04,0xa0]
         jnb     psw.10, 4
 ; CHECK: jbc r5.3, 2      ; encoding: [0xaa,0xf5,0x02,0x30]
         jbc     r5.3, 2
@@ -337,6 +345,45 @@ bit_target:
         movb    rl4, 0x2000
 ; CHECK: movb mdl, mdh    ; encoding: [0xf3,0x07,0x0c,0xfe]
         movb    mdl, mdh
+
+; The extended special function registers are mapped from F000H and F100H
+; rather than FE00H and FF00H.  Reaching one through a "reg" field would need
+; an EXTR and would encode the same as the register with the same short address
+; in the ordinary space, so they are reachable by address only - which needs no
+; EXTR, because the default DPPs already cover F000H.
+; CHECK: mov syscon1, r2  ; encoding: [0xf6,0xf2,0xdc,0xf1]
+        mov     syscon1, r2
+; CHECK: mov r3, pllcon   ; encoding: [0xf2,0xf3,0xd0,0xf1]
+        mov     r3, pllcon
+; CHECK: mov odp3, r4     ; encoding: [0xf6,0xf4,0xc6,0xf1]
+        mov     odp3, r4
+; CHECK: mov r5, rtc_con  ; encoding: [0xf2,0xf5,0x10,0xf1]
+        mov     r5, rtc_con
+
+; The short addresses an external bus would use name other things on this part,
+; so these are the XC164CM's registers rather than the C167's BUSCON/ADDRSEL.
+; CHECK: mov vecseg, #192 ; encoding: [0xe6,0x89,0xc0,0x00]
+        mov     vecseg, #0xC0
+; CHECK: mov spseg, #3    ; encoding: [0xe6,0x86,0x03,0x00]
+        mov     spseg, #3
+; CHECK: mov cpucon1, r2  ; encoding: [0xf6,0xf2,0x18,0xfe]
+        mov     cpucon1, r2
+; CHECK: mov p9, #0       ; encoding: [0xe6,0x8b,0x00,0x00]
+        mov     p9, #0
+; CHECK: bset odp9.3      ; encoding: [0x3f,0x8d]
+        bset    odp9.3
+
+; TRAP branches to a vector table entry rather than through it, so the number
+; it carries is half the entry's address: it sits in bits 7 to 1 of the second
+; byte and the low bit is zero.
+; CHECK: trap #0          ; encoding: [0x9b,0x00]
+        trap    #0
+; CHECK: trap #2          ; encoding: [0x9b,0x04]
+        trap    #2
+; CHECK: trap #34         ; encoding: [0x9b,0x44]
+        trap    #0x22
+; CHECK: trap #127        ; encoding: [0x9b,0xfe]
+        trap    #127
 
 ; The protected instructions repeat their opcode in the second word.
 ; CHECK: srst             ; encoding: [0xb7,0x48,0xb7,0xb7]

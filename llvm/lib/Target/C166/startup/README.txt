@@ -6,9 +6,11 @@ memory map to link against.  None of it is built by the LLVM build: it is code
 for the target, not for the machine doing the building, so it is here to be
 copied into a project and adjusted rather than installed.
 
-  crt0.S   the reset vector and the startup sequence
-  c166.ld  a linker script for an SAB 83C166 with nothing attached to it
-  mem.c    memcpy, memmove, memset and memcmp
+  crt0.S      the reset vector and the startup sequence
+  c166.ld     a linker script for a part with nothing attached to it
+  vectors.ld  the interrupt vector table, for a program that has handlers
+  xc164cm.h   the special function registers, for C
+  mem.c       memcpy, memmove, memset and memcmp
 
 Building it
 -----------
@@ -49,11 +51,52 @@ is not optional.
 What to change for a particular part
 ------------------------------------
 
-The linker script is written for the smallest thing this family comes in: the
-8 KByte of internal ROM at the bottom of code segment 0 and the 1 KByte of
-internal RAM at 00'FA00H that an SAB 83C166 has, with nothing outside the
-chip.  Almost every real board has external memory, and the MEMORY block at
-the top of c166.ld is where that goes.
+The linker script is written for an XC164CM with nothing outside the chip: the
+64 KByte of program Flash at C0'0000H, the 2 KByte of DSRAM at 00'C000H and the
+2 KByte of DPRAM at 00'F600H.  The MEMORY block at the top of c166.ld is where
+a board's own memory goes.
+
+Only 48 KByte of that Flash is in the rom region, and the reason is the thing
+to understand before changing any of this.  A 16 bit address does not name a
+physical location on a C166: the data page pointers map each quarter of it onto
+a 16 KByte page, so what an instruction carries is an offset and the DPPs say
+where it lands.  This script points DPP0 to DPP2 at the first three pages of
+the Flash and leaves DPP3 at page 3, which is 00'C000H to 00'FFFFH - the DSRAM,
+the DPRAM and both register spaces.  So a near address of 0000H to BFFFH is
+Flash and C000H to FFFFH is RAM and registers, and in both cases it is the low
+16 bits of the physical address.  The top 16 KByte of the Flash has no near
+address left to give it, which is why the region stops at 48 KByte; anything up
+there has to be reached far, which is what the farrom region is: .fartext and
+.farrodata go there, so an object declared __far uses the part of the Flash a
+near address cannot name.  Overflowing either region is an error from the
+linker, which is what keeps a program honest about the limit.
+
+The 48 KByte limit is on read-only data rather than on code.  A branch takes
+its segment from CSP and its offset from the instruction, so code is reachable
+anywhere in the segment; a program with more than 48 KByte of it can put .text
+in farrom instead, and only .rodata and the ROM image of .data have to stay
+below C0'C000H.
+
+Writable far data - .fardata and .farbss - goes in the PSRAM at E0'0000H, which
+is the only RAM here a near address cannot reach: it is data page 896 and all
+four page pointers are spoken for.  crt0.S initialises it with a second pair of
+loops that supply the segment with an EXTS, reading the ROM image near and
+writing the destination far.
+
+It is the last resort of the three RAMs rather than the first.  The manual
+calls the PSRAM optimised for code fetches and slower than the data memories
+for data, and a far access pays an EXTS on top of that, so __far on a variable
+is for what does not fit in the DSRAM rather than for anything it makes faster.
+The PSRAM's own strength is code: the manual singles out the interrupt vector
+table as something worth putting there.
+
+The pages are named by the script, not by crt0.S:
+
+  __dpp0_page  __dpp1_page  __dpp2_page  __dpp3_page
+
+so moving the memory means changing the MEMORY block and nothing else.  A part
+whose ROM really is in segment 0 sets them to 0, 1, 2 and 3, which is the
+identity and also the reset state.
 
 Three symbols in the script are addresses the hardware already knows, because
 SP, STKUN, STKOV and CP come out of reset holding them:
@@ -65,9 +108,18 @@ SP, STKUN, STKOV and CP come out of reset holding them:
 The system stack is the hardware one, which holds return addresses and is not
 addressable by the compiler.  The other stack, the one the ABI uses for
 arguments, locals and spills, is addressed through R0 and grows down from
-__user_stack_top, which the script puts at the top of RAM.  Both are in the
-same 1 KByte to start with, which does not leave much; a board with external
-RAM should move the user stack out there and give the system stack the room.
+__user_stack_top.
+
+The two RAMs are split along that line.  Static data goes in the DSRAM, which
+is 2 KByte and has nothing else in it; the ABI stack gets the KByte of DPRAM
+from 00'F600H to 00'F9FFH to itself, with the system stack growing down into
+FA00H from the other side.  So the two stacks meet at a known address and
+neither of them grows into the program's variables, which is what would happen
+if all three shared the DPRAM.
+
+The variant of this part with 32 KByte of Flash has no DSRAM.  That one wants
+the dsram region deleted and .data and .bss moved to dpram, which puts the
+statics and the ABI stack back in the same KByte.
 
 crt0.S writes SP, STKUN, STKOV and the DPPs with a plain "mov sp, #..." each,
 which the assembler can do because the 8 bit "reg" field of MOV reaches the
@@ -78,19 +130,84 @@ instruction that changes it changes what every register operand around it
 means; a program that wants a different register bank is better off doing that
 deliberately than having the startup code do it quietly.
 
+Naming the registers from C
+---------------------------
+
+xc164cm.h gives every special function register a name, so a peripheral is
+written the way it is in the manual:
+
+  #include "xc164cm.h"
+
+  DP3 = 0xFF;          /* port 3 all outputs */
+  P3  = 0x0055;
+
+What is here is what an XC164CM has.  A register whose address appears nowhere
+in that part's two manuals has been left out rather than offered to be written
+to by mistake, so the classic CAPCOM1 block, the PWM unit and ports 0, 2, 4, 6,
+7 and 8 are absent - this part has CAPCOM1 and CAPCOM2 under other names and
+addresses, CAPCOM6 in the X-peripheral space that no short address reaches, and
+only ports 1, 3, 5 and 9.  Writing to one that is not here is a compile error
+rather than a store to whatever the address turned out to be.
+
+The addresses are the ones C166RegisterInfo.td holds, which is what the
+assembler and the disassembler use, so the two cannot disagree about where a
+register is.  That is worth knowing because it is checkable: compiling a store
+through this header and looking at the assembly should show the register's
+name, since the disassembler prints an address it recognises by name.
+
+  clang -target c166 -O2 -I . -S -o - x.c
+
+turning "SYSCON1 = 0x1000" into "mov syscon1, r2" rather than a bare address.
+
+Both register spaces are inside the page DPP3 selects, so these are ordinary
+near accesses: no EXTR, no far pointer, and nothing to set up beyond the DPP3
+that crt0.S already writes.
+
+Which trap number a peripheral raises is not in the header.  That is Table 5-2
+of the XC164CM User's Manual, and guessing at it is exactly the kind of thing
+that produces a handler wired to the wrong source.
+
 Interrupt handlers
 ------------------
 
 The vector table is the low 512 bytes of code segment 0, one double word per
 trap number, so trap n is at 4*n.  Trap 0 is reset, which is why crt0.S puts
-its JMPS there.  A handler is declared
+its JMPS there.  What a slot holds is a jump, not an address: a trap and a
+hardware interrupt both branch to the slot rather than reading through it.
+
+A handler is declared
 
   __attribute__((interrupt)) void handler(void) { ... }
 
-and needs a jump to it in its own slot.  There is nothing here that builds the
-table, because which sources a part has is a property of the part; a project
-does it with a section per vector and an ordered linker script, or with one
-.vectors section written out by hand.
+which makes it save what it uses and return with RETI, and its slot is claimed
+by putting a jump there:
+
+  .section .vectors.026,"ax",@progbits
+  jmps    #seg(handler), sof(handler)
+
+The number is the trap number in decimal, padded to three digits.  vectors.ld
+places each of the 128 slots at the address it has to be at, so slots that
+nothing claims can be left out rather than counted:
+
+  SECTIONS
+  {
+    INCLUDE vectors.ld
+    .text : { ... }
+  }
+
+It replaces the .reset section of c166.ld, and is a separate file because the
+table is 512 bytes of ROM whether its slots are filled or not, which a program
+with no handlers should not pay.  Unclaimed slots end up holding LLD's trap
+pattern, JMPR cc_UC, -1, so a spurious interrupt stops rather than running into
+whatever follows.
+
+On an XC164CM this is the layout the part has at reset.  Two of its registers
+can change it: CPUCON1.VECSC sets the space between vectors, and resets to 00,
+which is the two words assumed here; VECSEG selects the segment the table lives
+in, and resets to C0H for a standard start from internal program memory, which
+is where this script puts the Flash.  A program that writes either wants a
+different script from this one.  Both are protected after EINIT, so a startup
+sequence that changes them has to do it before that.
 
 What is missing
 ---------------
@@ -100,6 +217,8 @@ or anything else should build picolibc or newlib for c166 and link that
 instead; mem.c exists so that a program can be linked and run with nothing
 else present at all.
 
-None of this has been executed on hardware, or on a simulator, because there
-is no free C166 simulator to run it on.  It assembles, links, and disassembles
-back to what it should be.
+None of this has been executed on hardware.  It has been executed on a
+simulator: llvm/utils/C166Sim runs it, and the differential tests there link
+this crt0.S and this mem.c into every program they check, so the startup
+sequence, the block functions and the linker script are all exercised on every
+run.  What that does not establish is that a part agrees with the simulator.

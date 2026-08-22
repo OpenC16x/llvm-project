@@ -117,6 +117,7 @@ public:
   bool isBitOff() const { return isImmInRange(0, 255, /*AllowSymbol=*/false); }
   bool isMask8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
   bool isIrang2() const { return isImmInRange(1, 4, /*AllowSymbol=*/false); }
+  bool isTrap7() const { return isImmInRange(0, 127, /*AllowSymbol=*/false); }
   bool isSeg8() const { return isImmInRange(0, 255, /*AllowSymbol=*/true); }
   bool isPag10() const { return isImmInRange(0, 1023, /*AllowSymbol=*/true); }
 
@@ -325,8 +326,9 @@ public:
 /// else the name stands for the address it is mapped at, which is the table
 /// C166MCTargetDesc holds so that the disassembler can print the same names
 /// back.
-static int64_t matchSpecialFunctionRegister(StringRef Name) {
-  return C166::getSFRAddress(Name);
+static int64_t matchSpecialFunctionRegister(const MCRegisterInfo &MRI,
+                                            StringRef Name) {
+  return C166::getSFRAddress(MRI, Name);
 }
 
 /// The 8 bit "bitoff" word address that names a word in the bit-addressable
@@ -335,7 +337,8 @@ static int64_t matchSpecialFunctionRegister(StringRef Name) {
 /// it already carries, but only the ones from FF00H to FFDEH are bit
 /// addressable at all - FE00H to FEFEH, where MDL, MDH, CP, SP and the DPPs
 /// live, is not.
-static int64_t matchBitAddressableWord(StringRef Name) {
+static int64_t matchBitAddressableWord(const MCRegisterInfo &MRI,
+                                       StringRef Name) {
   std::string Lowered = Name.lower();
   StringRef Number = Lowered;
   if (Number.consume_front("r")) {
@@ -345,10 +348,10 @@ static int64_t matchBitAddressableWord(StringRef Name) {
     return -1;
   }
 
-  int64_t Addr = matchSpecialFunctionRegister(Name);
-  if (Addr < 0xFF00 || Addr > 0xFFDE)
+  int64_t Short = C166::getSFRShortAddress(MRI, Name);
+  if (Short < 0 || !C166::isSFRBitAddressable(Short))
     return -1;
-  return 0x80 + ((Addr - 0xFF00) / 2);
+  return Short;
 }
 
 /// Map a cc_XX mnemonic onto its encoding.
@@ -482,7 +485,7 @@ bool C166AsmParser::parseBitOffValue(int64_t &Off, StringRef &BitPosText) {
       BitPosText = Name.drop_front(Dot + 1);
     }
 
-    Off = matchBitAddressableWord(Word);
+    Off = matchBitAddressableWord(*getContext().getRegisterInfo(), Word);
     if (Off < 0)
       return Error(S, "not a bit-addressable word");
     Lex();
@@ -594,11 +597,14 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
       return false;
     }
 
-    if (int64_t Addr = matchSpecialFunctionRegister(Name); Addr >= 0) {
+    if (int64_t Addr =
+            matchSpecialFunctionRegister(*getContext().getRegisterInfo(), Name);
+        Addr >= 0) {
       SMLoc E = getLexer().getLoc();
       Lex();
-      // The backend does not model every special function register, so one it
-      // knows only an address for stays a plain address operand.
+      // The address came from the register file, so there is a register behind
+      // every name that gets here; the fallback stands in case one is ever
+      // known by address alone.
       MCRegister Reg = MatchRegisterName(Name.lower());
       const MCExpr *AddrExpr = MCConstantExpr::create(Addr, getContext());
       Operands.push_back(Reg ? C166Operand::createSFR(Reg, AddrExpr, S, E)

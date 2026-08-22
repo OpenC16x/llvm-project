@@ -121,8 +121,15 @@
 0x30 0x35
 # CHECK: bset r5.3
 0x3f 0xf5
-# CHECK: bclr 135.0
+# A bit-addressable special function register comes back by name, because its
+# bitoff is the short address the register file already carries.
+# CHECK: bclr mdc.0
 0x0e 0x87
+# CHECK: bset s0con.15
+0xff 0xd8
+# Bit-addressable RAM has nothing mapped to name, so it stays a number.
+# CHECK: bset 0.3
+0x3f 0x00
 # CHECK: band r2.1, r3.2
 0x6a 0xf3 0xf2 0x21
 # CHECK: bfldl r4, #15, #5
@@ -133,7 +140,7 @@
 # back to the assembler; llvm-objdump asks for the target address instead.
 # CHECK: jb r5.3, -3
 0x8a 0xf5 0xfd 0x30
-# CHECK: jnb 136.10, 4
+# CHECK: jnb psw.10, 4
 0x9a 0x88 0x04 0xa0
 # CHECK: jbc r5.3, 2
 0xaa 0xf5 0x02 0x30
@@ -181,6 +188,25 @@
 0xe6 0x09 0x00 0xfc
 # CHECK: mov mdl, mdh
 0xf2 0x07 0x0c 0xfe
+
+# An address in the extended space comes back by name too.
+# CHECK: mov syscon1, r2
+0xf6 0xf2 0xdc 0xf1
+# CHECK: mov r3, pllcon
+0xf2 0xf3 0xd0 0xf1
+
+# FF12H is the vector segment pointer on an XC164CM, not the C167's SYSCON.
+# CHECK: mov vecseg, r2
+0xf6 0xf2 0x12 0xff
+# CHECK: bset odp9.3
+0x3f 0x8d
+
+# TRAP carries half its vector's address, so these come back as the trap
+# numbers they were written as.
+# CHECK: trap #2
+0x9b 0x04
+# CHECK: trap #127
+0x9b 0xfe
 
 # In a byte instruction the same field names a byte register instead, so these
 # opcodes come back with the byte mnemonic and the byte register name.

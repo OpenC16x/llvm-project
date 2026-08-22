@@ -152,6 +152,12 @@ def Irang2AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected an instruction range in [1, 4]";
 }
 
+def Trap7AsmOperand : AsmOperandClass {
+  let Name = "Trap7";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected a trap number in [0, 127]";
+}
+
 def Seg8AsmOperand : AsmOperandClass {
   let Name = "Seg8";
   let RenderMethod = "addImmOperands";
@@ -313,6 +319,13 @@ def irang2 : Operand<i8> {
   let EncoderMethod = "getIrang2OpValue";
   let DecoderMethod = "decodeIrang2Operand";
   let ParserMatchClass = Irang2AsmOperand;
+}
+
+// A trap number.  It is written as the trap number itself; where it sits in
+// the instruction is bits 7 to 1 of the second byte, which the encoding below
+// does rather than an encoder method.
+def trap7 : Operand<i8> {
+  let ParserMatchClass = Trap7AsmOperand;
 }
 
 // An 8 bit segment number (#seg8) and a 10 bit page number (#pag10).
@@ -1612,6 +1625,21 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1, hasCtrlDep = 1,
     Defs = [SYSSP], Uses = [SYSSP] in
 def RETS : InstS<0xDB, (outs), (ins), "rets", [(C166retsglue)]> {
   let Inst{15-8} = 0x00;
+}
+
+// TRAP enters an interrupt routine from software.  It does not read a vector:
+// it branches to the vector table entry itself, at 4 * the trap number, which
+// is where a project puts a jump to its handler.  What it saves is what a
+// hardware interrupt saves - PSW, then CSP while segmentation is on, then IP -
+// so RETI returns from either.
+//
+// The trap number occupies bits 7 to 1 of the second byte, so the encoding
+// holds half the vector's address.
+let hasSideEffects = 1, Defs = [SYSSP], Uses = [SYSSP] in
+def TRAP : InstS<0x9B, (outs), (ins trap7:$num), "trap\t$num", []> {
+  bits<7> num;
+  let Inst{15-9} = num;
+  let Inst{8} = 0;
 }
 
 //===----------------------------------------------------------------------===//

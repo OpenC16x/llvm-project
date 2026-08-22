@@ -38,13 +38,14 @@ _start:
         mov     stkov, #__system_stack_limit
 
         // The data page pointers map the top two bits of a 16 bit address onto
-        // a 10 bit page.  0, 1, 2, 3 is the identity over the first 64 KByte,
-        // which is what a near address means to the compiler.  It is also the
-        // reset state, so this only matters if something ran before us.
-        mov     dpp0, #0
-        mov     dpp1, #1
-        mov     dpp2, #2
-        mov     dpp3, #3
+        // a 10 bit page, which is what decides where a near address lands.
+        // The linker script picks the pages, because it is what knows where
+        // the memory is: on a part whose ROM is not in segment 0 these are not
+        // the identity and not the reset values either.
+        mov     dpp0, #__dpp0_page
+        mov     dpp1, #__dpp1_page
+        mov     dpp2, #__dpp2_page
+        mov     dpp3, #__dpp3_page
 
         // CP is left where reset put it.  It says where R0 to R15 are, so an
         // instruction that moves it changes the meaning of every register
@@ -81,9 +82,42 @@ _start:
         jmpa    cc_UC, .Lzero
 .Lzero_done:
 
+        // The same two again for what is declared __far.  That RAM is outside
+        // every page the data page pointers select - which is the whole point
+        // of it - so the destination carries only its offset within the
+        // segment and an EXTS supplies the segment for the store.  The source
+        // is the ROM image, which is near like everything else in the ROM.
+        //
+        // EXTS covers the one instruction after it, so it goes inside the
+        // loop rather than around it.
+        mov     r1, #__fardata_load
+        mov     r2, #sof(__fardata_start)
+        mov     r3, #sof(__fardata_end)
+.Lfarcopy:
+        cmp     r2, r3
+        jmpa    cc_z, .Lfarcopy_done
+        mov     r4, [r1+]
+        exts    #seg(__fardata_start), #1
+        mov     [r2], r4
+        add     r2, #2
+        jmpa    cc_UC, .Lfarcopy
+.Lfarcopy_done:
+
+        mov     r1, #sof(__farbss_start)
+        mov     r2, #sof(__farbss_end)
+        mov     r3, #0
+.Lfarzero:
+        cmp     r1, r2
+        jmpa    cc_z, .Lfarzero_done
+        exts    #seg(__farbss_start), #1
+        mov     [r1], r3
+        add     r1, #2
+        jmpa    cc_UC, .Lfarzero
+.Lfarzero_done:
+
         // End of the initialisation phase.  After this DISWDT no longer works
-        // and SYSCON is locked, so anything that has to change either of them
-        // has to have happened above.
+        // and the protected system registers are locked, so anything that has
+        // to change either of them has to have happened above.
         einit
 
         // main() takes no arguments here: there is no one to pass any.

@@ -144,6 +144,10 @@ int main(int argc, char **argv) {
   // finished program ends up.
   M.IP = uint16_t(ELF.getHeader().e_entry);
   M.CSP = uint16_t(ELF.getHeader().e_entry >> 16);
+  // The reset vector is the first entry of the vector table, so the segment it
+  // was fetched from is what VECSEG holds.  On a part this stands in for, that
+  // is arranged by the reset configuration rather than by any code.
+  M.VECSEG = M.CSP;
 
   if (!ExitSymbol.empty()) {
     for (const object::SymbolRef &S : Obj->symbols()) {

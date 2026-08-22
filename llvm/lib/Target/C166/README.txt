@@ -426,22 +426,54 @@ writes the low half of MDL and "add mdl, #1" writes all of it, and "addb
 rl2, #200" and "add r2, #200" name different registers with the same field
 value.
 
-Where those addresses are written down is C166MCTargetDesc, so that what the
-assembler accepts and what the disassembler prints back cannot drift apart:
+Where those addresses are written down is the register file itself: each
+register carries its short address as its hardware encoding, and the mapping
+from that to a memory address is a function rather than a second table, so what
+the assembler accepts and what the disassembler prints back cannot drift apart:
 "mov r2, mdl" disassembles as itself rather than as "mov r2, 65038", and still
 assembles to the bytes it came from.  An address with no register at it stays
-a number.
+a number, and so does a bit-addressable word with nothing mapped at it, while
+"bset psw.10" and "bclr mdc.0" say what they mean.
+
+The extended special function registers are in the table too, but only as
+addresses.  They sit at the same short addresses as the ordinary ones, mapped
+from F000H and F100H instead of FE00H and FF00H, so a "reg" field cannot tell
+the two apart and reaching one that way needs an EXTR the backend never emits.
+By address there is no such problem - the default DPPs already cover F000H - so
+"mov syscon1, r2" is a MOV mem, reg, and the registers are in a class of their
+own that no "reg" field can name.
+
+TRAP is the software entry to a vector.  It does not read a vector through the
+table: it branches to the table entry itself, at 4 * the trap number, so the
+entry has to hold a jump.  What it saves is what a hardware interrupt saves -
+PSW, then CSP while segmentation is on, then IP - which is why RETI returns
+from either.  Nothing selects it; it is there so that a handler is reachable
+and so that the path through a vector can be tested.
+
+Where the vector is comes from two registers rather than being fixed: the table
+sits at the low end of the segment VECSEG names, and CPUCON1's VECSC field says
+how many words apart the entries are.  Out of reset that is four bytes a vector
+in whichever segment the part was started from, which is what an older C166
+does unconditionally.
 
 Known limitations / things to do
 --------------------------------
 
+* The near addressing model is the XC164CM's: a near reference relocates as
+  SOF16, the offset within a segment, and the data page pointers decide which
+  page that offset lands in.  DPP0 to DPP2 cover the Flash and DPP3 the RAM and
+  the register spaces, which leaves the top 16 KByte of a 64 KByte Flash with
+  no near address; c166.ld stops its rom region at 48 KByte for that reason and
+  the linker reports an overflow rather than wrapping.  What is left goes to a
+  farrom region that .fartext and .farrodata land in, so an object declared
+  __far uses it, and writable far data has the PSRAM at E0'0000H, which no data
+  page pointer covers.  What is not placed anywhere is code in the PSRAM, which
+  is what that memory is actually for: the manual calls it optimised for code
+  fetches and slower than the data memories for data.
 * MOV mem, reg keeps its narrow field, because widening it would make
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between
   them.
-* Only the special function registers the backend has a use for, plus the ones
-  a startup sequence writes, are modelled; "push t0" is not understood and its
-  encoding does not decode.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * A far access always costs an EXTS, even for several accesses in a row to the
@@ -453,7 +485,34 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* No support for the XC16x MAC unit.
+* No support for the C166SV2 MAC unit, which the XC164CM has.  It is a
+  coprocessor rather than a few instructions - a 40 bit accumulator in MAH,
+  MAL and MAS, its own control, status and repeat registers, dual operand
+  fetch through IDX0/IDX1, and a repeat field on every CoXXX instruction - and
+  nothing in the compiler would select any of it without the DSP patterns to
+  drive it.  The C166SV2 User's Manual lists the mnemonics and describes the
+  operand fields; its opcode appendix is a matrix that has not been read off
+  accurately enough to encode from, so the encodings are still not known here.
+* The branch prediction bit of JMPA and CALLA is always left at 0, which the
+  C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
+  always 0 too; it is meant to be set for a backward branch of 32 bytes or
+  less, which is a distance that always relaxes to a JMPR here, so nothing is
+  lost by it.  Branch prediction is enabled out of reset on an XC164CM
+  (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
+* The SFR map is the XC164CM's, and only that part's: the same short address
+  names different registers on different derivatives, so nothing here is right
+  for another one and nothing selects between them.  C166RegisterInfo.td says
+  where the XC164CM departs from the older C167 layout.
+* An extended special function register is reachable by address but not
+  through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
+  Getting at one that way needs an EXTR, and once encoded it is the same bytes
+  as the register with the same short address in the ordinary space, so there
+  would be nothing for a disassembly to go on.  Three of them are missing
+  because the manual contradicts itself about where they are; the register file
+  names which.
+* Which trap number a peripheral raises is a property of the part and is not
+  written down anywhere here, so a handler's slot is named by number rather
+  than by the source it serves.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

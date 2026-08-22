@@ -81,31 +81,228 @@ def R15 : C166Reg<15, "r15">, DwarfRegNum<[15]>;
 //===----------------------------------------------------------------------===//
 
 // A special function register carries its 8 bit short address as the hardware
-// encoding, which is how the "reg" field of PUSH and POP names it.  Short
-// address N is FE00H + 2N below 80H and FF00H + 2(N - 80H) above it; the
-// values are from the C166 User's Manual register table.
+// encoding, which is how the "reg" field of PUSH and POP names it.  That
+// address is also where the register is mapped: short address N is FE00H + 2N
+// below 80H and FF00H + 2(N - 80H) above it, so the memory address every other
+// instruction reaches it by is worked out from the encoding rather than
+// written down a second time.  The ones above 80H are the bit-addressable
+// half, and their bitoff is the short address again.
+//
+// This is the SFR space of the XC164CM, checked against the XC164CM User's
+// Manual (System Units V2.1 and Peripheral Units V1.2, 2006).  The extended
+// SFR space that EXTR selects is not here at all - nothing in this backend
+// emits EXTR, so an ESFR has no way to be reached - which leaves out the whole
+// of SYSCON1, SYSCON3, PLLCON, RTC, the identifier registers and the port
+// alternate-select registers.
+//
+// The map is a property of the part rather than of the family: the same short
+// address names different registers on different derivatives, so a table can
+// only be right about one of them.  Where the XC164CM differs from the older
+// C167 layout it follows the XC164CM, and the registers of an external bus -
+// ADDRSEL1-4 and BUSCON0-4 - are absent because this part has no external bus
+// and those short addresses mean other things on it:
+//
+//   0CH  CPUCON1, not ADDRSEL1     86H  SPSEG,  not BUSCON0
+//   0DH  CPUCON2, not ADDRSEL2     89H  VECSEG, not SYSCON
+//   8BH  P9,      not BUSCON2      8CH  DP9,    not BUSCON3
+//   8DH  ODP9,    not BUSCON4
+//
+// The peripheral names here are the classic C166 ones.  The XC164CM manual
+// prefixes them with the module - GPT12E_T2CON for T2CON, ADC_CON for ADCON,
+// CC2_M4 for CCM4 - but names the same addresses, so the two spellings differ
+// only in what a datasheet calls them.
+//
+// What is here is what that part has.  A register whose address appears
+// nowhere in either XC164CM manual has been taken out rather than left to be
+// written to by mistake, which removed the classic CAPCOM1 block (T0, T1,
+// T01CON, CC0 to CC15, CCM0 to CCM3 and their interrupt control registers),
+// the PWM unit, and ports 0, 2, 4, 6, 7 and 8.  This part has CAPCOM1 and
+// CAPCOM2 under CC1_ and CC2_ names at other addresses, has CAPCOM6 in the
+// X-peripheral space at E8xxH where no short address reaches, and has only
+// ports 1, 3, 5 and 9.  Another derivative wanting the old names back should
+// add them from its own manual rather than assume these were right for it.
 
-// The condition flags live in the PSW.
-def PSW   : C166Reg<0x88, "psw">, DwarfRegNum<[32]>; // FF10H
-// Multiply/divide unit registers.
-def MDL   : C166Reg<0x07, "mdl">, DwarfRegNum<[33]>; // FE0EH
-def MDH   : C166Reg<0x06, "mdh">, DwarfRegNum<[34]>; // FE0CH
-def MDC   : C166Reg<0x87, "mdc">, DwarfRegNum<[35]>; // FF0EH
-// The hardware (system) stack pointer.  It only ever holds return addresses
-// and explicitly PUSHed values; the ABI stack lives in R0.
-def SYSSP : C166Reg<0x09, "sp">,  DwarfRegNum<[36]>; // FE12H
-// Context pointer.
-def CP    : C166Reg<0x08, "cp">,  DwarfRegNum<[37]>; // FE10H
-// The bounds the system stack is checked against.  Nothing the compiler emits
-// touches them, but a startup sequence has to set them.
-def STKOV : C166Reg<0x0A, "stkov">, DwarfRegNum<[38]>; // FE14H
-def STKUN : C166Reg<0x0B, "stkun">, DwarfRegNum<[39]>; // FE16H
-// The data page pointers, which map the top two bits of a 16 bit address onto
-// a ten bit page.  A startup sequence sets these too.
-def DPP0  : C166Reg<0x00, "dpp0">, DwarfRegNum<[40]>; // FE00H
-def DPP1  : C166Reg<0x01, "dpp1">, DwarfRegNum<[41]>; // FE02H
-def DPP2  : C166Reg<0x02, "dpp2">, DwarfRegNum<[42]>; // FE04H
-def DPP3  : C166Reg<0x03, "dpp3">, DwarfRegNum<[43]>; // FE06H
+// CPU core: the data page pointers, the code segment pointer, the multiply/
+// divide unit, the context pointer and the system stack and its bounds.
+def DPP0     : C166Reg<0x00, "dpp0">, DwarfRegNum<[40]>; // FE00H
+def DPP1     : C166Reg<0x01, "dpp1">, DwarfRegNum<[41]>; // FE02H
+def DPP2     : C166Reg<0x02, "dpp2">, DwarfRegNum<[42]>; // FE04H
+def DPP3     : C166Reg<0x03, "dpp3">, DwarfRegNum<[43]>; // FE06H
+def CSP      : C166Reg<0x04, "csp">; // FE08H
+def MDH      : C166Reg<0x06, "mdh">, DwarfRegNum<[34]>; // FE0CH
+def MDL      : C166Reg<0x07, "mdl">, DwarfRegNum<[33]>; // FE0EH
+def CP       : C166Reg<0x08, "cp">, DwarfRegNum<[37]>; // FE10H
+def SYSSP    : C166Reg<0x09, "sp">, DwarfRegNum<[36]>; // FE12H
+def STKOV    : C166Reg<0x0A, "stkov">, DwarfRegNum<[38]>; // FE14H
+def STKUN    : C166Reg<0x0B, "stkun">, DwarfRegNum<[39]>; // FE16H
+
+// External bus: the address windows and their bus configurations.
+def CPUCON1  : C166Reg<0x0C, "cpucon1">; // FE18H
+def CPUCON2  : C166Reg<0x0D, "cpucon2">; // FE1AH
+def SPSEG    : C166Reg<0x86, "spseg">; // FF0CH
+def VECSEG   : C166Reg<0x89, "vecseg">; // FF12H
+
+// Program status word, and the two constant registers.
+def PSW      : C166Reg<0x88, "psw">, DwarfRegNum<[32]>; // FF10H
+def MDC      : C166Reg<0x87, "mdc">, DwarfRegNum<[35]>; // FF0EH
+def ZEROS    : C166Reg<0x8E, "zeros">; // FF1CH
+def ONES     : C166Reg<0x8F, "ones">; // FF1EH
+def TFR      : C166Reg<0xD6, "tfr">; // FFACH
+
+// General purpose timers GPT1 and GPT2.
+def T2       : C166Reg<0x20, "t2">; // FE40H
+def T3       : C166Reg<0x21, "t3">; // FE42H
+def T4       : C166Reg<0x22, "t4">; // FE44H
+def T5       : C166Reg<0x23, "t5">; // FE46H
+def T6       : C166Reg<0x24, "t6">; // FE48H
+def CAPREL   : C166Reg<0x25, "caprel">; // FE4AH
+def T2CON    : C166Reg<0xA0, "t2con">; // FF40H
+def T3CON    : C166Reg<0xA1, "t3con">; // FF42H
+def T4CON    : C166Reg<0xA2, "t4con">; // FF44H
+def T5CON    : C166Reg<0xA3, "t5con">; // FF46H
+def T6CON    : C166Reg<0xA4, "t6con">; // FF48H
+
+// CAPCOM1 and CAPCOM2: the timers, their reloads, the capture/compare
+// registers and the mode control registers.
+def T78CON   : C166Reg<0x90, "t78con">; // FF20H
+def CC16     : C166Reg<0x30, "cc16">; // FE60H
+def CC17     : C166Reg<0x31, "cc17">; // FE62H
+def CC18     : C166Reg<0x32, "cc18">; // FE64H
+def CC19     : C166Reg<0x33, "cc19">; // FE66H
+def CC20     : C166Reg<0x34, "cc20">; // FE68H
+def CC21     : C166Reg<0x35, "cc21">; // FE6AH
+def CC22     : C166Reg<0x36, "cc22">; // FE6CH
+def CC23     : C166Reg<0x37, "cc23">; // FE6EH
+def CC24     : C166Reg<0x38, "cc24">; // FE70H
+def CC25     : C166Reg<0x39, "cc25">; // FE72H
+def CC26     : C166Reg<0x3A, "cc26">; // FE74H
+def CC27     : C166Reg<0x3B, "cc27">; // FE76H
+def CC28     : C166Reg<0x3C, "cc28">; // FE78H
+def CC29     : C166Reg<0x3D, "cc29">; // FE7AH
+def CC30     : C166Reg<0x3E, "cc30">; // FE7CH
+def CC31     : C166Reg<0x3F, "cc31">; // FE7EH
+def CCM4     : C166Reg<0x91, "ccm4">; // FF22H
+def CCM5     : C166Reg<0x92, "ccm5">; // FF24H
+def CCM6     : C166Reg<0x93, "ccm6">; // FF26H
+def CCM7     : C166Reg<0x94, "ccm7">; // FF28H
+
+// The PWM module.
+
+// The A/D converter and the watchdog.
+def ADDAT    : C166Reg<0x50, "addat">; // FEA0H
+def ADCON    : C166Reg<0xD0, "adcon">; // FFA0H
+def WDTCON   : C166Reg<0xD7, "wdtcon">; // FFAEH
+
+// Serial channel 0 (ASC0) and the synchronous serial channel (SSC).
+def S0TBUF   : C166Reg<0x58, "s0tbuf">; // FEB0H
+def S0RBUF   : C166Reg<0x59, "s0rbuf">; // FEB2H
+def S0BG     : C166Reg<0x5A, "s0bg">; // FEB4H
+def S0CON    : C166Reg<0xD8, "s0con">; // FFB0H
+def SSCCON   : C166Reg<0xD9, "ssccon">; // FFB2H
+
+// The peripheral event controller.
+def PECC0    : C166Reg<0x60, "pecc0">; // FEC0H
+def PECC1    : C166Reg<0x61, "pecc1">; // FEC2H
+def PECC2    : C166Reg<0x62, "pecc2">; // FEC4H
+def PECC3    : C166Reg<0x63, "pecc3">; // FEC6H
+def PECC4    : C166Reg<0x64, "pecc4">; // FEC8H
+def PECC5    : C166Reg<0x65, "pecc5">; // FECAH
+def PECC6    : C166Reg<0x66, "pecc6">; // FECCH
+def PECC7    : C166Reg<0x67, "pecc7">; // FECEH
+
+// Interrupt control registers, one per source.
+def T2IC     : C166Reg<0xB0, "t2ic">; // FF60H
+def T3IC     : C166Reg<0xB1, "t3ic">; // FF62H
+def T4IC     : C166Reg<0xB2, "t4ic">; // FF64H
+def T5IC     : C166Reg<0xB3, "t5ic">; // FF66H
+def T6IC     : C166Reg<0xB4, "t6ic">; // FF68H
+def CRIC     : C166Reg<0xB5, "cric">; // FF6AH
+def S0TIC    : C166Reg<0xB6, "s0tic">; // FF6CH
+def S0RIC    : C166Reg<0xB7, "s0ric">; // FF6EH
+def S0EIC    : C166Reg<0xB8, "s0eic">; // FF70H
+def SSCTIC   : C166Reg<0xB9, "ssctic">; // FF72H
+def SSCRIC   : C166Reg<0xBA, "sscric">; // FF74H
+def SSCEIC   : C166Reg<0xBB, "ssceic">; // FF76H
+def CC8IC    : C166Reg<0xC4, "cc8ic">; // FF88H
+def CC9IC    : C166Reg<0xC5, "cc9ic">; // FF8AH
+def CC10IC   : C166Reg<0xC6, "cc10ic">; // FF8CH
+def CC11IC   : C166Reg<0xC7, "cc11ic">; // FF8EH
+def CC12IC   : C166Reg<0xC8, "cc12ic">; // FF90H
+def CC13IC   : C166Reg<0xC9, "cc13ic">; // FF92H
+def ADCIC    : C166Reg<0xCC, "adcic">; // FF98H
+def ADEIC    : C166Reg<0xCD, "adeic">; // FF9AH
+
+// The ports and their direction registers.
+def P1L      : C166Reg<0x82, "p1l">; // FF04H
+def P1H      : C166Reg<0x83, "p1h">; // FF06H
+def P3       : C166Reg<0xE2, "p3">; // FFC4H
+def DP3      : C166Reg<0xE3, "dp3">; // FFC6H
+def P5       : C166Reg<0xD1, "p5">; // FFA2H
+def P5DIDIS  : C166Reg<0xD2, "p5didis">; // FFA4H
+// Port 9 sits in the block the external bus registers occupy on a part that
+// has an external bus; the XC164CM has none.
+def P9       : C166Reg<0x8B, "p9">; // FF16H
+def DP9      : C166Reg<0x8C, "dp9">; // FF18H
+def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
+def FOCON    : C166Reg<0xD5, "focon">; // FFAAH
+
+//===----------------------------------------------------------------------===//
+// Extended special function registers
+//===----------------------------------------------------------------------===//
+
+// The extended space holds a second set of registers at the same short
+// addresses, mapped from F000H and F100H instead of FE00H and FF00H.  Reaching
+// one through a "reg" field means preceding the instruction with EXTR, and the
+// two are indistinguishable once encoded, which is why none of these is in a
+// class a "reg" field can name.  What they are here for is the other way of
+// reaching them: the address itself is an ordinary 16 bit address that the
+// default DPPs already cover, so "mov syscon1, r2" is a MOV mem, reg and needs
+// no EXTR at all.
+//
+// From the XC164CM User's Manual.  Three registers it documents are left out
+// because it contradicts itself about where they are: it gives OPSEN as
+// FE58H/2CH, CC2_T7IC as F17AH/BEH and CC2_T8IC as F17CH/BFH, and in each case
+// the address and the short address name different words - 2CH is F058H in
+// this space, BEH is F17CH and BFH is F17EH - with nothing else nearby to say
+// which half is the typo.
+
+def QX0         : C166Reg<0x00, "qx0">; // F000H
+def QX1         : C166Reg<0x01, "qx1">; // F002H
+def QR0         : C166Reg<0x02, "qr0">; // F004H
+def QR1         : C166Reg<0x03, "qr1">; // F006H
+def CC2_IOC     : C166Reg<0x33, "cc2_ioc">; // F066H
+def IDPROG      : C166Reg<0x3C, "idprog">; // F078H
+def IDMEM       : C166Reg<0x3D, "idmem">; // F07AH
+def IDCHIP      : C166Reg<0x3E, "idchip">; // F07CH
+def IDMANUF     : C166Reg<0x3F, "idmanuf">; // F07EH
+def ADC_CTR2    : C166Reg<0x4E, "adc_ctr2">; // F09CH
+def ADC_CTR2IN  : C166Reg<0x4F, "adc_ctr2in">; // F09EH
+def ADC_DAT2    : C166Reg<0x50, "adc_dat2">; // F0A0H
+def SCUSLC      : C166Reg<0x60, "scuslc">; // F0C0H
+def RTC_RELL    : C166Reg<0x66, "rtc_rell">; // F0CCH
+def RTC_RELH    : C166Reg<0x67, "rtc_relh">; // F0CEH
+def RTC_RTCL    : C166Reg<0x6A, "rtc_rtcl">; // F0D4H
+def RTC_RTCH    : C166Reg<0x6B, "rtc_rtch">; // F0D6H
+def IMBCTR      : C166Reg<0x7F, "imbctr">; // F0FEH
+def DP1L        : C166Reg<0x82, "dp1l">; // F104H
+def DP1H        : C166Reg<0x83, "dp1h">; // F106H
+def RTC_ISNC    : C166Reg<0x86, "rtc_isnc">; // F10CH
+def RTC_CON     : C166Reg<0x88, "rtc_con">; // F110H
+def ALTSEL0P1H  : C166Reg<0x90, "altsel0p1h">; // F120H
+def ALTSEL0P3   : C166Reg<0x93, "altsel0p3">; // F126H
+def ALTSEL0P1L  : C166Reg<0x98, "altsel0p1l">; // F130H
+def ALTSEL0P9   : C166Reg<0x9C, "altsel0p9">; // F138H
+def ALTSEL1P9   : C166Reg<0x9D, "altsel1p9">; // F13AH
+def EOPIC       : C166Reg<0xC0, "eopic">; // F180H
+def PLL_IC      : C166Reg<0xCF, "pll_ic">; // F19EH
+def RTC_IC      : C166Reg<0xD0, "rtc_ic">; // F1A0H
+def EXICON      : C166Reg<0xE0, "exicon">; // F1C0H
+def ODP3        : C166Reg<0xE3, "odp3">; // F1C6H
+def PLLCON      : C166Reg<0xE8, "pllcon">; // F1D0H
+def SYSCON3     : C166Reg<0xEA, "syscon3">; // F1D4H
+def EXISEL1     : C166Reg<0xEC, "exisel1">; // F1D8H
+def EXISEL0     : C166Reg<0xED, "exisel0">; // F1DAH
+def SYSCON1     : C166Reg<0xEE, "syscon1">; // F1DCH
 
 //===----------------------------------------------------------------------===//
 // Register classes
@@ -126,8 +323,18 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
-  (add PSW, MDL, MDH, MDC, SYSSP, CP, STKOV, STKUN,
-       DPP0, DPP1, DPP2, DPP3)> {
+  (add 
+      DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
+      CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9, PSW, MDC, ZEROS,
+      ONES, TFR, T2, T3, T4, T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON,
+      T6CON, T78CON, CC16, CC17, CC18, CC19, CC20, CC21, CC22, CC23, CC24,
+      CC25, CC26, CC27, CC28, CC29, CC30, CC31, CCM4, CCM5, CCM6, CCM7,
+      ADDAT, ADCON, WDTCON, S0TBUF, S0RBUF, S0BG, S0CON, SSCCON, PECC0,
+      PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC, T3IC, T4IC,
+      T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC, SSCEIC,
+      CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC, P1L,
+      P1H, P3, DP3, P5, P5DIDIS, FOCON
+  )> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
@@ -143,6 +350,21 @@ def GR16orSFR : RegisterClass<"C166", [i16], 16, (add GR16, SFR)> {
 }
 
 def GR8orSFR : RegisterClass<"C166", [i8], 8, (add GR8, SFR)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The extended special function registers.  This is deliberately not part of
+// either class above: a "reg" field cannot tell one of these from the SFR with
+// the same short address, so they are reachable by address only.
+def ESFR : RegisterClass<"C166", [i16], 16,
+  (add
+      QX0, QX1, QR0, QR1, CC2_IOC, IDPROG, IDMEM, IDCHIP, IDMANUF,
+      ADC_CTR2, ADC_CTR2IN, ADC_DAT2, SCUSLC, RTC_RELL, RTC_RELH,
+      RTC_RTCL, RTC_RTCH, IMBCTR, DP1L, DP1H, RTC_ISNC, RTC_CON,
+      ALTSEL0P1H, ALTSEL0P3, ALTSEL0P1L, ALTSEL0P9, ALTSEL1P9, EOPIC,
+      PLL_IC, RTC_IC, EXICON, ODP3, PLLCON, SYSCON3, EXISEL1, EXISEL0,
+      SYSCON1)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

@@ -79,7 +79,7 @@ void C166InstPrinter::printAddr16Operand(const MCInst *MI, unsigned OpNo,
     // as the same address, so this still reassembles to the bytes it came
     // from, and "mov r2, mdl" says what it is doing.
     uint64_t Addr = static_cast<uint64_t>(Op.getImm()) & 0xffff;
-    if (StringRef Name = C166::getSFRName(Addr); !Name.empty())
+    if (StringRef Name = C166::getSFRName(MRI, Addr); !Name.empty())
       O << Name;
     else
       O << Addr;
@@ -136,13 +136,23 @@ void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
     return;
   }
 
-  // F0H to FFH is the general purpose register window, which reads better by
-  // name; the rest of the bit-addressable space has no names to give it.
+  // F0H to FFH is the general purpose register window, and 80H to EFH names a
+  // bit-addressable special function register, whose bitoff is the short
+  // address it already carries.  Below that is bit-addressable RAM, which has
+  // no names to give it.
   uint64_t Off = static_cast<uint64_t>(Op.getImm()) & 0xff;
-  if (Off >= 0xf0)
+  if (Off >= 0xf0) {
     O << "r" << (Off - 0xf0);
-  else
-    O << Off;
+    return;
+  }
+  if (C166::isSFRBitAddressable(Off)) {
+    StringRef Name = C166::getSFRName(MRI, C166::getSFRAddressForShort(Off));
+    if (!Name.empty()) {
+      O << Name;
+      return;
+    }
+  }
+  O << Off;
 }
 
 void C166InstPrinter::printBitAddrOperand(const MCInst *MI, unsigned OpNo,
