@@ -52,8 +52,9 @@ What to change for a particular part
 ------------------------------------
 
 The linker script is written for an XC164CM with nothing outside the chip: the
-64 KByte of program Flash at C0'0000H and the 2 KByte of DPRAM at 00'F600H.
-The MEMORY block at the top of c166.ld is where a board's own memory goes.
+64 KByte of program Flash at C0'0000H, the 2 KByte of DSRAM at 00'C000H and the
+2 KByte of DPRAM at 00'F600H.  The MEMORY block at the top of c166.ld is where
+a board's own memory goes.
 
 Only 48 KByte of that Flash is in the rom region, and the reason is the thing
 to understand before changing any of this.  A 16 bit address does not name a
@@ -99,10 +100,18 @@ SP, STKUN, STKOV and CP come out of reset holding them:
 The system stack is the hardware one, which holds return addresses and is not
 addressable by the compiler.  The other stack, the one the ABI uses for
 arguments, locals and spills, is addressed through R0 and grows down from
-__user_stack_top, which the script puts at the top of RAM.  On an XC164CM that
-leaves the ABI stack the KByte from 00'F600H to 00'F9FFH and the system stack
-the two below FC00H, which is not much; a board with external RAM should move
-the user stack out there.
+__user_stack_top.
+
+The two RAMs are split along that line.  Static data goes in the DSRAM, which
+is 2 KByte and has nothing else in it; the ABI stack gets the KByte of DPRAM
+from 00'F600H to 00'F9FFH to itself, with the system stack growing down into
+FA00H from the other side.  So the two stacks meet at a known address and
+neither of them grows into the program's variables, which is what would happen
+if all three shared the DPRAM.
+
+The variant of this part with 32 KByte of Flash has no DSRAM.  That one wants
+the dsram region deleted and .data and .bss moved to dpram, which puts the
+statics and the ABI stack back in the same KByte.
 
 crt0.S writes SP, STKUN, STKOV and the DPPs with a plain "mov sp, #..." each,
 which the assembler can do because the 8 bit "reg" field of MOV reaches the

@@ -43,10 +43,16 @@ MEMORY
    * more than 48 KByte of code can put .text here instead, since code does not
    * go through the data page pointers; read-only data cannot follow it. */
   farrom (rx) : ORIGIN = 0x00C0C000, LENGTH = 16K
-  /* The DPRAM below the system stack.  FC20H to FCFFH above the register bank
-   * is free too, and FD00H to FDFFH is the bit-addressable part, which is
-   * worth keeping for what needs it. */
-  ram (rw) : ORIGIN = 0x0000F600, LENGTH = 1K
+  /* Static data goes in the DSRAM, which is 2 KByte and entirely free.  It is
+   * a near address like everything else here: the part reaches it through a
+   * data page pointer holding page 3, which is what DPP3 already holds.  The
+   * variant of this part with 32 KByte of Flash has no DSRAM at all, and wants
+   * this region deleted and .data and .bss moved to dpram. */
+  dsram (rw) : ORIGIN = 0x0000C000, LENGTH = 2K
+  /* The DPRAM below the system stack, which the ABI stack gets to itself.
+   * FC20H to FCFFH above the register bank is free too, and FD00H to FDFFH is
+   * the bit-addressable part, which is worth keeping for what needs it. */
+  dpram (rw) : ORIGIN = 0x0000F600, LENGTH = 1K
 }
 
 /* The pages the data page pointers select, which is what makes a near address
@@ -97,7 +103,7 @@ SECTIONS
     *(.fardata .fardata.*)
     . = ALIGN(2);
     __data_end = .;
-  } > ram AT > rom
+  } > dsram AT > rom
   __data_load = LOADADDR(.data);
 
   .bss (NOLOAD) : ALIGN(2) {
@@ -107,10 +113,13 @@ SECTIONS
     *(COMMON)
     . = ALIGN(2);
     __bss_end = .;
-  } > ram
+  } > dsram
 
-  /* The ABI stack that R0 addresses grows down from the top of RAM. */
-  __user_stack_top = ORIGIN(ram) + LENGTH(ram);
+  /* The ABI stack that R0 addresses grows down from the top of the DPRAM, and
+   * has that KByte to itself: the system stack is above it and the static data
+   * is in the DSRAM, so the two stacks grow towards each other from either end
+   * of FA00H rather than the ABI stack growing into the program's variables. */
+  __user_stack_top = ORIGIN(dpram) + LENGTH(dpram);
   __heap_start = __bss_end;
   __heap_end = __user_stack_top;
 
