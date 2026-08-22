@@ -72,6 +72,23 @@ __dpp1_page = (ORIGIN(rom) >> 14) + 1;
 __dpp2_page = (ORIGIN(rom) >> 14) + 2;
 __dpp3_page = 3;
 
+/* A far access carries its segment as an immediate, and the compiler folds two
+ * of them into one EXTend when both reach the same object - "seg(g)" and
+ * "seg(g + 2)" are the same segment unless g straddles a segment boundary.
+ * Nothing in an object file rules that out, so it is ruled out here: no region
+ * above crosses one, and therefore nothing placed in one does either.  Moving
+ * any of them keeps that true or the link fails. */
+ASSERT((ORIGIN(rom) >> 16) == ((ORIGIN(rom) + LENGTH(rom) - 1) >> 16),
+       "the rom region crosses a segment boundary")
+ASSERT((ORIGIN(farrom) >> 16) == ((ORIGIN(farrom) + LENGTH(farrom) - 1) >> 16),
+       "the farrom region crosses a segment boundary")
+ASSERT((ORIGIN(dsram) >> 16) == ((ORIGIN(dsram) + LENGTH(dsram) - 1) >> 16),
+       "the dsram region crosses a segment boundary")
+ASSERT((ORIGIN(dpram) >> 16) == ((ORIGIN(dpram) + LENGTH(dpram) - 1) >> 16),
+       "the dpram region crosses a segment boundary")
+ASSERT((ORIGIN(psram) >> 16) == ((ORIGIN(psram) + LENGTH(psram) - 1) >> 16),
+       "the psram region crosses a segment boundary")
+
 SECTIONS
 {
   /* Trap 0 is reset, so the first four bytes of segment 0 are the jump the

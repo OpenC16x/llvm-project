@@ -149,6 +149,11 @@ class PassRegistry;
 FunctionPass *createC166ISelDag(C166TargetMachine &TM,
                                 CodeGenOptLevel OptLevel);
 
+/// Fold an EXTend prefix into the one before it where the two say the same
+/// thing and nothing between them touches memory.
+FunctionPass *createC166MergeExtendPass();
+void initializeC166MergeExtendPass(PassRegistry &);
+
 void initializeC166AsmPrinterPass(PassRegistry &);
 void initializeC166DAGToDAGISelLegacyPass(PassRegistry &);
 

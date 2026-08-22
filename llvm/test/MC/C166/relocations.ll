@@ -29,9 +29,9 @@ define void @f() {
 ; DISASM-NEXT:  14: cb 00         ret
 
 ; CHECK:      Section {{.*}} .rela.text {
-; CHECK-NEXT:   0x2 R_C166_ABS16 g 0x0
-; CHECK-NEXT:   0x6 R_C166_ABS16 g 0x0
-; CHECK-NEXT:   0xA R_C166_ABS16 callee 0x0
-; CHECK-NEXT:   0xE R_C166_ABS16 g 0x0
-; CHECK-NEXT:   0x12 R_C166_ABS16 g 0x0
+; CHECK-NEXT:   0x2 R_C166_SOF16 g 0x0
+; CHECK-NEXT:   0x6 R_C166_SOF16 g 0x0
+; CHECK-NEXT:   0xA R_C166_SOF16 callee 0x0
+; CHECK-NEXT:   0xE R_C166_SOF16 g 0x0
+; CHECK-NEXT:   0x12 R_C166_SOF16 g 0x0
 ; CHECK-NEXT: }

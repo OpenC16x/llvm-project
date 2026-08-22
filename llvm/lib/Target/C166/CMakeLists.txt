@@ -22,6 +22,7 @@ add_llvm_target(C166CodeGen
   C166ISelLowering.cpp
   C166InstrInfo.cpp
   C166MCInstLower.cpp
+  C166MergeExtend.cpp
   C166MachineFunctionInfo.cpp
   C166RegisterInfo.cpp
   C166SelectionDAGInfo.cpp

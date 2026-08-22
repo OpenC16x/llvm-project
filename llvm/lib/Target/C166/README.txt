@@ -476,12 +476,16 @@ Known limitations / things to do
   them.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
-* A far access always costs an EXTS, even for several accesses in a row to the
-  same segment, which one EXTS covering up to four instructions could do.
-  Merging two is harder than it sounds: through a register the segment has to
-  be provably unchanged in between, and through a symbol the two immediates
-  are different relocations - seg(g) and seg(g+2) are the same segment in
-  practice but nothing says so until the linker has placed g.
+* Two far accesses to the same object share one EXTS, and two to different
+  objects do not.  C166MergeExtend folds the second EXTend into the first when
+  they name the same object and nothing between them touches memory - the gap
+  instructions would otherwise have their own addressing redirected.  What
+  makes "seg(g)" and "seg(g + 2)" the same segment is that no region in c166.ld
+  crosses a segment boundary, which that script asserts rather than assumes.
+  It cannot merge across a near access, and it never merges an EXTS whose
+  segment comes from a register, because the register could be written in
+  between.  Worth 44 bytes on the larger of the two differential programs and
+  nothing at all on the other, which has no far accesses in it.
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
@@ -490,9 +494,19 @@ Known limitations / things to do
   MAL and MAS, its own control, status and repeat registers, dual operand
   fetch through IDX0/IDX1, and a repeat field on every CoXXX instruction - and
   nothing in the compiler would select any of it without the DSP patterns to
-  drive it.  The C166SV2 User's Manual lists the mnemonics and describes the
-  operand fields; its opcode appendix is a matrix that has not been read off
-  accurately enough to encode from, so the encodings are still not known here.
+  drive it.
+
+  What is known about the encoding, from the C166SV2 User's Manual: a CoXXX is
+  two opcode bytes, a primary one and an extended one that picks the operation,
+  and the repeat control field rrr sits at bits 31 to 29.  Its appendix lists
+  the pairs rather than tabulating them in a 16 by 16 matrix, and about half of
+  the list comes out of the document with the opcode, the mnemonic and the
+  operand form all lining up; on the rest the operand column has fewer entries
+  than the other three and nothing found so far says which rows it skips.  The
+  half that lines up is not worth implementing on its own - an assembler that
+  takes some of a coprocessor's instructions and rejects the others is harder
+  to use than one that takes none - so this waits on the operand forms for the
+  other half.
 * The branch prediction bit of JMPA and CALLA is always left at 0, which the
   C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
   always 0 too; it is meant to be set for a backward branch of 32 bytes or
