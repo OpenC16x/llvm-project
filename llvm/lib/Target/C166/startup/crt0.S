@@ -82,8 +82,8 @@ _start:
 .Lzero_done:
 
         // End of the initialisation phase.  After this DISWDT no longer works
-        // and SYSCON is locked, so anything that has to change either of them
-        // has to have happened above.
+        // and the protected system registers are locked, so anything that has
+        // to change either of them has to have happened above.
         einit
 
         // main() takes no arguments here: there is no one to pass any.

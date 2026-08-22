@@ -461,9 +461,14 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * No support for the XC16x MAC unit.
-* The SFR map follows the C167 where the derivatives disagree, and three names
-  are at different addresses on an 80C166; C166RegisterInfo.td lists them.
-  Nothing selects a derivative, so nothing warns about it.
+* The SFR map is the XC164CM's, and only that part's: the same short address
+  names different registers on different derivatives, so nothing here is right
+  for another one and nothing selects between them.  C166RegisterInfo.td says
+  where the XC164CM departs from the older C167 layout.
+* The extended SFR space is not modelled, because nothing emits the EXTR that
+  reaches it.  On an XC164CM that leaves out SYSCON1 and SYSCON3, PLLCON, the
+  RTC and the port alternate-select registers, so a startup sequence that has
+  to touch those still writes its own EXTR by hand.
 * Nothing builds the interrupt vector table.  TRAP reaches a slot and RETI
   comes back, but which sources a part has is a property of the part, so a
   project still writes its own .vectors section and places it.

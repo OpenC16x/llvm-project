@@ -189,6 +189,12 @@
 # CHECK: mov mdl, mdh
 0xf2 0x07 0x0c 0xfe
 
+# FF12H is the vector segment pointer on an XC164CM, not the C167's SYSCON.
+# CHECK: mov vecseg, r2
+0xf6 0xf2 0x12 0xff
+# CHECK: bset odp9.3
+0x3f 0x8d
+
 # TRAP carries half its vector's address, so these come back as the trap
 # numbers they were written as.
 # CHECK: trap #2

@@ -88,24 +88,29 @@ def R15 : C166Reg<15, "r15">, DwarfRegNum<[15]>;
 // written down a second time.  The ones above 80H are the bit-addressable
 // half, and their bitoff is the short address again.
 //
-// This is the standard SFR space of the C166 family as the C167 lays it out.
-// The extended SFR space that EXTR selects, and the registers of the on-chip
-// X-peripherals, have no short address in this space and are not here; nor are
-// the registers a particular derivative adds of its own.  Every name is
-// accepted whatever the part, since to an assembler an SFR is an address and
-// what answers at that address is the board's business.
+// This is the SFR space of the XC164CM, checked against the XC164CM User's
+// Manual (System Units V2.1 and Peripheral Units V1.2, 2006).  The extended
+// SFR space that EXTR selects is not here at all - nothing in this backend
+// emits EXTR, so an ESFR has no way to be reached - which leaves out the whole
+// of SYSCON1, SYSCON3, PLLCON, RTC, the identifier registers and the port
+// alternate-select registers.
 //
-// Where the derivatives disagree, this follows the C167.  Checked against the
-// SAB 80C166/83C166 User's Manual, which agrees on every name it documents
-// except three that the C167 moved:
+// The map is a property of the part rather than of the family: the same short
+// address names different registers on different derivatives, so a table can
+// only be right about one of them.  Where the XC164CM differs from the older
+// C167 layout it follows the XC164CM, and the registers of an external bus -
+// ADDRSEL1-4 and BUSCON0-4 - are absent because this part has no external bus
+// and those short addresses mean other things on it:
 //
-//   SYSCON  FF12H here, FF0CH on the 80C166, where BUSCON0 now is
-//   P4      FFC8H here, FF08H on the 80C166
-//   DP4     FFCAH here, FF0AH on the 80C166
+//   0CH  CPUCON1, not ADDRSEL1     86H  SPSEG,  not BUSCON0
+//   0DH  CPUCON2, not ADDRSEL2     89H  VECSEG, not SYSCON
+//   8BH  P9,      not BUSCON2      8CH  DP9,    not BUSCON3
+//   8DH  ODP9,    not BUSCON4
 //
-// so code for an 80C166 must not use those three names.  That manual also
-// prints CCM3 as FF58H/ABH, which cannot both be true - ABH is FF56H, which is
-// CCM2 - and ACH is what puts CCM3 at the FF58H the same line gives it.
+// The peripheral names here are the classic C166 ones.  The XC164CM manual
+// prefixes them with the module - GPT12E_T2CON for T2CON, ADC_CON for ADCON,
+// CC2_M4 for CCM4 - but names the same addresses, so the two spellings differ
+// only in what a datasheet calls them.
 
 // CPU core: the data page pointers, the code segment pointer, the multiply/
 // divide unit, the context pointer and the system stack and its bounds.
@@ -122,16 +127,10 @@ def STKOV    : C166Reg<0x0A, "stkov">, DwarfRegNum<[38]>; // FE14H
 def STKUN    : C166Reg<0x0B, "stkun">, DwarfRegNum<[39]>; // FE16H
 
 // External bus: the address windows and their bus configurations.
-def ADDRSEL1 : C166Reg<0x0C, "addrsel1">; // FE18H
-def ADDRSEL2 : C166Reg<0x0D, "addrsel2">; // FE1AH
-def ADDRSEL3 : C166Reg<0x0E, "addrsel3">; // FE1CH
-def ADDRSEL4 : C166Reg<0x0F, "addrsel4">; // FE1EH
-def BUSCON0  : C166Reg<0x86, "buscon0">; // FF0CH
-def BUSCON1  : C166Reg<0x8A, "buscon1">; // FF14H
-def BUSCON2  : C166Reg<0x8B, "buscon2">; // FF16H
-def BUSCON3  : C166Reg<0x8C, "buscon3">; // FF18H
-def BUSCON4  : C166Reg<0x8D, "buscon4">; // FF1AH
-def SYSCON   : C166Reg<0x89, "syscon">; // FF12H
+def CPUCON1  : C166Reg<0x0C, "cpucon1">; // FE18H
+def CPUCON2  : C166Reg<0x0D, "cpucon2">; // FE1AH
+def SPSEG    : C166Reg<0x86, "spseg">; // FF0CH
+def VECSEG   : C166Reg<0x89, "vecseg">; // FF12H
 
 // Program status word, and the two constant registers.
 def PSW      : C166Reg<0x88, "psw">, DwarfRegNum<[32]>; // FF10H
@@ -287,6 +286,11 @@ def P7       : C166Reg<0xE8, "p7">; // FFD0H
 def DP7      : C166Reg<0xE9, "dp7">; // FFD2H
 def P8       : C166Reg<0xEA, "p8">; // FFD4H
 def DP8      : C166Reg<0xEB, "dp8">; // FFD6H
+// Port 9 sits in the block the external bus registers occupy on a part that
+// has an external bus; the XC164CM has none.
+def P9       : C166Reg<0x8B, "p9">; // FF16H
+def DP9      : C166Reg<0x8C, "dp9">; // FF18H
+def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
 def FOCON    : C166Reg<0xD5, "focon">; // FFAAH
 
 //===----------------------------------------------------------------------===//
@@ -309,8 +313,8 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
   (add DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
-       ADDRSEL1, ADDRSEL2, ADDRSEL3, ADDRSEL4, BUSCON0, BUSCON1, BUSCON2,
-       BUSCON3, BUSCON4, SYSCON, PSW, MDC, ZEROS, ONES, TFR, T2, T3, T4,
+       CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9,
+       PSW, MDC, ZEROS, ONES, TFR, T2, T3, T4,
        T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON, T6CON, T0, T1, T0REL,
        T1REL, T01CON, T78CON, CC0, CC1, CC2, CC3, CC4, CC5, CC6, CC7, CC8,
        CC9, CC10, CC11, CC12, CC13, CC14, CC15, CC16, CC17, CC18, CC19,
