@@ -90,13 +90,24 @@ int64_t C166::getSFRShortAddress(const MCRegisterInfo &MRI, StringRef Name) {
 }
 
 int64_t C166::getSFRAddress(const MCRegisterInfo &MRI, StringRef Name) {
-  int64_t Short = getSFRShortAddress(MRI, Name);
-  return Short < 0 ? -1 : getSFRAddressForShort(Short);
+  if (int64_t Short = getSFRShortAddress(MRI, Name); Short >= 0)
+    return getSFRAddressForShort(Short);
+
+  // An extended register is reachable by address even though it is not
+  // reachable through a "reg" field.
+  std::string Lowered = Name.lower();
+  for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
+    if (Lowered == C166InstPrinter::getRegisterName(Reg))
+      return getESFRAddressForShort(MRI.getEncodingValue(Reg));
+  return -1;
 }
 
 StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr) {
   for (MCPhysReg Reg : MRI.getRegClass(C166::SFRRegClassID))
     if (getSFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)
+      return C166InstPrinter::getRegisterName(Reg);
+  for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
+    if (getESFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)
       return C166InstPrinter::getRegisterName(Reg);
   return StringRef();
 }

@@ -189,6 +189,12 @@
 # CHECK: mov mdl, mdh
 0xf2 0x07 0x0c 0xfe
 
+# An address in the extended space comes back by name too.
+# CHECK: mov syscon1, r2
+0xf6 0xf2 0xdc 0xf1
+# CHECK: mov r3, pllcon
+0xf2 0xf3 0xd0 0xf1
+
 # FF12H is the vector segment pointer on an XC164CM, not the C167's SYSCON.
 # CHECK: mov vecseg, r2
 0xf6 0xf2 0x12 0xff

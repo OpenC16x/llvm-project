@@ -435,6 +435,14 @@ assembles to the bytes it came from.  An address with no register at it stays
 a number, and so does a bit-addressable word with nothing mapped at it, while
 "bset psw.10" and "bclr mdc.0" say what they mean.
 
+The extended special function registers are in the table too, but only as
+addresses.  They sit at the same short addresses as the ordinary ones, mapped
+from F000H and F100H instead of FE00H and FF00H, so a "reg" field cannot tell
+the two apart and reaching one that way needs an EXTR the backend never emits.
+By address there is no such problem - the default DPPs already cover F000H - so
+"mov syscon1, r2" is a MOV mem, reg, and the registers are in a class of their
+own that no "reg" field can name.
+
 TRAP is the software entry to a vector.  It does not read a vector through the
 table: it branches to the table entry itself, at 4 * the trap number, so the
 entry has to hold a jump.  What it saves is what a hardware interrupt saves -
@@ -478,10 +486,13 @@ Known limitations / things to do
   names different registers on different derivatives, so nothing here is right
   for another one and nothing selects between them.  C166RegisterInfo.td says
   where the XC164CM departs from the older C167 layout.
-* The extended SFR space is not modelled, because nothing emits the EXTR that
-  reaches it.  On an XC164CM that leaves out SYSCON1 and SYSCON3, PLLCON, the
-  RTC and the port alternate-select registers, so a startup sequence that has
-  to touch those still writes its own EXTR by hand.
+* An extended special function register is reachable by address but not
+  through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
+  Getting at one that way needs an EXTR, and once encoded it is the same bytes
+  as the register with the same short address in the ordinary space, so there
+  would be nothing for a disassembly to go on.  Three of them are missing
+  because the manual contradicts itself about where they are; the register file
+  names which.
 * Which trap number a peripheral raises is a property of the part and is not
   written down anywhere here, so a handler's slot is named by number rather
   than by the source it serves.

@@ -59,11 +59,20 @@ constexpr bool isSFRBitAddressable(uint8_t Short) {
   return Short >= 0x80 && getSFRAddressForShort(Short) <= 0xFFDE;
 }
 
+/// Where the extended special function register with short address \p Short is
+/// mapped.  The extended space holds a second set of registers at the same
+/// short addresses, from different bases.
+constexpr uint16_t getESFRAddressForShort(uint8_t Short) {
+  return Short < 0x80 ? 0xF000 + 2 * Short : 0xF100 + 2 * (Short - 0x80);
+}
+
 /// The 8 bit short address of the named register, or -1 if the name is not
-/// one.
+/// one.  Extended registers are not named here: a "reg" field cannot tell one
+/// from the register with the same short address in the ordinary space.
 int64_t getSFRShortAddress(const MCRegisterInfo &MRI, StringRef Name);
 
 /// The address the named register is mapped at, or -1 if the name is not one.
+/// This does cover the extended registers, which are reachable by address.
 int64_t getSFRAddress(const MCRegisterInfo &MRI, StringRef Name);
 
 /// The name of the register mapped at \p Addr, or empty if nothing is.

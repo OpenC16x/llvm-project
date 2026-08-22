@@ -294,6 +294,64 @@ def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
 def FOCON    : C166Reg<0xD5, "focon">; // FFAAH
 
 //===----------------------------------------------------------------------===//
+// Extended special function registers
+//===----------------------------------------------------------------------===//
+
+// The extended space holds a second set of registers at the same short
+// addresses, mapped from F000H and F100H instead of FE00H and FF00H.  Reaching
+// one through a "reg" field means preceding the instruction with EXTR, and the
+// two are indistinguishable once encoded, which is why none of these is in a
+// class a "reg" field can name.  What they are here for is the other way of
+// reaching them: the address itself is an ordinary 16 bit address that the
+// default DPPs already cover, so "mov syscon1, r2" is a MOV mem, reg and needs
+// no EXTR at all.
+//
+// From the XC164CM User's Manual.  Three registers it documents are left out
+// because it contradicts itself about where they are: it gives OPSEN as
+// FE58H/2CH, CC2_T7IC as F17AH/BEH and CC2_T8IC as F17CH/BFH, and in each case
+// the address and the short address name different words - 2CH is F058H in
+// this space, BEH is F17CH and BFH is F17EH - with nothing else nearby to say
+// which half is the typo.
+
+def QX0         : C166Reg<0x00, "qx0">; // F000H
+def QX1         : C166Reg<0x01, "qx1">; // F002H
+def QR0         : C166Reg<0x02, "qr0">; // F004H
+def QR1         : C166Reg<0x03, "qr1">; // F006H
+def CC2_IOC     : C166Reg<0x33, "cc2_ioc">; // F066H
+def IDPROG      : C166Reg<0x3C, "idprog">; // F078H
+def IDMEM       : C166Reg<0x3D, "idmem">; // F07AH
+def IDCHIP      : C166Reg<0x3E, "idchip">; // F07CH
+def IDMANUF     : C166Reg<0x3F, "idmanuf">; // F07EH
+def ADC_CTR2    : C166Reg<0x4E, "adc_ctr2">; // F09CH
+def ADC_CTR2IN  : C166Reg<0x4F, "adc_ctr2in">; // F09EH
+def ADC_DAT2    : C166Reg<0x50, "adc_dat2">; // F0A0H
+def SCUSLC      : C166Reg<0x60, "scuslc">; // F0C0H
+def RTC_RELL    : C166Reg<0x66, "rtc_rell">; // F0CCH
+def RTC_RELH    : C166Reg<0x67, "rtc_relh">; // F0CEH
+def RTC_RTCL    : C166Reg<0x6A, "rtc_rtcl">; // F0D4H
+def RTC_RTCH    : C166Reg<0x6B, "rtc_rtch">; // F0D6H
+def IMBCTR      : C166Reg<0x7F, "imbctr">; // F0FEH
+def DP1L        : C166Reg<0x82, "dp1l">; // F104H
+def DP1H        : C166Reg<0x83, "dp1h">; // F106H
+def RTC_ISNC    : C166Reg<0x86, "rtc_isnc">; // F10CH
+def RTC_CON     : C166Reg<0x88, "rtc_con">; // F110H
+def ALTSEL0P1H  : C166Reg<0x90, "altsel0p1h">; // F120H
+def ALTSEL0P3   : C166Reg<0x93, "altsel0p3">; // F126H
+def ALTSEL0P1L  : C166Reg<0x98, "altsel0p1l">; // F130H
+def ALTSEL0P9   : C166Reg<0x9C, "altsel0p9">; // F138H
+def ALTSEL1P9   : C166Reg<0x9D, "altsel1p9">; // F13AH
+def EOPIC       : C166Reg<0xC0, "eopic">; // F180H
+def PLL_IC      : C166Reg<0xCF, "pll_ic">; // F19EH
+def RTC_IC      : C166Reg<0xD0, "rtc_ic">; // F1A0H
+def EXICON      : C166Reg<0xE0, "exicon">; // F1C0H
+def ODP3        : C166Reg<0xE3, "odp3">; // F1C6H
+def PLLCON      : C166Reg<0xE8, "pllcon">; // F1D0H
+def SYSCON3     : C166Reg<0xEA, "syscon3">; // F1D4H
+def EXISEL1     : C166Reg<0xEC, "exisel1">; // F1D8H
+def EXISEL0     : C166Reg<0xED, "exisel0">; // F1DAH
+def SYSCON1     : C166Reg<0xEE, "syscon1">; // F1DCH
+
+//===----------------------------------------------------------------------===//
 // Register classes
 //===----------------------------------------------------------------------===//
 
@@ -343,6 +401,21 @@ def GR16orSFR : RegisterClass<"C166", [i16], 16, (add GR16, SFR)> {
 }
 
 def GR8orSFR : RegisterClass<"C166", [i8], 8, (add GR8, SFR)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The extended special function registers.  This is deliberately not part of
+// either class above: a "reg" field cannot tell one of these from the SFR with
+// the same short address, so they are reachable by address only.
+def ESFR : RegisterClass<"C166", [i16], 16,
+  (add
+      QX0, QX1, QR0, QR1, CC2_IOC, IDPROG, IDMEM, IDCHIP, IDMANUF,
+      ADC_CTR2, ADC_CTR2IN, ADC_DAT2, SCUSLC, RTC_RELL, RTC_RELH,
+      RTC_RTCL, RTC_RTCH, IMBCTR, DP1L, DP1H, RTC_ISNC, RTC_CON,
+      ALTSEL0P1H, ALTSEL0P3, ALTSEL0P1L, ALTSEL0P9, ALTSEL1P9, EOPIC,
+      PLL_IC, RTC_IC, EXICON, ODP3, PLLCON, SYSCON3, EXISEL1, EXISEL0,
+      SYSCON1)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
