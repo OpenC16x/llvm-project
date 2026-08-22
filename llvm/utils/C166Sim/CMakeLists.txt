@@ -14,4 +14,5 @@ add_llvm_utility(c166-sim
   Machine.cpp
   Execute.cpp
   Unwind.cpp
+  GDBServer.cpp
   )

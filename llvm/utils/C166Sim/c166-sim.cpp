@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Machine.h"
+#include "GDBServer.h"
 #include "Unwind.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -40,6 +41,11 @@ static cl::opt<bool> Trace("trace",
                            cl::desc("print each instruction executed"));
 static cl::opt<bool>
     DumpState("dump-state", cl::desc("print registers when the program stops"));
+static cl::opt<bool>
+    GDB("gdb", cl::desc("speak the GDB remote serial protocol on stdin and "
+                        "stdout instead of running the program, so that a "
+                        "debugger can drive it: target remote | c166-sim "
+                        "--gdb prog.elf"));
 static cl::opt<bool> Backtrace(
     "backtrace",
     cl::desc("walk the stack when the program stops, using the call frame "
@@ -72,7 +78,9 @@ int main(int argc, char **argv) {
   M.MaxSteps = MaxSteps;
   M.Trace = Trace;
   M.TraceOS = &errs();
-  M.ConsoleOS = &outs();
+  // The debugger owns stdout while it is connected, so the program's console
+  // output goes the other way rather than into the middle of a packet.
+  M.ConsoleOS = GDB ? &errs() : &outs();
 
   const object::ObjectFile *BacktraceObj = nullptr;
   auto Finish = [&]() -> int {
@@ -108,6 +116,9 @@ int main(int argc, char **argv) {
   // A flat image has no symbols and nothing to link, which is what the
   // simulator's own tests use: it stops by writing to the exit port.
   if (Binary) {
+    if (GDB)
+      return Fail("--gdb needs an executable, so that the debugger has symbols "
+                  "and debug information to go with the machine");
     if (Backtrace)
       return Fail("--backtrace needs an executable to read the call frame "
                   "information out of, and a flat image has none");
@@ -179,11 +190,18 @@ int main(int argc, char **argv) {
       M.HasExitAddress = true;
       break;
     }
-    if (!M.HasExitAddress)
+    // Without one there is nothing to say a program has finished, which only
+    // matters when the simulator is the one deciding to stop.  A debugger
+    // decides for itself, so it is allowed to attach to a program that has no
+    // such symbol.
+    if (!M.HasExitAddress && !GDB)
       return Fail("no symbol '" + ExitSymbol +
                   "': the simulator needs to know where a finished program "
                   "ends up, see --exit-symbol");
   }
+
+  if (GDB)
+    return serveGDB(M);
 
   while (M.step())
     ;

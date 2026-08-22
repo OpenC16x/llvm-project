@@ -43,6 +43,46 @@ instance - and looking at the walk is what tests it.
   #1 c0c006 in farmid at prog.c:3
   #2 c0010e in outer at prog.c:4
 
+Debugging a program
+-------------------
+
+  c166-sim --gdb prog.elf
+
+speaks the GDB remote serial protocol on stdin and stdout, so the machine is
+driven from outside instead of running to completion.  A debugger connects to
+it with
+
+  target remote | c166-sim --gdb prog.elf
+
+which needs no port and leaves nothing listening if the debugger goes away.
+What is supported is enough to look at a stopped machine and let it go again:
+reading and writing registers and memory, software breakpoints, stepping,
+continuing, and an interrupt while running.  Breakpoints are the simulator's
+own - nothing is written into the program - which is something a simulator can
+do and a part cannot.
+
+The registers are described to the client rather than assumed, through
+qXfer:features:read, and the numbers in that description are the DWARF ones
+from C166RegisterInfo.td.  So there is one register numbering across the
+assembler, the debug information and this.  PC is not a register any
+instruction can name: it is the 24 bit CSP:IP pair, reported as one 32 bit
+register because that is what an address in the debug information is.
+
+No debugger knows the C166 architecture yet, so nothing can put a source level
+front end on this today; a port of GDB or LLDB to this target is what that
+would take.  The protocol itself is not architecture specific, though, so an
+ordinary remote client works, and tools/rsp-client.py is one - it is what the
+tests drive the stub with, and it prints what came back:
+
+  $ rsp-client.py -- c166-sim --gdb prog.elf <<'END'
+  send Z0,c00100,2
+  send c
+  reg pc
+  END
+  Z0,c00100,2 -> OK
+  c -> S05
+  pc = 00c00100
+
 Two addresses are the simulator rather than storage.  They are in the top
 segment, which no C166 part populates and no linker script here places
 anything in, so a program reaches them with a far pointer or an EXTS:

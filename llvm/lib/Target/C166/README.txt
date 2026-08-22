@@ -422,6 +422,10 @@ executable carries, using LLVM's own reader for it, and lld/test/ELF has a test
 that links a mixed near and far call chain and compares the walk against the
 symbol table.
 
+c166-sim --gdb serves the same machine over the GDB remote serial protocol, so
+that something outside can drive it; llvm/utils/C166Sim/README.txt has what it
+supports and how to connect.
+
 Encodings and the MC layer
 --------------------------
 
@@ -580,9 +584,13 @@ Known limitations / things to do
 * Only the X-peripheral registers the XC164CM's own two manuals name are
   modelled.  The CAN module has a manual of its own that this was not built
   from, so its registers have to be written as addresses.
-* A debugger cannot attach to any of this yet.  The unwind information is
-  right - the simulator walks it - but no debugger knows the c166 architecture,
-  so what reads the information today is llvm-dwarfdump and the simulator.
+* No debugger knows the c166 architecture, so nothing puts a source level front
+  end on this yet.  What is in place is everything under one: the debug
+  information is right, the unwind information is right and the simulator walks
+  it, and "c166-sim --gdb" serves the GDB remote serial protocol over stdin and
+  stdout - registers, memory, breakpoints, stepping - with the registers
+  described to the client rather than assumed.  A port of GDB or LLDB to this
+  target is what is left.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
