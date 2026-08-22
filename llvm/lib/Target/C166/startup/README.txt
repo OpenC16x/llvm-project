@@ -100,6 +100,8 @@ or anything else should build picolibc or newlib for c166 and link that
 instead; mem.c exists so that a program can be linked and run with nothing
 else present at all.
 
-None of this has been executed on hardware, or on a simulator, because there
-is no free C166 simulator to run it on.  It assembles, links, and disassembles
-back to what it should be.
+None of this has been executed on hardware.  It has been executed on a
+simulator: llvm/utils/C166Sim runs it, and the differential tests there link
+this crt0.S and this mem.c into every program they check, so the startup
+sequence, the block functions and the linker script are all exercised on every
+run.  What that does not establish is that a part agrees with the simulator.
