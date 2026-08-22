@@ -246,6 +246,18 @@ def DP9      : C166Reg<0x8C, "dp9">; // FF18H
 def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
 def FOCON    : C166Reg<0xD5, "focon">; // FFAAH
 
+// The MAC unit's registers.  This part has a C166SV2 core, so it has a
+// multiply-accumulate coprocessor, and these are the parts of it that have a
+// short address.  MAS, the saturated view of the accumulator's high word, does
+// not: CoSTORE reaches it through the CoREG encoding instead.
+def IDX0     : C166Reg<0x84, "idx0">; // FF08H
+def IDX1     : C166Reg<0x85, "idx1">; // FF0AH
+def MAL      : C166Reg<0x2E, "mal">;  // FE5CH
+def MAH      : C166Reg<0x2F, "mah">;  // FE5EH
+def MRW      : C166Reg<0xED, "mrw">;  // FFDAH
+def MCW      : C166Reg<0xEE, "mcw">;  // FFDCH
+def MSW      : C166Reg<0xEF, "msw">;  // FFDEH
+
 //===----------------------------------------------------------------------===//
 // Extended special function registers
 //===----------------------------------------------------------------------===//
@@ -374,6 +386,7 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
   (add 
+      
       DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
       CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9, PSW, MDC, ZEROS,
       ONES, TFR, T2, T3, T4, T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON,
@@ -383,7 +396,8 @@ def SFR : RegisterClass<"C166", [i16], 16,
       PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC, T3IC, T4IC,
       T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC, SSCEIC,
       CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC, P1L,
-      P1H, P3, DP3, P5, P5DIDIS, FOCON
+      P1H, P3, DP3, P5, P5DIDIS, FOCON, IDX0, IDX1, MAL, MAH, MRW, MCW,
+      MSW
   )> {
   let isAllocatable = 0;
   let CopyCost = -1;

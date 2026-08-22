@@ -489,24 +489,28 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* No support for the C166SV2 MAC unit, which the XC164CM has.  It is a
-  coprocessor rather than a few instructions - a 40 bit accumulator in MAH,
-  MAL and MAS, its own control, status and repeat registers, dual operand
-  fetch through IDX0/IDX1, and a repeat field on every CoXXX instruction - and
-  nothing in the compiler would select any of it without the DSP patterns to
-  drive it.
+* The MAC unit's instructions are not implemented, but its encoding is now
+  known rather than guessed at, so this is work rather than research.  The
+  C166SV2 User's Manual gives a Format line per instruction in its detailed
+  description chapter, which is a better source than the opcode list: a CoXXX
+  is four bytes, "A3 nm CA rrr0:0000" and the like, so the primary opcode is
+  the first byte, the register or pointer nibbles the second, the extended
+  opcode the third, and the repeat and pointer-update controls the fourth.
+  That puts rrr at bits 31 to 29, qqq at 26 to 24 and the IDX control at 15 to
+  12, which is what the manual says about all three independently.  180 forms
+  in twelve byte shapes cover the unit, and the same table read two ways -
+  those Format lines and the opcode list - agrees with itself on all 173 rows
+  the two have in common.
 
-  What is known about the encoding, from the C166SV2 User's Manual: a CoXXX is
-  two opcode bytes, a primary one and an extended one that picks the operation,
-  and the repeat control field rrr sits at bits 31 to 29.  Its appendix lists
-  the pairs rather than tabulating them in a 16 by 16 matrix, and about half of
-  the list comes out of the document with the opcode, the mnemonic and the
-  operand form all lining up; on the rest the operand column has fewer entries
-  than the other three and nothing found so far says which rows it skips.  The
-  half that lines up is not worth implementing on its own - an assembler that
-  takes some of a coprocessor's instructions and rejects the others is harder
-  to use than one that takes none - so this waits on the operand forms for the
-  other half.
+  Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
+  it puts the CoREG selector at bits 31 to 27, where the repeat field already
+  is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
+  win, being self-consistent across all 180.
+
+  What is left is the work: an operand for [IDXi] and [Rwm] with their eight
+  update forms each, one for the CoREG names, the repeat prefix, and the
+  instruction definitions.  Nothing in the compiler would select any of it
+  either way; it is for code written by hand.
 * The branch prediction bit of JMPA and CALLA is always left at 0, which the
   C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
   always 0 too; it is meant to be set for a backward branch of 32 bytes or

@@ -49,6 +49,8 @@ typedef volatile unsigned int c166_sfr;
 #define T5          C166_SFR(0xFE46U)
 #define T6          C166_SFR(0xFE48U)
 #define CAPREL      C166_SFR(0xFE4AU)
+#define MAL         C166_SFR(0xFE5CU)
+#define MAH         C166_SFR(0xFE5EU)
 #define CC16        C166_SFR(0xFE60U)
 #define CC17        C166_SFR(0xFE62U)
 #define CC18        C166_SFR(0xFE64U)
@@ -79,6 +81,8 @@ typedef volatile unsigned int c166_sfr;
 #define PECC7       C166_SFR(0xFECEU)
 #define P1L         C166_SFR(0xFF04U)
 #define P1H         C166_SFR(0xFF06U)
+#define IDX0        C166_SFR(0xFF08U)
+#define IDX1        C166_SFR(0xFF0AU)
 #define SPSEG       C166_SFR(0xFF0CU)
 #define MDC         C166_SFR(0xFF0EU)
 #define PSW         C166_SFR(0xFF10U)
@@ -128,6 +132,9 @@ typedef volatile unsigned int c166_sfr;
 #define SSCCON      C166_SFR(0xFFB2U)
 #define P3          C166_SFR(0xFFC4U)
 #define DP3         C166_SFR(0xFFC6U)
+#define MRW         C166_SFR(0xFFDAU)
+#define MCW         C166_SFR(0xFFDCU)
+#define MSW         C166_SFR(0xFFDEU)
 
 /* Extended special function registers, F000H to F1DEH.  Reaching one by
  * address needs no EXTR; only the short "reg" form of an instruction does. */
