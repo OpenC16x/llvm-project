@@ -119,6 +119,24 @@ SECTIONS
     __bss_end = .;
   } > dsram
 
+  /* Code that runs from the PSRAM rather than from the Flash.  That is what
+   * that memory is for - the manual calls it optimised for code fetches - and
+   * it is also the only way to run a routine that rewrites the Flash, since a
+   * part cannot fetch from Flash while erasing it.  The image lives in ROM and
+   * crt0.S copies it up, so a function goes here with
+   *
+   *   __attribute__((far, section(".psramtext")))
+   *
+   * where the section says where it lives and the far says how to call it: the
+   * PSRAM is a different segment from the Flash, so it takes a CALLS. */
+  .psramtext : ALIGN(2) {
+    __psramtext_start = .;
+    *(.psramtext .psramtext.*)
+    . = ALIGN(2);
+    __psramtext_end = .;
+  } > psram AT > rom
+  __psramtext_load = LOADADDR(.psramtext);
+
   /* The same two again for what is declared __far, in the RAM that only a far
    * access reaches.  crt0.S copies and zeroes these with the segment supplied
    * by an EXTS, which is the only difference. */

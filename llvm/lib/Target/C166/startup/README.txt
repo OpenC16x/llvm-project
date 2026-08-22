@@ -83,12 +83,27 @@ four page pointers are spoken for.  crt0.S initialises it with a second pair of
 loops that supply the segment with an EXTS, reading the ROM image near and
 writing the destination far.
 
-It is the last resort of the three RAMs rather than the first.  The manual
-calls the PSRAM optimised for code fetches and slower than the data memories
-for data, and a far access pays an EXTS on top of that, so __far on a variable
-is for what does not fit in the DSRAM rather than for anything it makes faster.
-The PSRAM's own strength is code: the manual singles out the interrupt vector
-table as something worth putting there.
+It is the last resort of the three RAMs for data rather than the first.  The
+manual calls the PSRAM optimised for code fetches and slower than the data
+memories for data, and a far access pays an EXTS on top of that, so __far on a
+variable is for what does not fit in the DSRAM rather than for anything it
+makes faster.
+
+Code is what that memory is good at, and a function goes there with
+
+  __attribute__((far, noinline, section(".psramtext")))
+  int scale(int x) { return x * 3 + 1; }
+
+The section says where it lives, the far says how to call it - the PSRAM is a
+different segment from the Flash, so it takes a CALLS - and the noinline is
+what keeps it a function at all, and therefore what keeps it in the section.
+Without it the compiler may inline the body and --gc-sections then drops the
+copy that is left, so the section comes out empty.
+
+The image lives in the Flash and crt0.S copies it up beside the far data.  The
+reason to want this is not only speed: a routine that erases or writes the
+Flash cannot be fetched from the Flash while it does so, so it has to be
+somewhere else, and this is the somewhere else.
 
 The pages are named by the script, not by crt0.S:
 

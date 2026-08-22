@@ -467,9 +467,9 @@ Known limitations / things to do
   the linker reports an overflow rather than wrapping.  What is left goes to a
   farrom region that .fartext and .farrodata land in, so an object declared
   __far uses it, and writable far data has the PSRAM at E0'0000H, which no data
-  page pointer covers.  What is not placed anywhere is code in the PSRAM, which
-  is what that memory is actually for: the manual calls it optimised for code
-  fetches and slower than the data memories for data.
+  page pointer covers.  Code can be put there too, which is what that memory is
+  actually for and what a routine that rewrites the Flash needs, since a part
+  cannot fetch from the Flash while erasing it.
 * MOV mem, reg keeps its narrow field, because widening it would make
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between

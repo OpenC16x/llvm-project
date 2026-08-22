@@ -15,6 +15,20 @@
 // Trap 0 is reset, and a trap vector is one double word at 4 * trap number, so
 // the reset vector is the first four bytes of code segment 0 and has room for
 // exactly one jump.  JMPS is that jump, and it is four bytes.
+.macro FARCOPY load, start, end
+        mov     r1, #\load
+        mov     r2, #sof(\start)
+        mov     r3, #sof(\end)
+1:      cmp     r2, r3
+        jmpa    cc_z, 2f
+        mov     r4, [r1+]
+        exts    #seg(\start), #1
+        mov     [r2], r4
+        add     r2, #2
+        jmpa    cc_UC, 1b
+2:
+.endm
+
         .section .reset,"ax",@progbits
         .globl __reset_vector
 __reset_vector:
@@ -82,26 +96,17 @@ _start:
         jmpa    cc_UC, .Lzero
 .Lzero_done:
 
-        // The same two again for what is declared __far.  That RAM is outside
-        // every page the data page pointers select - which is the whole point
-        // of it - so the destination carries only its offset within the
-        // segment and an EXTS supplies the segment for the store.  The source
-        // is the ROM image, which is near like everything else in the ROM.
+        // Copy what lives in the RAM the data page pointers do not reach:
+        // the code that runs from the PSRAM, and anything declared __far.
+        // That RAM being outside every page they select is the whole point of
+        // it, so the destination carries only its offset within the segment
+        // and an EXTS supplies the segment for the store.  The source is the
+        // ROM image, which is near like everything else in the ROM.
         //
         // EXTS covers the one instruction after it, so it goes inside the
         // loop rather than around it.
-        mov     r1, #__fardata_load
-        mov     r2, #sof(__fardata_start)
-        mov     r3, #sof(__fardata_end)
-.Lfarcopy:
-        cmp     r2, r3
-        jmpa    cc_z, .Lfarcopy_done
-        mov     r4, [r1+]
-        exts    #seg(__fardata_start), #1
-        mov     [r2], r4
-        add     r2, #2
-        jmpa    cc_UC, .Lfarcopy
-.Lfarcopy_done:
+        FARCOPY __psramtext_load, __psramtext_start, __psramtext_end
+        FARCOPY __fardata_load, __fardata_start, __fardata_end
 
         mov     r1, #sof(__farbss_start)
         mov     r2, #sof(__farbss_end)

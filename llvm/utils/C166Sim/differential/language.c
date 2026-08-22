@@ -1,10 +1,15 @@
 #ifdef __c166__
 static void put(char c) { *(__far volatile unsigned char *)0xFF0000 = c; }
 #define FAR __far
+/* Copied out of the Flash into the PSRAM at startup and called across
+   segments.  noinline is what keeps it a function at all, and therefore what
+   keeps it in the section. */
+#define PSRAMTEXT __attribute__((far, noinline, section(".psramtext")))
 #else
 #include <stdio.h>
 static void put(char c) { putchar(c); }
 #define FAR
+#define PSRAMTEXT __attribute__((noinline))
 #endif
 typedef __UINT16_TYPE__ u16; typedef __INT16_TYPE__ s16;
 typedef __UINT32_TYPE__ u32; typedef __INT32_TYPE__ s32;
@@ -44,6 +49,17 @@ static u32 classify(int c) {
   case 4: return 55; case 5: return 66; case 6: return 77; case 7: return 88;
   case 20: return 99; default: return 0xdead;
   }
+}
+
+/* --- a function that runs from RAM ---------------------------------- */
+/* On the C166 this one is executed out of the PSRAM rather than the Flash,
+   which is a different segment, so getting the same answer means the startup
+   copy, the inter-segment call and the return all worked. */
+static PSRAMTEXT u32 ram_mix(u32 a, u32 b) {
+  u32 t = a;
+  for (int i = 0; i < 8; i++)
+    t = t * 33 + (b >> (i & 15)) + (t >> 7);
+  return t;
 }
 
 /* --- varargs -------------------------------------------------------- */
@@ -117,5 +133,9 @@ int main(void) {
 
   puthex(mem_work(), 8);
   puthex(pointer_work(), 8);
+
+  acc = ram_mix(0x12345678u, 0xABCDu);
+  acc = acc * 7 + ram_mix(acc, 0xFFFFu);
+  puthex(acc, 8);
   return 0;
 }
