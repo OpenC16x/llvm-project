@@ -19,8 +19,9 @@
  * itself - the vector location is four times the vector number in all 80 - and
  * the numbers run from 10H to 5FH with none missing.
  *
- * Vectors 00H to 0FH are the reset vector and the hardware traps, which are
- * Table 5-3 and are not here.
+ * The hardware traps below are Table 5-3 of the same manual, and agree with
+ * themselves the same way.  They occupy every other slot rather than
+ * consecutive ones.
  *
  * Part of the LLVM Project, under the Apache License v2.0 with LLVM
  * Exceptions.  See https://llvm.org/LICENSE.txt for license information.
@@ -350,6 +351,37 @@
         VECTOR 093, \handler
 .endm
 
-/* These vector numbers are real but no source on this part raises them:
+/* The hardware traps.  Vector 0 is reset, which crt0.S claims with its own
+   section, so there is no macro for it. */
+
+/* Non-maskable interrupt, at 02H in the table. */
+.macro VECTOR_NMITRAP handler
+        VECTOR 002, \handler
+.endm
+
+/* Stack overflow, at 04H in the table. */
+.macro VECTOR_STOTRAP handler
+        VECTOR 004, \handler
+.endm
+
+/* Stack underflow, at 06H in the table. */
+.macro VECTOR_STUTRAP handler
+        VECTOR 006, \handler
+.endm
+
+/* Software break, at 08H in the table. */
+.macro VECTOR_SBRKTRAP handler
+        VECTOR 008, \handler
+.endm
+
+/* Undefined opcode, PMI access error, protected instruction
+   fault or illegal word operand access.  All four raise this one vector, and
+   TFR says which of them it was, at 0AH in the table. */
+.macro VECTOR_BTRAP handler
+        VECTOR 010, \handler
+.endm
+
+/* 0BH to 0FH are reserved, and these vector numbers are real but nothing on
+ * this part raises them:
  * 10H, 11H, 12H, 13H, 14H, 15H, 16H, 17H, 1EH, 1FH, 20H, 21H, 3FH, 40H, 41H, 4BH, 58H
  */

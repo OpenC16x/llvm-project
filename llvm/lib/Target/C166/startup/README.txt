@@ -210,7 +210,14 @@ if the number is already known:
   .section .vectors.043,"ax",@progbits
   jmps    #seg(handler), sof(handler)
 
-where the number is the trap number in decimal, padded to three digits.  vectors.ld
+where the number is the trap number in decimal, padded to three digits.
+
+The hardware traps are in that file too, under the names the manual gives them
+- VECTOR_NMITRAP, VECTOR_STOTRAP for stack overflow, VECTOR_STUTRAP for stack
+underflow, VECTOR_SBRKTRAP, and VECTOR_BTRAP for the four class B traps, which
+share one vector and leave TFR to say which of them it was.  They sit in every
+other slot rather than consecutive ones.  Vector 0 is reset and crt0.S claims
+it, so there is no macro for that one.  vectors.ld
 places each of the 128 slots at the address it has to be at, so slots that
 nothing claims can be left out rather than counted:
 

@@ -510,9 +510,12 @@ Known limitations / things to do
   would be nothing for a disassembly to go on.  Three of them are missing
   because the manual contradicts itself about where they are; the register file
   names which.
-* Vectors 00H to 0FH - the reset vector and the hardware traps - are not in
-  xc164cm-vectors.inc, because they are a different table of the manual than
-  the one it was built from.
+* The interrupt jump table cache is not used.  This part can hold two 24 bit
+  pointers in FINT0ADDR/FINT0CSP and FINT1ADDR/FINT1CSP and branch straight to
+  those two service routines, skipping the vector table's second branch
+  entirely.  Nothing here writes them, and they are in the XSFR space at
+  EC00H and up, which is a fourth register space this backend does not model
+  at all - it has no short address, so only a far pointer reaches it.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
