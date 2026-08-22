@@ -10,8 +10,8 @@
  * 16 bit access and needs no EXTR and no far pointer.  That holds as long as
  * DPP3 is left at page 3, which is what crt0.S sets it to.
  *
- * Which trap number a peripheral raises is not here.  It is in Table 5-2 of
- * the XC164CM User's Manual, and this file would have to guess at it.
+ * Which trap number a peripheral raises is in xc164cm-vectors.inc, because a
+ * vector is claimed from assembly rather than from C.
  *
  * Part of the LLVM Project, under the Apache License v2.0 with LLVM
  * Exceptions.  See https://llvm.org/LICENSE.txt for license information.

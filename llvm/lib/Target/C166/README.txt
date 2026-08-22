@@ -510,9 +510,9 @@ Known limitations / things to do
   would be nothing for a disassembly to go on.  Three of them are missing
   because the manual contradicts itself about where they are; the register file
   names which.
-* Which trap number a peripheral raises is a property of the part and is not
-  written down anywhere here, so a handler's slot is named by number rather
-  than by the source it serves.
+* Vectors 00H to 0FH - the reset vector and the hardware traps - are not in
+  xc164cm-vectors.inc, because they are a different table of the manual than
+  the one it was built from.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

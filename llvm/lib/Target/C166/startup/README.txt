@@ -6,11 +6,12 @@ memory map to link against.  None of it is built by the LLVM build: it is code
 for the target, not for the machine doing the building, so it is here to be
 copied into a project and adjusted rather than installed.
 
-  crt0.S      the reset vector and the startup sequence
-  c166.ld     a linker script for a part with nothing attached to it
-  vectors.ld  the interrupt vector table, for a program that has handlers
-  xc164cm.h   the special function registers, for C
-  mem.c       memcpy, memmove, memset and memcmp
+  crt0.S               the reset vector and the startup sequence
+  c166.ld              a linker script for a part with nothing attached
+  vectors.ld           the interrupt vector table, for a program with handlers
+  xc164cm.h            the special function registers, for C
+  xc164cm-vectors.inc  the interrupt vector numbers, for assembly
+  mem.c                memcpy, memmove, memset and memcmp
 
 Building it
 -----------
@@ -178,9 +179,9 @@ Both register spaces are inside the page DPP3 selects, so these are ordinary
 near accesses: no EXTR, no far pointer, and nothing to set up beyond the DPP3
 that crt0.S already writes.
 
-Which trap number a peripheral raises is not in the header.  That is Table 5-2
-of the XC164CM User's Manual, and guessing at it is exactly the kind of thing
-that produces a handler wired to the wrong source.
+Which trap number a peripheral raises is not in the header; it is in
+xc164cm-vectors.inc, because a vector is claimed from assembly rather than
+from C.
 
 Interrupt handlers
 ------------------
@@ -195,12 +196,21 @@ A handler is declared
   __attribute__((interrupt)) void handler(void) { ... }
 
 which makes it save what it uses and return with RETI, and its slot is claimed
-by putting a jump there:
+by name:
 
-  .section .vectors.026,"ax",@progbits
+  #include "xc164cm-vectors.inc"
+  VECTOR_ASC0_RIC  uart_rx_isr
+
+That claims the slot ASC0 raises on a received character.  Every source the
+part has is in that file, named after its interrupt control register, so
+nothing has to be looked up and typed - a handler wired to the wrong source is
+not a failure anyone sees quickly.  A slot can be claimed by number instead,
+if the number is already known:
+
+  .section .vectors.043,"ax",@progbits
   jmps    #seg(handler), sof(handler)
 
-The number is the trap number in decimal, padded to three digits.  vectors.ld
+where the number is the trap number in decimal, padded to three digits.  vectors.ld
 places each of the 128 slots at the address it has to be at, so slots that
 nothing claims can be left out rather than counted:
 
