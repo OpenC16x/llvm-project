@@ -464,9 +464,10 @@ Known limitations / things to do
   page that offset lands in.  DPP0 to DPP2 cover the Flash and DPP3 the RAM and
   the register spaces, which leaves the top 16 KByte of a 64 KByte Flash with
   no near address; c166.ld stops its rom region at 48 KByte for that reason and
-  the linker reports an overflow rather than wrapping.  Nothing yet places
-  anything in the part that is left, so a program that outgrows 48 KByte of
-  code and read-only data has nowhere to put the rest.
+  the linker reports an overflow rather than wrapping.  What is left goes to a
+  farrom region that .fartext and .farrodata land in, so an object declared
+  __far uses it; writable far data does not, because crt0 copies .data with
+  near addressing and moving it would need a copy loop that writes far too.
 * MOV mem, reg keeps its narrow field, because widening it would make
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between

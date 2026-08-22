@@ -32,12 +32,17 @@ __register_bank      = 0xFC00;
 
 MEMORY
 {
-  /* The part has 64 KByte of Flash, but only the first 48 fit under the three
-   * data page pointers that map it; the top 16 KByte would collide with the
-   * page the RAM and the special function registers need.  Code and data that
-   * has to live up there is reachable far, not near, so it does not belong in
-   * this region. */
+  /* Only the first 48 KByte of the Flash fits under the three data page
+   * pointers that map it; the top 16 KByte would collide with the page the RAM
+   * and the special function registers need.  So this region is what a near
+   * address can reach, which is the constraint on read-only data rather than
+   * on code: a branch takes its segment from CSP and its offset from the
+   * instruction, so code is reachable anywhere in the segment. */
   rom (rx) : ORIGIN = 0x00C00000, LENGTH = 48K
+  /* The rest of the Flash, which only a far access reaches.  A program with
+   * more than 48 KByte of code can put .text here instead, since code does not
+   * go through the data page pointers; read-only data cannot follow it. */
+  farrom (rx) : ORIGIN = 0x00C0C000, LENGTH = 16K
   /* The DPRAM below the system stack.  FC20H to FCFFH above the register bank
    * is free too, and FD00H to FDFFH is the bit-addressable part, which is
    * worth keeping for what needs it. */
@@ -66,14 +71,23 @@ SECTIONS
 
   .text : {
     *(.text .text.*)
-    *(.fartext .fartext.*)
   } > rom
 
   .rodata : {
     *(.rodata .rodata.*)
-    *(.farrodata .farrodata.*)
     . = ALIGN(2);
   } > rom
+
+  /* What a far access reaches, which is what can live above the pages the data
+   * page pointers cover. */
+  .fartext : {
+    *(.fartext .fartext.*)
+  } > farrom
+
+  .farrodata : ALIGN(2) {
+    *(.farrodata .farrodata.*)
+    . = ALIGN(2);
+  } > farrom
 
   /* Initialised data lives in RAM but its image is in ROM; crt0 copies it
    * across.  Both ends are word aligned so that the copy can move words. */

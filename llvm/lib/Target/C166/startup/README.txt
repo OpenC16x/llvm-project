@@ -64,8 +64,21 @@ the DPRAM and both register spaces.  So a near address of 0000H to BFFFH is
 Flash and C000H to FFFFH is RAM and registers, and in both cases it is the low
 16 bits of the physical address.  The top 16 KByte of the Flash has no near
 address left to give it, which is why the region stops at 48 KByte; anything up
-there has to be reached far.  Overflowing the region is an error from the
+there has to be reached far, which is what the farrom region is: .fartext and
+.farrodata go there, so an object declared __far uses the part of the Flash a
+near address cannot name.  Overflowing either region is an error from the
 linker, which is what keeps a program honest about the limit.
+
+The 48 KByte limit is on read-only data rather than on code.  A branch takes
+its segment from CSP and its offset from the instruction, so code is reachable
+anywhere in the segment; a program with more than 48 KByte of it can put .text
+in farrom instead, and only .rodata and the ROM image of .data have to stay
+below C0'C000H.
+
+Writable far data - .fardata and .farbss - still goes in the ordinary RAM.  The
+part has 2 KByte of DSRAM at 00'C000H and 2 KByte of PSRAM at E0'0000H that
+would suit it better, but crt0.S copies .data with near addressing, so moving
+it out there means a copy loop that writes far as well as reads far.
 
 The pages are named by the script, not by crt0.S:
 
