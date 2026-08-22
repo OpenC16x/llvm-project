@@ -6,11 +6,12 @@ memory map to link against.  None of it is built by the LLVM build: it is code
 for the target, not for the machine doing the building, so it is here to be
 copied into a project and adjusted rather than installed.
 
-  crt0.S      the reset vector and the startup sequence
-  c166.ld     a linker script for a part with nothing attached to it
-  vectors.ld  the interrupt vector table, for a program that has handlers
-  xc164cm.h   the special function registers, for C
-  mem.c       memcpy, memmove, memset and memcmp
+  crt0.S               the reset vector and the startup sequence
+  c166.ld              a linker script for a part with nothing attached
+  vectors.ld           the interrupt vector table, for a program with handlers
+  xc164cm.h            the special function registers, for C
+  xc164cm-vectors.inc  the interrupt vector numbers, for assembly
+  mem.c                memcpy, memmove, memset and memcmp
 
 Building it
 -----------
@@ -83,12 +84,27 @@ four page pointers are spoken for.  crt0.S initialises it with a second pair of
 loops that supply the segment with an EXTS, reading the ROM image near and
 writing the destination far.
 
-It is the last resort of the three RAMs rather than the first.  The manual
-calls the PSRAM optimised for code fetches and slower than the data memories
-for data, and a far access pays an EXTS on top of that, so __far on a variable
-is for what does not fit in the DSRAM rather than for anything it makes faster.
-The PSRAM's own strength is code: the manual singles out the interrupt vector
-table as something worth putting there.
+It is the last resort of the three RAMs for data rather than the first.  The
+manual calls the PSRAM optimised for code fetches and slower than the data
+memories for data, and a far access pays an EXTS on top of that, so __far on a
+variable is for what does not fit in the DSRAM rather than for anything it
+makes faster.
+
+Code is what that memory is good at, and a function goes there with
+
+  __attribute__((far, noinline, section(".psramtext")))
+  int scale(int x) { return x * 3 + 1; }
+
+The section says where it lives, the far says how to call it - the PSRAM is a
+different segment from the Flash, so it takes a CALLS - and the noinline is
+what keeps it a function at all, and therefore what keeps it in the section.
+Without it the compiler may inline the body and --gc-sections then drops the
+copy that is left, so the section comes out empty.
+
+The image lives in the Flash and crt0.S copies it up beside the far data.  The
+reason to want this is not only speed: a routine that erases or writes the
+Flash cannot be fetched from the Flash while it does so, so it has to be
+somewhere else, and this is the somewhere else.
 
 The pages are named by the script, not by crt0.S:
 
@@ -159,13 +175,16 @@ name, since the disassembler prints an address it recognises by name.
 
 turning "SYSCON1 = 0x1000" into "mov syscon1, r2" rather than a bare address.
 
-Both register spaces are inside the page DPP3 selects, so these are ordinary
-near accesses: no EXTR, no far pointer, and nothing to set up beyond the DPP3
-that crt0.S already writes.
+All three register spaces are inside the page DPP3 selects, so these are
+ordinary near accesses: no EXTR, no far pointer, and nothing to set up beyond
+the DPP3 that crt0.S already writes.  That includes the on-chip X-peripherals
+at E800H and up - the CAPCOM6 unit, the LXBus controller and the interrupt jump
+table cache - which have no short address at all and so can only be reached
+this way.
 
-Which trap number a peripheral raises is not in the header.  That is Table 5-2
-of the XC164CM User's Manual, and guessing at it is exactly the kind of thing
-that produces a handler wired to the wrong source.
+Which trap number a peripheral raises is not in the header; it is in
+xc164cm-vectors.inc, because a vector is claimed from assembly rather than
+from C.
 
 Interrupt handlers
 ------------------
@@ -180,12 +199,28 @@ A handler is declared
   __attribute__((interrupt)) void handler(void) { ... }
 
 which makes it save what it uses and return with RETI, and its slot is claimed
-by putting a jump there:
+by name:
 
-  .section .vectors.026,"ax",@progbits
+  #include "xc164cm-vectors.inc"
+  VECTOR_ASC0_RIC  uart_rx_isr
+
+That claims the slot ASC0 raises on a received character.  Every source the
+part has is in that file, named after its interrupt control register, so
+nothing has to be looked up and typed - a handler wired to the wrong source is
+not a failure anyone sees quickly.  A slot can be claimed by number instead,
+if the number is already known:
+
+  .section .vectors.043,"ax",@progbits
   jmps    #seg(handler), sof(handler)
 
-The number is the trap number in decimal, padded to three digits.  vectors.ld
+where the number is the trap number in decimal, padded to three digits.
+
+The hardware traps are in that file too, under the names the manual gives them
+- VECTOR_NMITRAP, VECTOR_STOTRAP for stack overflow, VECTOR_STUTRAP for stack
+underflow, VECTOR_SBRKTRAP, and VECTOR_BTRAP for the four class B traps, which
+share one vector and leave TFR to say which of them it was.  They sit in every
+other slot rather than consecutive ones.  Vector 0 is reset and crt0.S claims
+it, so there is no macro for that one.  vectors.ld
 places each of the 128 slots at the address it has to be at, so slots that
 nothing claims can be left out rather than counted:
 

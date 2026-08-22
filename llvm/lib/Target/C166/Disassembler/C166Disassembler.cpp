@@ -161,6 +161,51 @@ static DecodeStatus decodeReg8bOperand(MCInst &MI, uint64_t Imm,
   return MCDisassembler::Fail;
 }
 
+/// A MAC unit pointer comes back as the register and its step, which is how
+/// the printer and the parser both hold it.
+static DecodeStatus decodeCoPtrOperand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  unsigned Update = (Imm >> 4) & 0x7;
+  // 000 is reserved, so an instruction carrying it is not one of these.
+  if (Update == 0)
+    return MCDisassembler::Fail;
+  if (DecodeGR16RegisterClass(MI, Imm & 0xF, Address, Decoder) ==
+      MCDisassembler::Fail)
+    return MCDisassembler::Fail;
+  MI.addOperand(MCOperand::createImm(Update));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus decodeCoIdxOperand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  unsigned Update = Imm & 0x7;
+  if (Update == 0)
+    return MCDisassembler::Fail;
+  MI.addOperand(MCOperand::createReg((Imm & 0x8) ? C166::IDX1 : C166::IDX0));
+  MI.addOperand(MCOperand::createImm(Update));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus decodeCoRegOperand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  MCRegister Reg;
+  switch (Imm) {
+  case 0x00: Reg = C166::MSW; break;
+  case 0x01: Reg = C166::MAH; break;
+  case 0x02: Reg = C166::MAS; break;
+  case 0x04: Reg = C166::MAL; break;
+  case 0x05: Reg = C166::MCW; break;
+  case 0x06: Reg = C166::MRW; break;
+  default:
+    return MCDisassembler::Fail;
+  }
+  MI.addOperand(MCOperand::createReg(Reg));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus decodeIrang2Operand(MCInst &MI, uint64_t Imm,
                                         uint64_t Address,
                                         const MCDisassembler *Decoder) {

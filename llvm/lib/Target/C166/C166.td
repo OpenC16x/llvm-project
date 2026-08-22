@@ -56,6 +56,7 @@ include "C166CallingConv.td"
 //===----------------------------------------------------------------------===//
 
 include "C166InstrInfo.td"
+include "C166InstrMAC.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GR16>;
 

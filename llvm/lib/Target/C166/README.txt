@@ -467,32 +467,46 @@ Known limitations / things to do
   the linker reports an overflow rather than wrapping.  What is left goes to a
   farrom region that .fartext and .farrodata land in, so an object declared
   __far uses it, and writable far data has the PSRAM at E0'0000H, which no data
-  page pointer covers.  What is not placed anywhere is code in the PSRAM, which
-  is what that memory is actually for: the manual calls it optimised for code
-  fetches and slower than the data memories for data.
+  page pointer covers.  Code can be put there too, which is what that memory is
+  actually for and what a routine that rewrites the Flash needs, since a part
+  cannot fetch from the Flash while erasing it.
 * MOV mem, reg keeps its narrow field, because widening it would make
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between
   them.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
-* A far access always costs an EXTS, even for several accesses in a row to the
-  same segment, which one EXTS covering up to four instructions could do.
-  Merging two is harder than it sounds: through a register the segment has to
-  be provably unchanged in between, and through a symbol the two immediates
-  are different relocations - seg(g) and seg(g+2) are the same segment in
-  practice but nothing says so until the linker has placed g.
+* Two far accesses to the same object share one EXTS, and two to different
+  objects do not.  C166MergeExtend folds the second EXTend into the first when
+  they name the same object and nothing between them touches memory - the gap
+  instructions would otherwise have their own addressing redirected.  What
+  makes "seg(g)" and "seg(g + 2)" the same segment is that no region in c166.ld
+  crosses a segment boundary, which that script asserts rather than assumes.
+  It cannot merge across a near access, and it never merges an EXTS whose
+  segment comes from a register, because the register could be written in
+  between.  Worth 44 bytes on the larger of the two differential programs and
+  nothing at all on the other, which has no far accesses in it.
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* No support for the C166SV2 MAC unit, which the XC164CM has.  It is a
-  coprocessor rather than a few instructions - a 40 bit accumulator in MAH,
-  MAL and MAS, its own control, status and repeat registers, dual operand
-  fetch through IDX0/IDX1, and a repeat field on every CoXXX instruction - and
-  nothing in the compiler would select any of it without the DSP patterns to
-  drive it.  The C166SV2 User's Manual lists the mnemonics and describes the
-  operand fields; its opcode appendix is a matrix that has not been read off
-  accurately enough to encode from, so the encodings are still not known here.
+* The MAC unit assembles and disassembles but nothing selects it.  All 180
+  forms are there, in C166InstrMAC.td, which is generated from the Format lines
+  the C166S V2 manual gives each instruction rather than written out by hand -
+  the same table read from the opcode list agrees with those lines on every row
+  the two share.  Each one assembles to the bytes the manual specifies and
+  disassembles back to itself.
+
+  Two things it does not do.  The repeat prefix, which the manual writes
+  "- USR0 CoXXX", is not accepted: it puts two tokens in front of the mnemonic
+  and the matcher keys on the mnemonic being first.  rrr is therefore always
+  000, the plain form.  And the simulator does not model the unit, so it stops
+  and names the instruction rather than executing it, which is what it does
+  with anything it does not know.
+
+  Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
+  it puts the CoREG selector at bits 31 to 27, where the repeat field already
+  is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
+  win, being self-consistent across all 180.
 * The branch prediction bit of JMPA and CALLA is always left at 0, which the
   C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
   always 0 too; it is meant to be set for a backward branch of 32 bytes or
@@ -510,9 +524,15 @@ Known limitations / things to do
   would be nothing for a disassembly to go on.  Three of them are missing
   because the manual contradicts itself about where they are; the register file
   names which.
-* Which trap number a peripheral raises is a property of the part and is not
-  written down anywhere here, so a handler's slot is named by number rather
-  than by the source it serves.
+* The interrupt jump table cache is reachable but not used.  This part can
+  hold two 24 bit pointers in FINT0ADDR/FINT0CSP and FINT1ADDR/FINT1CSP and
+  branch straight to those two service routines, skipping the vector table's
+  second branch entirely.  Nothing here writes them, and nothing decides which
+  two interrupts would deserve them, which is a policy question rather than a
+  missing encoding.
+* Only the X-peripheral registers the XC164CM's own two manuals name are
+  modelled.  The CAN module has a manual of its own that this was not built
+  from, so its registers have to be written as addresses.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

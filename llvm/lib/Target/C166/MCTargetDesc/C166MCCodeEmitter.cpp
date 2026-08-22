@@ -118,6 +118,24 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &STI) const;
 
+  /// A MAC unit pointer: the register number in the low four bits and what
+  /// happens to the pointer afterwards in the three above, which the
+  /// instruction then splits between two of its bytes.
+  unsigned getCoPtrOpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
+
+  /// The same for IDX0 and IDX1, as one nibble: which of the two, then what
+  /// happens to it.
+  unsigned getCoIdxOpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
+
+  /// The five bit code CoSTORE names a MAC register by.
+  unsigned getCoRegOpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
+
   /// An ATOMIC/EXTend instruction range, written as 1 to 4 and encoded as
   /// 0 to 3.
   unsigned getIrang2OpValue(const MCInst &MI, unsigned OpNo,
@@ -274,6 +292,46 @@ unsigned C166MCCodeEmitter::getReg8bOpValue(const MCInst &MI, unsigned OpNo,
   if (getC166MCRegisterClass(C166::GR8RegClassID).contains(Reg))
     return 0xF0 + Encoding;
   return Encoding;
+}
+
+unsigned C166MCCodeEmitter::getCoPtrOpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  unsigned Reg = Ctx.getRegisterInfo()->getEncodingValue(
+      MI.getOperand(OpNo).getReg());
+  unsigned Update = MI.getOperand(OpNo + 1).getImm();
+  return (Update << 4) | Reg;
+}
+
+unsigned C166MCCodeEmitter::getCoIdxOpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  unsigned Which = MI.getOperand(OpNo).getReg() == C166::IDX1 ? 1 : 0;
+  unsigned Update = MI.getOperand(OpNo + 1).getImm();
+  return (Which << 3) | Update;
+}
+
+unsigned C166MCCodeEmitter::getCoRegOpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  // From Table 2-9 of the C166S V2 manual.  The codes are not consecutive, so
+  // this is a table rather than an index.
+  switch (MI.getOperand(OpNo).getReg()) {
+  case C166::MSW:
+    return 0x00;
+  case C166::MAH:
+    return 0x01;
+  case C166::MAS:
+    return 0x02;
+  case C166::MAL:
+    return 0x04;
+  case C166::MCW:
+    return 0x05;
+  case C166::MRW:
+    return 0x06;
+  default:
+    llvm_unreachable("not a register CoSTORE can name");
+  }
 }
 
 unsigned

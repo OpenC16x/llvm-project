@@ -72,6 +72,23 @@ __dpp1_page = (ORIGIN(rom) >> 14) + 1;
 __dpp2_page = (ORIGIN(rom) >> 14) + 2;
 __dpp3_page = 3;
 
+/* A far access carries its segment as an immediate, and the compiler folds two
+ * of them into one EXTend when both reach the same object - "seg(g)" and
+ * "seg(g + 2)" are the same segment unless g straddles a segment boundary.
+ * Nothing in an object file rules that out, so it is ruled out here: no region
+ * above crosses one, and therefore nothing placed in one does either.  Moving
+ * any of them keeps that true or the link fails. */
+ASSERT((ORIGIN(rom) >> 16) == ((ORIGIN(rom) + LENGTH(rom) - 1) >> 16),
+       "the rom region crosses a segment boundary")
+ASSERT((ORIGIN(farrom) >> 16) == ((ORIGIN(farrom) + LENGTH(farrom) - 1) >> 16),
+       "the farrom region crosses a segment boundary")
+ASSERT((ORIGIN(dsram) >> 16) == ((ORIGIN(dsram) + LENGTH(dsram) - 1) >> 16),
+       "the dsram region crosses a segment boundary")
+ASSERT((ORIGIN(dpram) >> 16) == ((ORIGIN(dpram) + LENGTH(dpram) - 1) >> 16),
+       "the dpram region crosses a segment boundary")
+ASSERT((ORIGIN(psram) >> 16) == ((ORIGIN(psram) + LENGTH(psram) - 1) >> 16),
+       "the psram region crosses a segment boundary")
+
 SECTIONS
 {
   /* Trap 0 is reset, so the first four bytes of segment 0 are the jump the
@@ -118,6 +135,24 @@ SECTIONS
     . = ALIGN(2);
     __bss_end = .;
   } > dsram
+
+  /* Code that runs from the PSRAM rather than from the Flash.  That is what
+   * that memory is for - the manual calls it optimised for code fetches - and
+   * it is also the only way to run a routine that rewrites the Flash, since a
+   * part cannot fetch from Flash while erasing it.  The image lives in ROM and
+   * crt0.S copies it up, so a function goes here with
+   *
+   *   __attribute__((far, section(".psramtext")))
+   *
+   * where the section says where it lives and the far says how to call it: the
+   * PSRAM is a different segment from the Flash, so it takes a CALLS. */
+  .psramtext : ALIGN(2) {
+    __psramtext_start = .;
+    *(.psramtext .psramtext.*)
+    . = ALIGN(2);
+    __psramtext_end = .;
+  } > psram AT > rom
+  __psramtext_load = LOADADDR(.psramtext);
 
   /* The same two again for what is declared __far, in the RAM that only a far
    * access reaches.  crt0.S copies and zeroes these with the segment supplied

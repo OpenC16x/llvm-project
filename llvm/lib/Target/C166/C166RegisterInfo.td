@@ -246,6 +246,23 @@ def DP9      : C166Reg<0x8C, "dp9">; // FF18H
 def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
 def FOCON    : C166Reg<0xD5, "focon">; // FFAAH
 
+// The MAC unit's registers.  This part has a C166SV2 core, so it has a
+// multiply-accumulate coprocessor, and these are the parts of it that have a
+// short address.  MAS, the saturated view of the accumulator's high word, does
+// not: CoSTORE reaches it through the CoREG encoding instead.
+def IDX0     : C166Reg<0x84, "idx0">; // FF08H
+def IDX1     : C166Reg<0x85, "idx1">; // FF0AH
+def MAL      : C166Reg<0x2E, "mal">;  // FE5CH
+def MAH      : C166Reg<0x2F, "mah">;  // FE5EH
+def MRW      : C166Reg<0xED, "mrw">;  // FFDAH
+def MCW      : C166Reg<0xEE, "mcw">;  // FFDCH
+def MSW      : C166Reg<0xEF, "msw">;  // FFDEH
+// The saturated view of the accumulator's high word.  It has no short address:
+// CoSTORE names it by the five bit CoREG code instead, which is what the class
+// below is for, so the encoding here is not an address and is never used as
+// one.
+def MAS      : C166Reg<0x00, "mas">;
+
 //===----------------------------------------------------------------------===//
 // Extended special function registers
 //===----------------------------------------------------------------------===//
@@ -305,6 +322,56 @@ def EXISEL0     : C166Reg<0xED, "exisel0">; // F1DAH
 def SYSCON1     : C166Reg<0xEE, "syscon1">; // F1DCH
 
 //===----------------------------------------------------------------------===//
+// X-peripheral registers
+//===----------------------------------------------------------------------===//
+
+// The on-chip X-peripherals are mapped at E800H and up, which is inside the
+// page DPP3 selects, so an ordinary near address reaches them.  What they do
+// not have is a short address - the manual writes it as "--" - so no "reg"
+// field can name one and nothing below is in a class that a "reg" field uses.
+// These carry their 16 bit address as the hardware encoding rather than a
+// short address, because that is all there is to carry.
+//
+// This is what the XC164CM Peripheral Units manual names in the per-register
+// form: the CAPCOM6 unit and the interrupt jump table cache.  Three more
+// addresses it annotates - E8AEH, E8C4H and E8CEH - are left out because the
+// name that goes with each did not come out of the document.  The CAN module's
+// registers are not here either; that part has its own manual.
+//
+// ADDRSEL7 and TCONCS7 are the LXBus controller's, which is the on-chip bus
+// the X-peripherals hang off.  That is a different thing from the external bus
+// whose ADDRSEL1 to ADDRSEL4 are absent from this part, and the reason both
+// statements are true at once.
+
+def CCU6_T12      : C166Reg<0xE890, "ccu6_t12">; // X-peripheral
+def CCU6_T12PR    : C166Reg<0xE892, "ccu6_t12pr">; // X-peripheral
+def CCU6_T12DTC   : C166Reg<0xE894, "ccu6_t12dtc">; // X-peripheral
+def CCU6_CC60R    : C166Reg<0xE898, "ccu6_cc60r">; // X-peripheral
+def CCU6_CC61R    : C166Reg<0xE89A, "ccu6_cc61r">; // X-peripheral
+def CCU6_CC62R    : C166Reg<0xE89C, "ccu6_cc62r">; // X-peripheral
+def CCU6_TCTR4    : C166Reg<0xE8A6, "ccu6_tctr4">; // X-peripheral
+def CCU6_CMPSTAT  : C166Reg<0xE8A8, "ccu6_cmpstat">; // X-peripheral
+def CCU6_TCTR0    : C166Reg<0xE8AC, "ccu6_tctr0">; // X-peripheral
+def CCU6_T13      : C166Reg<0xE8B0, "ccu6_t13">; // X-peripheral
+def CCU6_T13PR    : C166Reg<0xE8B2, "ccu6_t13pr">; // X-peripheral
+def CCU6_CC63R    : C166Reg<0xE8B4, "ccu6_cc63r">; // X-peripheral
+def CCU6_MODCTR   : C166Reg<0xE8C0, "ccu6_modctr">; // X-peripheral
+def CCU6_TRPCTR   : C166Reg<0xE8C2, "ccu6_trpctr">; // X-peripheral
+def CCU6_T12MSEL  : C166Reg<0xE8C6, "ccu6_t12msel">; // X-peripheral
+def CCU6_MCMOUT   : C166Reg<0xE8CC, "ccu6_mcmout">; // X-peripheral
+def CCU6_IS       : C166Reg<0xE8D0, "ccu6_is">; // X-peripheral
+def CCU6_ISS      : C166Reg<0xE8D2, "ccu6_iss">; // X-peripheral
+def CCU6_ISR      : C166Reg<0xE8D4, "ccu6_isr">; // X-peripheral
+def CCU6_INP      : C166Reg<0xE8D6, "ccu6_inp">; // X-peripheral
+def CCU6_IEN      : C166Reg<0xE8D8, "ccu6_ien">; // X-peripheral
+def FINT0CSP      : C166Reg<0xEC00, "fint0csp">; // X-peripheral
+def FINT0ADDR     : C166Reg<0xEC02, "fint0addr">; // X-peripheral
+def FINT1CSP      : C166Reg<0xEC04, "fint1csp">; // X-peripheral
+def FINT1ADDR     : C166Reg<0xEC06, "fint1addr">; // X-peripheral
+def TCONCS7       : C166Reg<0xEE48, "tconcs7">; // X-peripheral
+def ADDRSEL7      : C166Reg<0xEE4E, "addrsel7">; // X-peripheral
+
+//===----------------------------------------------------------------------===//
 // Register classes
 //===----------------------------------------------------------------------===//
 
@@ -324,6 +391,7 @@ def GR16 : RegisterClass<"C166", [i16], 16,
 // Non-allocatable special function registers.
 def SFR : RegisterClass<"C166", [i16], 16,
   (add 
+      
       DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
       CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9, PSW, MDC, ZEROS,
       ONES, TFR, T2, T3, T4, T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON,
@@ -333,7 +401,8 @@ def SFR : RegisterClass<"C166", [i16], 16,
       PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC, T3IC, T4IC,
       T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC, SSCEIC,
       CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC, P1L,
-      P1H, P3, DP3, P5, P5DIDIS, FOCON
+      P1H, P3, DP3, P5, P5DIDIS, FOCON, IDX0, IDX1, MAL, MAH, MRW, MCW,
+      MSW
   )> {
   let isAllocatable = 0;
   let CopyCost = -1;
@@ -365,6 +434,34 @@ def ESFR : RegisterClass<"C166", [i16], 16,
       ALTSEL0P1H, ALTSEL0P3, ALTSEL0P1L, ALTSEL0P9, ALTSEL1P9, EOPIC,
       PLL_IC, RTC_IC, EXICON, ODP3, PLLCON, SYSCON3, EXISEL1, EXISEL0,
       SYSCON1)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The X-peripheral registers.  Like the extended ones these are reachable by
+// address only, and for a stronger reason: they have no short address at all.
+// What CoSTORE can name.  These are addressed by a five bit code of their own
+// rather than by a short address, so this class exists to say which registers
+// the code covers; the encoder maps each to its code.
+// The two pointers the MAC unit's indirect forms run on.
+def CoIDX : RegisterClass<"C166", [i16], 16, (add IDX0, IDX1)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+def CoREG : RegisterClass<"C166", [i16], 16,
+  (add MSW, MAH, MAS, MAL, MCW, MRW)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+def XSFR : RegisterClass<"C166", [i16], 16,
+  (add
+      CCU6_T12, CCU6_T12PR, CCU6_T12DTC, CCU6_CC60R, CCU6_CC61R,
+      CCU6_CC62R, CCU6_TCTR4, CCU6_CMPSTAT, CCU6_TCTR0, CCU6_T13,
+      CCU6_T13PR, CCU6_CC63R, CCU6_MODCTR, CCU6_TRPCTR, CCU6_T12MSEL,
+      CCU6_MCMOUT, CCU6_IS, CCU6_ISS, CCU6_ISR, CCU6_INP, CCU6_IEN,
+      FINT0CSP, FINT0ADDR, FINT1CSP, FINT1ADDR, TCONCS7, ADDRSEL7)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

@@ -10,8 +10,11 @@
  * 16 bit access and needs no EXTR and no far pointer.  That holds as long as
  * DPP3 is left at page 3, which is what crt0.S sets it to.
  *
- * Which trap number a peripheral raises is not here.  It is in Table 5-2 of
- * the XC164CM User's Manual, and this file would have to guess at it.
+ * Which trap number a peripheral raises is in xc164cm-vectors.inc, because a
+ * vector is claimed from assembly rather than from C.
+ *
+ * The CAN module's registers are not here.  That part has a manual of its own
+ * and this file was not built from it.
  *
  * Part of the LLVM Project, under the Apache License v2.0 with LLVM
  * Exceptions.  See https://llvm.org/LICENSE.txt for license information.
@@ -46,6 +49,8 @@ typedef volatile unsigned int c166_sfr;
 #define T5          C166_SFR(0xFE46U)
 #define T6          C166_SFR(0xFE48U)
 #define CAPREL      C166_SFR(0xFE4AU)
+#define MAL         C166_SFR(0xFE5CU)
+#define MAH         C166_SFR(0xFE5EU)
 #define CC16        C166_SFR(0xFE60U)
 #define CC17        C166_SFR(0xFE62U)
 #define CC18        C166_SFR(0xFE64U)
@@ -76,6 +81,8 @@ typedef volatile unsigned int c166_sfr;
 #define PECC7       C166_SFR(0xFECEU)
 #define P1L         C166_SFR(0xFF04U)
 #define P1H         C166_SFR(0xFF06U)
+#define IDX0        C166_SFR(0xFF08U)
+#define IDX1        C166_SFR(0xFF0AU)
 #define SPSEG       C166_SFR(0xFF0CU)
 #define MDC         C166_SFR(0xFF0EU)
 #define PSW         C166_SFR(0xFF10U)
@@ -125,6 +132,9 @@ typedef volatile unsigned int c166_sfr;
 #define SSCCON      C166_SFR(0xFFB2U)
 #define P3          C166_SFR(0xFFC4U)
 #define DP3         C166_SFR(0xFFC6U)
+#define MRW         C166_SFR(0xFFDAU)
+#define MCW         C166_SFR(0xFFDCU)
+#define MSW         C166_SFR(0xFFDEU)
 
 /* Extended special function registers, F000H to F1DEH.  Reaching one by
  * address needs no EXTR; only the short "reg" form of an instruction does. */
@@ -165,5 +175,39 @@ typedef volatile unsigned int c166_sfr;
 #define EXISEL1     C166_SFR(0xF1D8U)
 #define EXISEL0     C166_SFR(0xF1DAU)
 #define SYSCON1     C166_SFR(0xF1DCU)
+
+/* The on-chip X-peripherals, at E800H and up.  These have no short address at
+ * all, so no instruction reaches one by register name - but the addresses are
+ * inside the page DPP3 selects, so from C they are ordinary near accesses like
+ * the rest.  ADDRSEL7 and TCONCS7 belong to the LXBus controller, the on-chip
+ * bus these hang off, which is a different thing from the external bus this
+ * part does not have. */
+#define CCU6_T12      C166_SFR(0xE890U)
+#define CCU6_T12PR    C166_SFR(0xE892U)
+#define CCU6_T12DTC   C166_SFR(0xE894U)
+#define CCU6_CC60R    C166_SFR(0xE898U)
+#define CCU6_CC61R    C166_SFR(0xE89AU)
+#define CCU6_CC62R    C166_SFR(0xE89CU)
+#define CCU6_TCTR4    C166_SFR(0xE8A6U)
+#define CCU6_CMPSTAT  C166_SFR(0xE8A8U)
+#define CCU6_TCTR0    C166_SFR(0xE8ACU)
+#define CCU6_T13      C166_SFR(0xE8B0U)
+#define CCU6_T13PR    C166_SFR(0xE8B2U)
+#define CCU6_CC63R    C166_SFR(0xE8B4U)
+#define CCU6_MODCTR   C166_SFR(0xE8C0U)
+#define CCU6_TRPCTR   C166_SFR(0xE8C2U)
+#define CCU6_T12MSEL  C166_SFR(0xE8C6U)
+#define CCU6_MCMOUT   C166_SFR(0xE8CCU)
+#define CCU6_IS       C166_SFR(0xE8D0U)
+#define CCU6_ISS      C166_SFR(0xE8D2U)
+#define CCU6_ISR      C166_SFR(0xE8D4U)
+#define CCU6_INP      C166_SFR(0xE8D6U)
+#define CCU6_IEN      C166_SFR(0xE8D8U)
+#define FINT0CSP      C166_SFR(0xEC00U)
+#define FINT0ADDR     C166_SFR(0xEC02U)
+#define FINT1CSP      C166_SFR(0xEC04U)
+#define FINT1ADDR     C166_SFR(0xEC06U)
+#define TCONCS7       C166_SFR(0xEE48U)
+#define ADDRSEL7      C166_SFR(0xEE4EU)
 
 #endif /* C166_XC164CM_H */

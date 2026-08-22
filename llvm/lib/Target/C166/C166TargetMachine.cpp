@@ -29,6 +29,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166Target() {
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeC166AsmPrinterPass(PR);
   initializeC166DAGToDAGISelLegacyPass(PR);
+  initializeC166MergeExtendPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -72,6 +73,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  void addPreEmitPass() override;
 };
 
 } // end anonymous namespace
@@ -88,4 +90,11 @@ void C166PassConfig::addIRPasses() {
 bool C166PassConfig::addInstSelector() {
   addPass(createC166ISelDag(getC166TargetMachine(), getOptLevel()));
   return false;
+}
+
+void C166PassConfig::addPreEmitPass() {
+  // Late, so that it sees the instructions as they will be emitted: what it
+  // looks at is which of them touch memory.
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createC166MergeExtendPass());
 }
