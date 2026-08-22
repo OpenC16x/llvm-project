@@ -121,8 +121,15 @@
 0x30 0x35
 # CHECK: bset r5.3
 0x3f 0xf5
-# CHECK: bclr 135.0
+# A bit-addressable special function register comes back by name, because its
+# bitoff is the short address the register file already carries.
+# CHECK: bclr mdc.0
 0x0e 0x87
+# CHECK: bset s0con.15
+0xff 0xd8
+# Bit-addressable RAM has nothing mapped to name, so it stays a number.
+# CHECK: bset 0.3
+0x3f 0x00
 # CHECK: band r2.1, r3.2
 0x6a 0xf3 0xf2 0x21
 # CHECK: bfldl r4, #15, #5
@@ -133,7 +140,7 @@
 # back to the assembler; llvm-objdump asks for the target address instead.
 # CHECK: jb r5.3, -3
 0x8a 0xf5 0xfd 0x30
-# CHECK: jnb 136.10, 4
+# CHECK: jnb psw.10, 4
 0x9a 0x88 0x04 0xa0
 # CHECK: jbc r5.3, 2
 0xaa 0xf5 0x02 0x30

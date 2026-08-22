@@ -77,33 +77,27 @@ static MCInstPrinter *createC166MCInstPrinter(const Triple &T,
   return nullptr;
 }
 
-namespace {
-struct SFR {
-  const char *Name;
-  uint16_t Addr;
-};
-// Kept in one place so that what the assembler accepts and what the
-// disassembler prints cannot drift apart.
-const SFR SFRs[] = {
-    {"dpp0", 0xFE00}, {"dpp1", 0xFE02},  {"dpp2", 0xFE04},
-    {"dpp3", 0xFE06}, {"mdh", 0xFE0C},   {"mdl", 0xFE0E},
-    {"cp", 0xFE10},   {"sp", 0xFE12},    {"stkov", 0xFE14},
-    {"stkun", 0xFE16}, {"mdc", 0xFF0E},  {"psw", 0xFF10},
-};
-} // namespace
-
-int64_t C166::getSFRAddress(StringRef Name) {
+// The spelling to match is the one the disassembler prints, which is the
+// register's AsmName.  MCRegisterInfo::getName gives the TableGen record name
+// instead - "SYSSP" where the assembly says "sp" - so both directions go
+// through the printer's table and cannot disagree about a name.
+int64_t C166::getSFRShortAddress(const MCRegisterInfo &MRI, StringRef Name) {
   std::string Lowered = Name.lower();
-  for (const SFR &R : SFRs)
-    if (Lowered == R.Name)
-      return R.Addr;
+  for (MCPhysReg Reg : MRI.getRegClass(C166::SFRRegClassID))
+    if (Lowered == C166InstPrinter::getRegisterName(Reg))
+      return MRI.getEncodingValue(Reg);
   return -1;
 }
 
-StringRef C166::getSFRName(uint64_t Addr) {
-  for (const SFR &R : SFRs)
-    if (R.Addr == Addr)
-      return R.Name;
+int64_t C166::getSFRAddress(const MCRegisterInfo &MRI, StringRef Name) {
+  int64_t Short = getSFRShortAddress(MRI, Name);
+  return Short < 0 ? -1 : getSFRAddressForShort(Short);
+}
+
+StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr) {
+  for (MCPhysReg Reg : MRI.getRegClass(C166::SFRRegClassID))
+    if (getSFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)
+      return C166InstPrinter::getRegisterName(Reg);
   return StringRef();
 }
 

@@ -426,11 +426,14 @@ writes the low half of MDL and "add mdl, #1" writes all of it, and "addb
 rl2, #200" and "add r2, #200" name different registers with the same field
 value.
 
-Where those addresses are written down is C166MCTargetDesc, so that what the
-assembler accepts and what the disassembler prints back cannot drift apart:
+Where those addresses are written down is the register file itself: each
+register carries its short address as its hardware encoding, and the mapping
+from that to a memory address is a function rather than a second table, so what
+the assembler accepts and what the disassembler prints back cannot drift apart:
 "mov r2, mdl" disassembles as itself rather than as "mov r2, 65038", and still
 assembles to the bytes it came from.  An address with no register at it stays
-a number.
+a number, and so does a bit-addressable word with nothing mapped at it, while
+"bset psw.10" and "bclr mdc.0" say what they mean.
 
 Known limitations / things to do
 --------------------------------
@@ -439,9 +442,6 @@ Known limitations / things to do
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between
   them.
-* Only the special function registers the backend has a use for, plus the ones
-  a startup sequence writes, are modelled; "push t0" is not understood and its
-  encoding does not decode.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * A far access always costs an EXTS, even for several accesses in a row to the
@@ -454,6 +454,9 @@ Known limitations / things to do
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
 * No support for the XC16x MAC unit.
+* The SFR map follows the C167 where the derivatives disagree, and three names
+  are at different addresses on an 80C166; C166RegisterInfo.td lists them.
+  Nothing selects a derivative, so nothing warns about it.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
