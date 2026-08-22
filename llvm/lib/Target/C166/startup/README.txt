@@ -9,6 +9,7 @@ copied into a project and adjusted rather than installed.
   crt0.S      the reset vector and the startup sequence
   c166.ld     a linker script for a part with nothing attached to it
   vectors.ld  the interrupt vector table, for a program that has handlers
+  xc164cm.h   the special function registers, for C
   mem.c       memcpy, memmove, memset and memcmp
 
 Building it
@@ -111,6 +112,35 @@ crt0.S leaves CP where reset put it.  CP says where R0 to R15 are, so an
 instruction that changes it changes what every register operand around it
 means; a program that wants a different register bank is better off doing that
 deliberately than having the startup code do it quietly.
+
+Naming the registers from C
+---------------------------
+
+xc164cm.h gives every special function register a name, so a peripheral is
+written the way it is in the manual:
+
+  #include "xc164cm.h"
+
+  DP3 = 0xFF;          /* port 3 all outputs */
+  P3  = 0x0055;
+
+The addresses are the ones C166RegisterInfo.td holds, which is what the
+assembler and the disassembler use, so the two cannot disagree about where a
+register is.  That is worth knowing because it is checkable: compiling a store
+through this header and looking at the assembly should show the register's
+name, since the disassembler prints an address it recognises by name.
+
+  clang -target c166 -O2 -I . -S -o - x.c
+
+turning "SYSCON1 = 0x1000" into "mov syscon1, r2" rather than a bare address.
+
+Both register spaces are inside the page DPP3 selects, so these are ordinary
+near accesses: no EXTR, no far pointer, and nothing to set up beyond the DPP3
+that crt0.S already writes.
+
+Which trap number a peripheral raises is not in the header.  That is Table 5-2
+of the XC164CM User's Manual, and guessing at it is exactly the kind of thing
+that produces a handler wired to the wrong source.
 
 Interrupt handlers
 ------------------
