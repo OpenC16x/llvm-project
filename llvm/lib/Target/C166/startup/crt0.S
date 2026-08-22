@@ -82,6 +82,39 @@ _start:
         jmpa    cc_UC, .Lzero
 .Lzero_done:
 
+        // The same two again for what is declared __far.  That RAM is outside
+        // every page the data page pointers select - which is the whole point
+        // of it - so the destination carries only its offset within the
+        // segment and an EXTS supplies the segment for the store.  The source
+        // is the ROM image, which is near like everything else in the ROM.
+        //
+        // EXTS covers the one instruction after it, so it goes inside the
+        // loop rather than around it.
+        mov     r1, #__fardata_load
+        mov     r2, #sof(__fardata_start)
+        mov     r3, #sof(__fardata_end)
+.Lfarcopy:
+        cmp     r2, r3
+        jmpa    cc_z, .Lfarcopy_done
+        mov     r4, [r1+]
+        exts    #seg(__fardata_start), #1
+        mov     [r2], r4
+        add     r2, #2
+        jmpa    cc_UC, .Lfarcopy
+.Lfarcopy_done:
+
+        mov     r1, #sof(__farbss_start)
+        mov     r2, #sof(__farbss_end)
+        mov     r3, #0
+.Lfarzero:
+        cmp     r1, r2
+        jmpa    cc_z, .Lfarzero_done
+        exts    #seg(__farbss_start), #1
+        mov     [r1], r3
+        add     r1, #2
+        jmpa    cc_UC, .Lfarzero
+.Lfarzero_done:
+
         // End of the initialisation phase.  After this DISWDT no longer works
         // and the protected system registers are locked, so anything that has
         // to change either of them has to have happened above.

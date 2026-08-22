@@ -77,10 +77,18 @@ anywhere in the segment; a program with more than 48 KByte of it can put .text
 in farrom instead, and only .rodata and the ROM image of .data have to stay
 below C0'C000H.
 
-Writable far data - .fardata and .farbss - still goes in the ordinary RAM.  The
-part has 2 KByte of DSRAM at 00'C000H and 2 KByte of PSRAM at E0'0000H that
-would suit it better, but crt0.S copies .data with near addressing, so moving
-it out there means a copy loop that writes far as well as reads far.
+Writable far data - .fardata and .farbss - goes in the PSRAM at E0'0000H, which
+is the only RAM here a near address cannot reach: it is data page 896 and all
+four page pointers are spoken for.  crt0.S initialises it with a second pair of
+loops that supply the segment with an EXTS, reading the ROM image near and
+writing the destination far.
+
+It is the last resort of the three RAMs rather than the first.  The manual
+calls the PSRAM optimised for code fetches and slower than the data memories
+for data, and a far access pays an EXTS on top of that, so __far on a variable
+is for what does not fit in the DSRAM rather than for anything it makes faster.
+The PSRAM's own strength is code: the manual singles out the interrupt vector
+table as something worth putting there.
 
 The pages are named by the script, not by crt0.S:
 

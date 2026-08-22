@@ -53,6 +53,12 @@ MEMORY
    * FC20H to FCFFH above the register bank is free too, and FD00H to FDFFH is
    * the bit-addressable part, which is worth keeping for what needs it. */
   dpram (rw) : ORIGIN = 0x0000F600, LENGTH = 1K
+  /* The PSRAM, which is the only RAM here that a near address cannot reach:
+   * it is data page 896 and the four pointers are spoken for.  So this is
+   * where __far data goes, and it is worth knowing that the manual calls it
+   * optimised for code fetches and slower than the data memories for data - a
+   * far access pays an EXTS on top of that.  It is for what does not fit. */
+  psram (rw) : ORIGIN = 0x00E00000, LENGTH = 2K
 }
 
 /* The pages the data page pointers select, which is what makes a near address
@@ -100,7 +106,6 @@ SECTIONS
   .data : ALIGN(2) {
     __data_start = .;
     *(.data .data.*)
-    *(.fardata .fardata.*)
     . = ALIGN(2);
     __data_end = .;
   } > dsram AT > rom
@@ -109,11 +114,28 @@ SECTIONS
   .bss (NOLOAD) : ALIGN(2) {
     __bss_start = .;
     *(.bss .bss.*)
-    *(.farbss .farbss.*)
     *(COMMON)
     . = ALIGN(2);
     __bss_end = .;
   } > dsram
+
+  /* The same two again for what is declared __far, in the RAM that only a far
+   * access reaches.  crt0.S copies and zeroes these with the segment supplied
+   * by an EXTS, which is the only difference. */
+  .fardata : ALIGN(2) {
+    __fardata_start = .;
+    *(.fardata .fardata.*)
+    . = ALIGN(2);
+    __fardata_end = .;
+  } > psram AT > rom
+  __fardata_load = LOADADDR(.fardata);
+
+  .farbss (NOLOAD) : ALIGN(2) {
+    __farbss_start = .;
+    *(.farbss .farbss.*)
+    . = ALIGN(2);
+    __farbss_end = .;
+  } > psram
 
   /* The ABI stack that R0 addresses grows down from the top of the DPRAM, and
    * has that KByte to itself: the system stack is above it and the static data
