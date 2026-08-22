@@ -152,6 +152,24 @@ def Irang2AsmOperand : AsmOperandClass {
   let DiagnosticString = "expected an instruction range in [1, 4]";
 }
 
+def CoPtrAsmOperand : AsmOperandClass {
+  let Name = "CoPtr";
+  let RenderMethod = "addCoPtrOperands";
+  let DiagnosticString = "expected a pointer such as [r2], [r2+] or [r2+qr0]";
+}
+
+def CoIdxAsmOperand : AsmOperandClass {
+  let Name = "CoIdx";
+  let RenderMethod = "addCoIdxOperands";
+  let DiagnosticString = "expected [idx0] or [idx1], with an optional step";
+}
+
+def Imm5AsmOperand : AsmOperandClass {
+  let Name = "Imm5";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticString = "expected an immediate in the range [0, 31]";
+}
+
 def Trap7AsmOperand : AsmOperandClass {
   let Name = "Trap7";
   let RenderMethod = "addImmOperands";
@@ -319,6 +337,40 @@ def irang2 : Operand<i8> {
   let EncoderMethod = "getIrang2OpValue";
   let DecoderMethod = "decodeIrang2Operand";
   let ParserMatchClass = Irang2AsmOperand;
+}
+
+// The MAC unit's operand forms.  A pointer is two machine operands, the
+// register and what the instruction does to it afterwards, because the two end
+// up in different places in the encoding: the register number in the second
+// byte and the update in the fourth.  The encoder packs them into one value so
+// that the instruction can take the halves it needs.
+def coptr : Operand<i16> {
+  let MIOperandInfo = (ops GR16, i32imm);
+  let EncoderMethod = "getCoPtrOpValue";
+  let PrintMethod = "printCoPtrOperand";
+  let DecoderMethod = "decodeCoPtrOperand";
+  let ParserMatchClass = CoPtrAsmOperand;
+}
+
+// The same for IDX0 and IDX1, which the instruction encodes as one nibble:
+// which of the two, and what happens to it.
+def coidx : Operand<i16> {
+  let MIOperandInfo = (ops CoIDX, i32imm);
+  let EncoderMethod = "getCoIdxOpValue";
+  let PrintMethod = "printCoIdxOperand";
+  let DecoderMethod = "decodeCoIdxOperand";
+  let ParserMatchClass = CoIdxAsmOperand;
+}
+
+// A MAC register named the way CoSTORE names it.
+def coreg : RegisterOperand<CoREG> {
+  let EncoderMethod = "getCoRegOpValue";
+  let DecoderMethod = "decodeCoRegOperand";
+}
+
+// The shift count of the MAC unit's shifts.
+def imm5 : Operand<i8> {
+  let ParserMatchClass = Imm5AsmOperand;
 }
 
 // A trap number.  It is written as the trap number itself; where it sits in

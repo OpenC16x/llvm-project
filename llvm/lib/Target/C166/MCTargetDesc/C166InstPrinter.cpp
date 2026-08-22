@@ -161,6 +161,41 @@ void C166InstPrinter::printBitAddrOperand(const MCInst *MI, unsigned OpNo,
   O << '.' << (MI->getOperand(OpNo + 1).getImm() & 0xf);
 }
 
+/// The step a MAC unit pointer takes after it is read.  1 leaves it alone and
+/// prints nothing; the rest are what the manual writes.
+static const char *coStep(unsigned Update, bool IsIdx) {
+  switch (Update) {
+  case 1:
+    return "";
+  case 2:
+    return "+";
+  case 3:
+    return "-";
+  case 4:
+    return IsIdx ? "+qx0" : "+qr0";
+  case 5:
+    return IsIdx ? "-qx0" : "-qr0";
+  case 6:
+    return IsIdx ? "+qx1" : "+qr1";
+  case 7:
+    return IsIdx ? "-qx1" : "-qr1";
+  default:
+    return "?";
+  }
+}
+
+void C166InstPrinter::printCoPtrOperand(const MCInst *MI, unsigned OpNo,
+                                        raw_ostream &O) {
+  O << '[' << getRegisterName(MI->getOperand(OpNo).getReg())
+    << coStep(MI->getOperand(OpNo + 1).getImm(), /*IsIdx=*/false) << ']';
+}
+
+void C166InstPrinter::printCoIdxOperand(const MCInst *MI, unsigned OpNo,
+                                        raw_ostream &O) {
+  O << '[' << getRegisterName(MI->getOperand(OpNo).getReg())
+    << coStep(MI->getOperand(OpNo + 1).getImm(), /*IsIdx=*/true) << ']';
+}
+
 void C166InstPrinter::printCCOperand(const MCInst *MI, unsigned OpNo,
                                      raw_ostream &O) {
   auto CC = static_cast<C166CC::CondCode>(MI->getOperand(OpNo).getImm());

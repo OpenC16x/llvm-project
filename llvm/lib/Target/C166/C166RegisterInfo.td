@@ -257,6 +257,11 @@ def MAH      : C166Reg<0x2F, "mah">;  // FE5EH
 def MRW      : C166Reg<0xED, "mrw">;  // FFDAH
 def MCW      : C166Reg<0xEE, "mcw">;  // FFDCH
 def MSW      : C166Reg<0xEF, "msw">;  // FFDEH
+// The saturated view of the accumulator's high word.  It has no short address:
+// CoSTORE names it by the five bit CoREG code instead, which is what the class
+// below is for, so the encoding here is not an address and is never used as
+// one.
+def MAS      : C166Reg<0x00, "mas">;
 
 //===----------------------------------------------------------------------===//
 // Extended special function registers
@@ -435,6 +440,21 @@ def ESFR : RegisterClass<"C166", [i16], 16,
 
 // The X-peripheral registers.  Like the extended ones these are reachable by
 // address only, and for a stronger reason: they have no short address at all.
+// What CoSTORE can name.  These are addressed by a five bit code of their own
+// rather than by a short address, so this class exists to say which registers
+// the code covers; the encoder maps each to its code.
+// The two pointers the MAC unit's indirect forms run on.
+def CoIDX : RegisterClass<"C166", [i16], 16, (add IDX0, IDX1)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+def CoREG : RegisterClass<"C166", [i16], 16,
+  (add MSW, MAH, MAS, MAL, MCW, MRW)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
 def XSFR : RegisterClass<"C166", [i16], 16,
   (add
       CCU6_T12, CCU6_T12PR, CCU6_T12DTC, CCU6_CC60R, CCU6_CC61R,

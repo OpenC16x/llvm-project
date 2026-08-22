@@ -29,6 +29,7 @@
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include <list>
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -63,6 +64,15 @@ class C166Operand : public MCParsedAsmOperand {
     // which one was written has to survive parsing.
     bool HasDisp;
     bool PostInc;
+    // What the MAC unit's pointer forms do to the pointer after reading it.
+    // The values are the ones the instruction carries: 1 leaves it alone, 2
+    // and 3 step it by a word, and 4 to 7 step it by one of the two offset
+    // registers.  An ordinary "[Rw]" is 1 and "[Rw+]" is 2, so the older forms
+    // and these are the same syntax where they overlap.
+    unsigned CoUpdate;
+    // Whether the base is one of the MAC unit's own pointers rather than a
+    // general purpose register, which the instruction encodes differently.
+    bool IsIdx;
   };
 
   StringRef Tok;
@@ -88,7 +98,20 @@ public:
   bool isAddr() const { return Kind == k_Address || Kind == k_SFR; }
   bool isCondCode() const { return Kind == k_CondCode; }
   bool isMemR() const {
-    return Kind == k_Memory && !Mem.HasDisp && !Mem.PostInc;
+    return Kind == k_Memory && !Mem.HasDisp && !Mem.PostInc && !Mem.IsIdx &&
+           Mem.CoUpdate == 1;
+  }
+
+  /// A MAC unit pointer: any of the update forms, on a general purpose
+  /// register.  "[Rw]" and "[Rw+]" are also ordinary memory operands, and
+  /// which one an instruction wants is what tells them apart.
+  bool isCoPtr() const {
+    return Kind == k_Memory && !Mem.HasDisp && !Mem.IsIdx;
+  }
+
+  /// The same on IDX0 or IDX1.
+  bool isCoIdx() const {
+    return Kind == k_Memory && !Mem.HasDisp && Mem.IsIdx;
   }
   bool isMemRI() const { return Kind == k_Memory && Mem.HasDisp; }
   bool isMemRPostInc() const { return Kind == k_Memory && Mem.PostInc; }
@@ -109,6 +132,7 @@ public:
 
   bool isImm3() const { return isImmInRange(0, 7, /*AllowSymbol=*/false); }
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
+  bool isImm5() const { return isImmInRange(0, 31, /*AllowSymbol=*/false); }
   bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
@@ -187,6 +211,20 @@ public:
     Inst.addOperand(MCOperand::createReg(Mem.Base));
   }
 
+  /// A pointer form is two machine operands, the register and what happens to
+  /// it, which the encoder puts in two different places in the instruction.
+  void addCoPtrOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 2 && "Invalid number of operands");
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
+    Inst.addOperand(MCOperand::createImm(Mem.CoUpdate));
+  }
+
+  void addCoIdxOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 2 && "Invalid number of operands");
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
+    Inst.addOperand(MCOperand::createImm(Mem.CoUpdate));
+  }
+
   void print(raw_ostream &OS, const MCAsmInfo &MAI) const override {
     switch (Kind) {
     case k_Token:
@@ -258,12 +296,15 @@ public:
   static std::unique_ptr<C166Operand> createMem(MCRegister Base,
                                                 const MCExpr *Disp,
                                                 bool HasDisp, bool PostInc,
+                                                unsigned CoUpdate, bool IsIdx,
                                                 SMLoc S, SMLoc E) {
     auto Op = std::make_unique<C166Operand>(k_Memory, S, E);
     Op->Mem.Base = Base;
     Op->Mem.Disp = Disp;
     Op->Mem.HasDisp = HasDisp;
     Op->Mem.PostInc = PostInc;
+    Op->Mem.CoUpdate = CoUpdate;
+    Op->Mem.IsIdx = IsIdx;
     return Op;
   }
 };
@@ -294,6 +335,10 @@ class C166AsmParser : public MCTargetAsmParser {
                           uint64_t ErrorInfo, const Twine &Msg);
   bool parseMemory(OperandVector &Operands);
   bool parseBracketedRegister(OperandVector &Operands);
+
+  // Mnemonics that had a trailing minus glued back on; see parseInstruction.
+  // A list rather than a vector because the operands hold references into it.
+  std::list<std::string> GluedMnemonics;
 
   MCAsmParser &getParser() const { return Parser; }
   AsmLexer &getLexer() const { return Parser.getLexer(); }
@@ -405,23 +450,60 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   if (parseRegister(Base, RegStart, RegEnd))
     return Error(RegStart, "expected a base register");
 
+  bool IsIdx = Base == C166::IDX0 || Base == C166::IDX1;
+
   const MCExpr *Disp = MCConstantExpr::create(0, getContext());
   bool HasDisp = false;
   bool PostInc = false;
+  // 1 is "leave the pointer alone", which is what a plain "[Rw]" means to the
+  // MAC unit and what every other instruction does anyway.
+  unsigned CoUpdate = 1;
+
+  // The offset registers a pointer can be stepped by are the MAC unit's, and
+  // which pair depends on which pointer: IDX0 and IDX1 step by QX0 and QX1,
+  // a general purpose register by QR0 and QR1.
+  auto ParseStep = [&](bool Minus) -> bool {
+    if (getLexer().is(AsmToken::RBrac)) {
+      CoUpdate = Minus ? 3 : 2;
+      return false;
+    }
+    if (getLexer().isNot(AsmToken::Identifier))
+      return Error(getLexer().getLoc(),
+                   Minus ? "expected an offset register"
+                         : "expected '#' before a displacement");
+    StringRef Name = getLexer().getTok().getIdentifier().lower();
+    StringRef Want0 = IsIdx ? "qx0" : "qr0";
+    StringRef Want1 = IsIdx ? "qx1" : "qr1";
+    if (Name == Want0)
+      CoUpdate = Minus ? 5 : 4;
+    else if (Name == Want1)
+      CoUpdate = Minus ? 7 : 6;
+    else
+      return Error(getLexer().getLoc(),
+                   IsIdx ? "expected qx0 or qx1" : "expected qr0 or qr1");
+    Lex();
+    return false;
+  };
+
   if (getLexer().is(AsmToken::Plus)) {
     Lex(); // eat '+'
     // "[Rw+]" steps the pointer past what was read rather than adding
     // anything to it.
     if (getLexer().is(AsmToken::RBrac)) {
       PostInc = true;
-    } else {
-      if (getLexer().isNot(AsmToken::Hash))
-        return Error(getLexer().getLoc(), "expected '#' before a displacement");
+      CoUpdate = 2;
+    } else if (getLexer().is(AsmToken::Hash)) {
       Lex(); // eat '#'
       if (parseExpressionWithSpecifier(Disp))
         return true;
       HasDisp = true;
+    } else if (ParseStep(/*Minus=*/false)) {
+      return true;
     }
+  } else if (getLexer().is(AsmToken::Minus)) {
+    Lex(); // eat '-'
+    if (ParseStep(/*Minus=*/true))
+      return true;
   }
 
   if (getLexer().isNot(AsmToken::RBrac))
@@ -429,8 +511,8 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   SMLoc E = getLexer().getLoc();
   Lex();
 
-  Operands.push_back(
-      C166Operand::createMem(Base, Disp, HasDisp, PostInc, S, E));
+  Operands.push_back(C166Operand::createMem(Base, Disp, HasDisp, PostInc,
+                                            CoUpdate, IsIdx, S, E));
   return false;
 }
 
@@ -587,6 +669,17 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   case AsmToken::Identifier: {
     StringRef Name = getLexer().getTok().getIdentifier();
 
+    // The MAC unit's rounding forms are spelled with a word after the
+    // operands rather than in the mnemonic, so it reaches here as an operand
+    // and the matcher wants it as the literal it is.
+    if (Name.equals_insensitive("rnd") &&
+        Mnemonic.starts_with_insensitive("co")) {
+      SMLoc E = getLexer().getLoc();
+      Lex();
+      Operands.push_back(C166Operand::createToken("rnd", S));
+      return false;
+    }
+
     if (Name.starts_with_insensitive("cc_")) {
       int64_t CC = matchCondCode(Name);
       if (CC < 0)
@@ -634,6 +727,22 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
 
 bool C166AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                      SMLoc NameLoc, OperandVector &Operands) {
+  // Several of the MAC unit's mnemonics end in a minus - CoMAC- negates what
+  // it accumulates - which the lexer hands over as a separate token.  Glue it
+  // back on when it is the next thing and there is nothing between, so that
+  // the name is what the manual writes.
+  // The minus has to be the very next character rather than merely the next
+  // token, which is what says it belongs to the name rather than being an
+  // operand.  The glued name is kept by the parser because the operand holds
+  // it as a reference.
+  if (getLexer().is(AsmToken::Minus) && Name.starts_with_insensitive("co") &&
+      getLexer().getTok().getLoc().getPointer() ==
+          NameLoc.getPointer() + Name.size()) {
+    GluedMnemonics.emplace_back((Name + "-").str());
+    Name = GluedMnemonics.back();
+    Lex();
+  }
+
   Operands.push_back(C166Operand::createToken(Name, NameLoc));
 
   if (getLexer().is(AsmToken::EndOfStatement))

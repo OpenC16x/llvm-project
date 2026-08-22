@@ -37,6 +37,8 @@ public:
   void printAddr16Operand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBrTargetOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printCallTargetOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printCoPtrOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printCoIdxOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printCCOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printRelTargetOperand(const MCInst *MI, uint64_t Address, unsigned OpNo,
                              raw_ostream &O);
