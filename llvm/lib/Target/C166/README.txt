@@ -375,6 +375,53 @@ the extraction this backend was written against; the sixteen conditions were
 taken as the conventional readings of their names and then checked by running
 them.
 
+Debug information
+-----------------
+
+An address in the debug information is four bytes and holds the whole physical
+address, which is not what a pointer in the program does.  A pointer is a 16 bit
+offset that the data page pointers or CSP place somewhere in the 16 MByte the
+part addresses, so two bytes cannot say where anything is: on a part whose Flash
+is at C0'0000H every function would be described as living in segment 0.  The
+relocation is therefore ABS32 rather than the SOF16 an instruction operand
+takes.  DW_AT_byte_size of a pointer type comes from the source type and is
+unaffected; this is only how the debug information says where something is.
+
+Unwinding is the harder half, because DWARF describes a frame with one canonical
+frame address and a rule per register, and the return address here is in neither
+of those places.  It is on the hardware stack, addressed by SP, while the CFA is
+measured from R0 on the ABI stack.  So no offset from the CFA finds it and the
+rule is a DWARF expression instead - and since the return address is 24 bits,
+the expression assembles it out of a segment and an offset.
+
+What the hardware stack holds at function entry depends on how the function was
+entered:
+
+  near        IP                 2 bytes, and the caller's CSP is our CSP
+  far         IP, CSP            4 bytes, entered with CALLS
+  interrupt   IP, CSP, PSW       6 bytes, put there by the hardware
+
+The near case is what nearly every function looks like, so it is in the CIE and
+those functions say nothing of their own; the other two override it.  So do the
+handlers that save the multiply/divide unit, since those three PUSHes are on the
+same hardware stack and move every offset the rules are written in terms of.
+
+The return address column is a register called PC that no instruction can name.
+DWARF needs the column to be some register number, and on this part nothing
+holds the return address, so PC stands for the CSP:IP pair the expression
+computes.  It has no assembly name on purpose: every register name here is a
+word the assembler reserves, and this one would be reserving "pc" for something
+nothing can write.
+
+The callee saved registers are the ordinary case - they are on the ABI stack, so
+they take an ordinary offset from the CFA.
+
+None of this is checkable by reading the assembly, so it is checked by running
+it: c166-sim --backtrace walks the stack with the call frame information the
+executable carries, using LLVM's own reader for it, and lld/test/ELF has a test
+that links a mixed near and far call chain and compares the walk against the
+symbol table.
+
 Encodings and the MC layer
 --------------------------
 
@@ -533,6 +580,9 @@ Known limitations / things to do
 * Only the X-peripheral registers the XC164CM's own two manuals name are
   modelled.  The CAN module has a manual of its own that this was not built
   from, so its registers have to be written as addresses.
+* A debugger cannot attach to any of this yet.  The unwind information is
+  right - the simulator walks it - but no debugger knows the c166 architecture,
+  so what reads the information today is llvm-dwarfdump and the simulator.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

@@ -8,9 +8,14 @@
 define void @isr() #0 {
 ; CHECK-LABEL: isr:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    sub r0, #2
 ; CHECK-NEXT:    .cfi_def_cfa_offset 2
 ; CHECK-NEXT:    mov [r0], r2 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r2, -2
 ; CHECK-NEXT:    mov r2, count
 ; CHECK-NEXT:    add r2, #1
 ; CHECK-NEXT:    mov count, r2
@@ -31,9 +36,17 @@ declare void @helper()
 define void @isr_with_call() #0 {
 ; CHECK-LABEL: isr_with_call:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    push mdc
 ; CHECK-NEXT:    push mdl
 ; CHECK-NEXT:    push mdh
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x08, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x06, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x0c ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x08 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x0a ; caller's PSW
 ; CHECK-NEXT:    sub r0, #20
 ; CHECK-NEXT:    .cfi_def_cfa_offset 20
 ; CHECK-NEXT:    mov [r0+#18], r2 ; 2-byte Folded Spill
@@ -46,6 +59,16 @@ define void @isr_with_call() #0 {
 ; CHECK-NEXT:    mov [r0+#4], r9 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0+#2], r10 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0], r11 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r2, -2
+; CHECK-NEXT:    .cfi_offset r3, -4
+; CHECK-NEXT:    .cfi_offset r4, -6
+; CHECK-NEXT:    .cfi_offset r5, -8
+; CHECK-NEXT:    .cfi_offset r6, -10
+; CHECK-NEXT:    .cfi_offset r7, -12
+; CHECK-NEXT:    .cfi_offset r8, -14
+; CHECK-NEXT:    .cfi_offset r9, -16
+; CHECK-NEXT:    .cfi_offset r10, -18
+; CHECK-NEXT:    .cfi_offset r11, -20
 ; CHECK-NEXT:    calla cc_UC, helper
 ; CHECK-NEXT:    mov r11, [r0] ; 2-byte Folded Reload
 ; CHECK-NEXT:    mov r10, [r0+#2] ; 2-byte Folded Reload
@@ -62,6 +85,10 @@ define void @isr_with_call() #0 {
 ; CHECK-NEXT:    pop mdh
 ; CHECK-NEXT:    pop mdl
 ; CHECK-NEXT:    pop mdc
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    reti
   call void @helper()
   ret void
@@ -81,13 +108,23 @@ define void @normal() {
 define void @isr_multiplies() #0 {
 ; CHECK-LABEL: isr_multiplies:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    push mdc
 ; CHECK-NEXT:    push mdl
 ; CHECK-NEXT:    push mdh
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x08, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x06, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x0c ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x08 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x0a ; caller's PSW
 ; CHECK-NEXT:    sub r0, #4
 ; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    mov [r0+#2], r2 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0], r3 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r2, -2
+; CHECK-NEXT:    .cfi_offset r3, -4
 ; CHECK-NEXT:    mov r2, #3
 ; CHECK-NEXT:    mov r3, count
 ; CHECK-NEXT:    mul r3, r2
@@ -100,6 +137,10 @@ define void @isr_multiplies() #0 {
 ; CHECK-NEXT:    pop mdh
 ; CHECK-NEXT:    pop mdl
 ; CHECK-NEXT:    pop mdc
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    reti
   %v = load volatile i16, ptr @count
   %n = mul i16 %v, 3
@@ -110,13 +151,23 @@ define void @isr_multiplies() #0 {
 define void @isr_divides(i16 %d) #0 {
 ; CHECK-LABEL: isr_divides:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    push mdc
 ; CHECK-NEXT:    push mdl
 ; CHECK-NEXT:    push mdh
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x08, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x06, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x0c ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x08 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x0a ; caller's PSW
 ; CHECK-NEXT:    sub r0, #4
 ; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    mov [r0+#2], r2 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0], r3 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r2, -2
+; CHECK-NEXT:    .cfi_offset r3, -4
 ; CHECK-NEXT:    mov r3, count
 ; CHECK-NEXT:    mov mdl, r3
 ; CHECK-NEXT:    div r2
@@ -129,6 +180,10 @@ define void @isr_divides(i16 %d) #0 {
 ; CHECK-NEXT:    pop mdh
 ; CHECK-NEXT:    pop mdl
 ; CHECK-NEXT:    pop mdc
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    reti
   %v = load volatile i16, ptr @count
   %n = sdiv i16 %v, %d
@@ -153,9 +208,14 @@ define i16 @normal_multiplies(i16 %a, i16 %b) {
 define void @isr_with_argument(i16 %v) #0 {
 ; CHECK-LABEL: isr_with_argument:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    sub r0, #2
 ; CHECK-NEXT:    .cfi_def_cfa_offset 2
 ; CHECK-NEXT:    mov [r0], r2 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r2, -2
 ; CHECK-NEXT:    add r2, count
 ; CHECK-NEXT:    mov count, r2
 ; CHECK-NEXT:    mov r2, [r0] ; 2-byte Folded Reload

@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Machine.h"
+#include "Unwind.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELFObjectFile.h"
@@ -39,6 +40,10 @@ static cl::opt<bool> Trace("trace",
                            cl::desc("print each instruction executed"));
 static cl::opt<bool>
     DumpState("dump-state", cl::desc("print registers when the program stops"));
+static cl::opt<bool> Backtrace(
+    "backtrace",
+    cl::desc("walk the stack when the program stops, using the call frame "
+             "information in the executable"));
 static cl::opt<bool>
     Binary("binary", cl::desc("the input is a flat image rather than an ELF "
                               "executable; it is loaded at --load-address and "
@@ -69,7 +74,10 @@ int main(int argc, char **argv) {
   M.TraceOS = &errs();
   M.ConsoleOS = &outs();
 
+  const object::ObjectFile *BacktraceObj = nullptr;
   auto Finish = [&]() -> int {
+    if (Backtrace && BacktraceObj)
+      printBacktrace(errs(), backtrace(M, *BacktraceObj));
     if (DumpState) {
       errs() << formatv("IP={0:x-4} CSP={1:x-2} PSW={2:x-4} SP={3:x-4} "
                         "CP={4:x-4}\n",
@@ -100,6 +108,9 @@ int main(int argc, char **argv) {
   // A flat image has no symbols and nothing to link, which is what the
   // simulator's own tests use: it stops by writing to the exit port.
   if (Binary) {
+    if (Backtrace)
+      return Fail("--backtrace needs an executable to read the call frame "
+                  "information out of, and a flat image has none");
     StringRef Data = (*BufOrErr)->getBuffer();
     for (size_t I = 0; I != Data.size(); ++I)
       M.poke8(uint32_t(LoadAddress + I), uint8_t(Data[I]));
@@ -119,6 +130,7 @@ int main(int argc, char **argv) {
   const auto &ELF = Obj->getELFFile();
   if (ELF.getHeader().e_machine != ELF::EM_C166)
     return Fail("not a C166 executable");
+  BacktraceObj = Obj;
 
   // Load the PT_LOAD segments at their physical addresses, which is where the
   // image really is: .data is linked to run in RAM but loaded from ROM.

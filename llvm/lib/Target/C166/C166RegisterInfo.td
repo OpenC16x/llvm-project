@@ -128,7 +128,7 @@ def DPP0     : C166Reg<0x00, "dpp0">, DwarfRegNum<[40]>; // FE00H
 def DPP1     : C166Reg<0x01, "dpp1">, DwarfRegNum<[41]>; // FE02H
 def DPP2     : C166Reg<0x02, "dpp2">, DwarfRegNum<[42]>; // FE04H
 def DPP3     : C166Reg<0x03, "dpp3">, DwarfRegNum<[43]>; // FE06H
-def CSP      : C166Reg<0x04, "csp">; // FE08H
+def CSP      : C166Reg<0x04, "csp">, DwarfRegNum<[44]>; // FE08H
 def MDH      : C166Reg<0x06, "mdh">, DwarfRegNum<[34]>; // FE0CH
 def MDL      : C166Reg<0x07, "mdl">, DwarfRegNum<[33]>; // FE0EH
 def CP       : C166Reg<0x08, "cp">, DwarfRegNum<[37]>; // FE10H
@@ -141,6 +141,19 @@ def CPUCON1  : C166Reg<0x0C, "cpucon1">; // FE18H
 def CPUCON2  : C166Reg<0x0D, "cpucon2">; // FE1AH
 def SPSEG    : C166Reg<0x86, "spseg">; // FF0CH
 def VECSEG   : C166Reg<0x89, "vecseg">; // FF12H
+
+// The instruction pointer, which is not a register a program can name: it is
+// here because the debug information has to.  DWARF describes where a frame's
+// return address is by giving a rule for one numbered column, and that column
+// has to be something; on a C166 the return address is not in a register at
+// all, it is on the hardware stack, so the column stands for the 24 bit
+// CSP:IP pair rather than for anything the instruction set exposes.  See
+// C166FrameLowering.cpp for the rule that computes it.
+//
+// It has no assembly name on purpose.  Every register name here is a word the
+// assembler reserves, and this one would be reserving "pc" for something no
+// instruction can write.
+def PC       : C166Reg<0x00, "">, DwarfRegNum<[45]>;
 
 // Program status word, and the two constant registers.
 def PSW      : C166Reg<0x88, "psw">, DwarfRegNum<[32]>; // FF10H

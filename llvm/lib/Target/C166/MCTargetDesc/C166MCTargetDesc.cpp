@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "C166MCTargetDesc.h"
+#include "C166UnwindRules.h"
+#include "llvm/Support/LEB128.h"
 #include "C166InstPrinter.h"
 #include "C166MCAsmInfo.h"
 #include "TargetInfo/C166TargetInfo.h"
@@ -43,7 +45,12 @@ static MCInstrInfo *createC166MCInstrInfo() {
 
 static MCRegisterInfo *createC166MCRegisterInfo(const Triple &TT) {
   MCRegisterInfo *X = new MCRegisterInfo();
-  InitC166MCRegisterInfo(X, C166::R0);
+  // The second argument is the DWARF return address column.  On most targets
+  // that is a register holding the return address; here nothing does - a CALL
+  // puts it on the hardware stack - so it is the synthetic PC, and
+  // C166FrameLowering emits a rule that computes it from the stack.  It used
+  // to be R0, which is the ABI stack pointer and meant nothing at all.
+  InitC166MCRegisterInfo(X, C166::PC);
   return X;
 }
 
@@ -55,9 +62,16 @@ static MCAsmInfo *createC166MCAsmInfo(const MCRegisterInfo &MRI,
   // The ABI stack lives in R0 and grows down.  On function entry it points
   // straight at the first stack argument: the return address is kept on the
   // separate hardware stack and is not part of this frame.
-  MCCFIInstruction Inst =
-      MCCFIInstruction::cfiDefCfa(nullptr, MRI.getDwarfRegNum(C166::R0, true), 0);
-  MAI->addInitialFrameState(Inst);
+  MAI->addInitialFrameState(MCCFIInstruction::cfiDefCfa(
+      nullptr, MRI.getDwarfRegNum(C166::R0, /*isEH=*/false), 0));
+
+  // And where that return address is.  Almost every function was entered with
+  // a near call and has pushed nothing else, so those rules go here rather than
+  // into every frame; the other shapes say so in their own.
+  SmallVector<MCCFIInstruction, 4> Rules;
+  C166::getUnwindRules(Rules, MRI, C166::EntryKind::Near, /*Depth=*/0);
+  for (const MCCFIInstruction &Inst : Rules)
+    MAI->addInitialFrameState(Inst);
 
   return MAI;
 }
@@ -130,4 +144,131 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166TargetMC() {
   TargetRegistry::RegisterMCInstPrinter(T, createC166MCInstPrinter);
   TargetRegistry::RegisterMCCodeEmitter(T, createC166MCCodeEmitter);
   TargetRegistry::RegisterMCAsmBackend(T, createC166MCAsmBackend);
+}
+
+//===----------------------------------------------------------------------===//
+// Call frame information
+//===----------------------------------------------------------------------===//
+//
+// See C166UnwindRules.h for what these rules have to say and why they are
+// expressions rather than offsets.
+
+namespace {
+/// The DWARF operations these rules are built from.
+enum : uint8_t {
+  DW_OP_const1u = 0x08,
+  DW_OP_or = 0x21,
+  DW_OP_shl = 0x24,
+  DW_OP_bregx = 0x92,
+  DW_OP_deref_size = 0x94,
+  DW_CFA_expression = 0x10,
+  DW_CFA_val_expression = 0x16,
+};
+
+void appendULEB(std::string &S, uint64_t V) {
+  raw_string_ostream OS(S);
+  encodeULEB128(V, OS);
+}
+
+void appendSLEB(std::string &S, int64_t V) {
+  raw_string_ostream OS(S);
+  encodeSLEB128(V, OS);
+}
+
+/// "the value in DWARF register Reg, plus Off".
+void appendBregx(std::string &S, unsigned Reg, int64_t Off) {
+  S.push_back(DW_OP_bregx);
+  appendULEB(S, Reg);
+  appendSLEB(S, Off);
+}
+
+/// "the word at the address on top of the stack", zero extended.  Everything
+/// the hardware stack holds is one word wide.
+void appendDerefWord(std::string &S) {
+  S.push_back(DW_OP_deref_size);
+  S.push_back(2);
+}
+
+/// "shifted up into the segment field".
+void appendToSegment(std::string &S) {
+  S.push_back(DW_OP_const1u);
+  S.push_back(16);
+  S.push_back(DW_OP_shl);
+}
+
+/// A DW_CFA_expression or DW_CFA_val_expression naming \p Reg, whose operand
+/// is the expression \p Expr.
+std::string cfaExpression(uint8_t Op, unsigned Reg, StringRef Expr) {
+  std::string S;
+  S.push_back(Op);
+  appendULEB(S, Reg);
+  appendULEB(S, Expr.size());
+  S.append(Expr.begin(), Expr.end());
+  return S;
+}
+} // end anonymous namespace
+
+void C166::getUnwindRules(SmallVectorImpl<MCCFIInstruction> &Out,
+                          const MCRegisterInfo &MRI, EntryKind Kind,
+                          unsigned Depth) {
+  // This target emits .debug_frame rather than .eh_frame, and has one register
+  // numbering either way, so the two forms of the question have one answer.
+  auto Dwarf = [&](MCRegister Reg) {
+    return unsigned(MRI.getDwarfRegNum(Reg, /*isEH=*/false));
+  };
+  const unsigned SP = Dwarf(C166::SYSSP);
+  const unsigned CSP = Dwarf(C166::CSP);
+
+  // How much the entry left on the hardware stack, and whether the caller's
+  // CSP is part of it.  When it is not, a near call got us here and the
+  // caller's CSP is the one we are running with.
+  const bool SavesCSP = Kind != EntryKind::Near;
+  const bool SavesPSW = Kind == EntryKind::Interrupt;
+  const unsigned Size = Kind == EntryKind::Near      ? 2
+                        : Kind == EntryKind::Far     ? 4
+                                                     : 6;
+  const int64_t Base = Depth;
+
+  // The return address: the segment shifted up, with the offset below it.
+  std::string RA;
+  if (SavesCSP) {
+    appendBregx(RA, SP, Base + 2);
+    appendDerefWord(RA);
+  } else {
+    appendBregx(RA, CSP, 0);
+  }
+  appendToSegment(RA);
+  appendBregx(RA, SP, Base);
+  appendDerefWord(RA);
+  RA.push_back(DW_OP_or);
+  Out.push_back(MCCFIInstruction::createEscape(
+      nullptr, cfaExpression(DW_CFA_val_expression, Dwarf(C166::PC), RA), {},
+      "return address, from the hardware stack"));
+
+  // The caller's hardware stack pointer is ours with the whole record popped.
+  std::string CallerSP;
+  appendBregx(CallerSP, SP, Base + Size);
+  Out.push_back(MCCFIInstruction::createEscape(
+      nullptr, cfaExpression(DW_CFA_val_expression, SP, CallerSP), {},
+      "caller's hardware stack pointer"));
+
+  // The caller's CSP, which a near call did not disturb.
+  if (SavesCSP) {
+    std::string Saved;
+    appendBregx(Saved, SP, Base + 2);
+    Out.push_back(MCCFIInstruction::createEscape(
+        nullptr, cfaExpression(DW_CFA_expression, CSP, Saved), {},
+        "caller's CSP"));
+  } else {
+    Out.push_back(MCCFIInstruction::createSameValue(nullptr, CSP));
+  }
+
+  // An interrupt saved the PSW too, and RETI is what puts it back.
+  if (SavesPSW) {
+    std::string Saved;
+    appendBregx(Saved, SP, Base + 4);
+    Out.push_back(MCCFIInstruction::createEscape(
+        nullptr, cfaExpression(DW_CFA_expression, Dwarf(C166::PSW), Saved), {},
+        "caller's PSW"));
+  }
 }

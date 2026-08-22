@@ -26,7 +26,22 @@ names a different symbol.
 
   --trace        print each instruction as it executes
   --dump-state   print the registers when the program stops
+  --backtrace    walk the stack when the program stops
   --max-steps    give up after this many instructions
+
+--backtrace is the one that is a check rather than a convenience.  It walks the
+stack using the call frame information in the executable, which on this target
+is the only way to find out whether that information is right: the return
+address is on the hardware stack rather than at any offset from the canonical
+frame address, so the rule that finds it is a DWARF expression, and an
+expression that is wrong is not something reading the assembly would show.
+Stopping somewhere with a call chain under it - --exit-symbol names a leaf, for
+instance - and looking at the walk is what tests it.
+
+  $ c166-sim --exit-symbol=leaf --backtrace prog.elf
+  #0 c00100 in leaf at prog.c:2
+  #1 c0c006 in farmid at prog.c:3
+  #2 c0010e in outer at prog.c:4
 
 Two addresses are the simulator rather than storage.  They are in the top
 segment, which no C166 part populates and no linker script here places

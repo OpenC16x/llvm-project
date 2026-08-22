@@ -80,6 +80,13 @@ if (NOT LLD_BUILT_STANDALONE)
         Bye
         )
     endif()
+    # The C166 simulator, for the tests that have to run what was linked
+    # rather than only read it.  It is only built when that target is.
+    if ("C166" IN_LIST LLVM_TARGETS_TO_BUILD)
+      list(APPEND LLD_TEST_DEPS
+        c166-sim
+        )
+    endif()
 endif()
 
 add_lit_testsuite(check-lld "Running lld test suite"
