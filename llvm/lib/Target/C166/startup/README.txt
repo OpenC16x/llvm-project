@@ -6,9 +6,10 @@ memory map to link against.  None of it is built by the LLVM build: it is code
 for the target, not for the machine doing the building, so it is here to be
 copied into a project and adjusted rather than installed.
 
-  crt0.S   the reset vector and the startup sequence
-  c166.ld  a linker script for an SAB 83C166 with nothing attached to it
-  mem.c    memcpy, memmove, memset and memcmp
+  crt0.S      the reset vector and the startup sequence
+  c166.ld     a linker script for a part with nothing attached to it
+  vectors.ld  the interrupt vector table, for a program that has handlers
+  mem.c       memcpy, memmove, memset and memcmp
 
 Building it
 -----------
@@ -83,14 +84,41 @@ Interrupt handlers
 
 The vector table is the low 512 bytes of code segment 0, one double word per
 trap number, so trap n is at 4*n.  Trap 0 is reset, which is why crt0.S puts
-its JMPS there.  A handler is declared
+its JMPS there.  What a slot holds is a jump, not an address: a trap and a
+hardware interrupt both branch to the slot rather than reading through it.
+
+A handler is declared
 
   __attribute__((interrupt)) void handler(void) { ... }
 
-and needs a jump to it in its own slot.  There is nothing here that builds the
-table, because which sources a part has is a property of the part; a project
-does it with a section per vector and an ordered linker script, or with one
-.vectors section written out by hand.
+which makes it save what it uses and return with RETI, and its slot is claimed
+by putting a jump there:
+
+  .section .vectors.026,"ax",@progbits
+  jmps    #seg(handler), sof(handler)
+
+The number is the trap number in decimal, padded to three digits.  vectors.ld
+places each of the 128 slots at the address it has to be at, so slots that
+nothing claims can be left out rather than counted:
+
+  SECTIONS
+  {
+    INCLUDE vectors.ld
+    .text : { ... }
+  }
+
+It replaces the .reset section of c166.ld, and is a separate file because the
+table is 512 bytes of ROM whether its slots are filled or not, which a program
+with no handlers should not pay.  Unclaimed slots end up holding LLD's trap
+pattern, JMPR cc_UC, -1, so a spurious interrupt stops rather than running into
+whatever follows.
+
+On an XC164CM this is the layout the part has at reset.  Two of its registers
+can change it: CPUCON1.VECSC sets the space between vectors, and resets to 00,
+which is the two words assumed here; VECSEG selects the segment the table lives
+in, and its reset value depends on how the part was started.  A program that
+writes either wants a different script from this one.  Both are protected after
+EINIT, so a startup sequence that changes them has to do it before that.
 
 What is missing
 ---------------

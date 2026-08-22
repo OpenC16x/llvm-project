@@ -460,7 +460,20 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* No support for the XC16x MAC unit.
+* No support for the C166SV2 MAC unit, which the XC164CM has.  It is a
+  coprocessor rather than a few instructions - a 40 bit accumulator in MAH,
+  MAL and MAS, its own control, status and repeat registers, dual operand
+  fetch through IDX0/IDX1, and a repeat field on every CoXXX instruction - and
+  nothing in the compiler would select any of it without the DSP patterns to
+  drive it.  The C166SV2 User's Manual lists the mnemonics and describes the
+  operand fields; its opcode appendix is a matrix that has not been read off
+  accurately enough to encode from, so the encodings are still not known here.
+* The branch prediction bit of JMPA and CALLA is always left at 0, which the
+  C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
+  always 0 too; it is meant to be set for a backward branch of 32 bytes or
+  less, which is a distance that always relaxes to a JMPR here, so nothing is
+  lost by it.  Branch prediction is enabled out of reset on an XC164CM
+  (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
 * The SFR map is the XC164CM's, and only that part's: the same short address
   names different registers on different derivatives, so nothing here is right
   for another one and nothing selects between them.  C166RegisterInfo.td says
@@ -469,9 +482,9 @@ Known limitations / things to do
   reaches it.  On an XC164CM that leaves out SYSCON1 and SYSCON3, PLLCON, the
   RTC and the port alternate-select registers, so a startup sequence that has
   to touch those still writes its own EXTR by hand.
-* Nothing builds the interrupt vector table.  TRAP reaches a slot and RETI
-  comes back, but which sources a part has is a property of the part, so a
-  project still writes its own .vectors section and places it.
+* Which trap number a peripheral raises is a property of the part and is not
+  written down anywhere here, so a handler's slot is named by number rather
+  than by the source it serves.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
