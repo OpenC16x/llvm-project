@@ -13,6 +13,10 @@ HERE=$(dirname "$0")
 ROOT=$(cd "$HERE/../../../.." && pwd)
 STATUS=0
 
+# Resolved before the cd below, because the caller wrote it relative to where
+# they were rather than to the root of the tree.
+BIN=$(cd "$BIN" && pwd)
+
 TESTS="llvm/test/CodeGen/C166 llvm/test/MC/C166 llvm/test/DebugInfo/C166 llvm/test/tools/c166-sim"
 
 # Every test file, which is what gets read for the tool names.  The directories

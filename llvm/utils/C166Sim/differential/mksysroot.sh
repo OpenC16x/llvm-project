@@ -16,11 +16,17 @@
 set -e
 BUILD=${1:?usage: mksysroot.sh <build-dir> <sysroot>}
 SYSROOT=${2:?}
-BIN="$BUILD/bin"
 HERE=$(dirname "$0")
 STARTUP=$(cd "$HERE/../../../lib/Target/C166/startup" && pwd)
 
+# cmake rejects a relative CMAKE_C_COMPILER or CMAKE_ASM_COMPILER outright -
+# it looks the name up in PATH and does not find it - and it configures the
+# builtins in a directory of its own, where a relative sysroot would land
+# somewhere else again.  Both are given to us as the caller typed them, so
+# make them absolute here rather than depending on where we were run from.
 mkdir -p "$SYSROOT/c166-elf/lib"
+SYSROOT=$(cd "$SYSROOT" && pwd)
+BIN=$(cd "$BUILD/bin" && pwd)
 
 "$BIN/clang" -target c166 -c "$STARTUP/crt0.S" -o "$SYSROOT/c166-elf/lib/crt0.o"
 
