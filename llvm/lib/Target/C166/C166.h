@@ -15,6 +15,7 @@
 #define LLVM_LIB_TARGET_C166_C166_H
 
 #include "MCTargetDesc/C166MCTargetDesc.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
@@ -139,6 +140,23 @@ inline const char *getCondCodeName(CondCode CC) {
   default:
     return nullptr;
   }
+}
+
+/// The other name of each encoding that has two.
+///
+/// The architecture spells four of these both ways - "cc_z" and "cc_EQ" are the
+/// same condition - and getCondCodeName above returns only one of each pair.
+/// The assembler accepts either, so anything that has to know every spelling
+/// there is, such as the set of words a symbol may not be called, has to read
+/// both lists.
+inline ArrayRef<std::pair<const char *, CondCode>> getCondCodeAliases() {
+  static const std::pair<const char *, CondCode> Aliases[] = {
+      {"cc_z", COND_Z},
+      {"cc_nz", COND_NZ},
+      {"cc_c", COND_ULT},
+      {"cc_nc", COND_UGE},
+  };
+  return Aliases;
 }
 } // end namespace C166CC
 

@@ -13,9 +13,12 @@
 #include "C166MCTargetDesc.h"
 #include "C166UnwindRules.h"
 #include "llvm/Support/LEB128.h"
+#include "C166.h"
 #include "C166InstPrinter.h"
 #include "C166MCAsmInfo.h"
 #include "TargetInfo/C166TargetInfo.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -24,6 +27,7 @@
 #include "llvm/Support/Compiler.h"
 
 #include <string>
+#include <vector>
 
 using namespace llvm;
 
@@ -54,10 +58,66 @@ static MCRegisterInfo *createC166MCRegisterInfo(const Triple &TT) {
   return X;
 }
 
+/// The words the assembler will not read as a symbol, because it reads them as
+/// something else first.
+///
+/// An operand like "t2" is the T2 timer at FE40H, not a program's variable
+/// called t2, and the assembler has no way to tell that anyone meant otherwise:
+/// a symbol may be defined after it is used, so there is nothing to consult at
+/// the point the name is read.  Left alone that is silent - "mov r2, t2" would
+/// assemble to a load from FE40H with no relocation and no diagnostic - which
+/// matters because it is what the compiler itself writes for a variable of that
+/// name, so compiling to assembly and assembling that back would not produce
+/// the same program.
+///
+/// Saying the names are reserved is what stops it: MCSymbol::print quotes a
+/// name that is, so the compiler writes "mov r2, \"t2\"", and a quoted name
+/// reaches the parser as a string rather than an identifier and can only be a
+/// symbol.  The register keeps the bare spelling, so a disassembly still says
+/// "mov r2, mdl" and still assembles back to the bytes it came from.
+static void populateReservedIdentifiers(MCAsmInfo &MAI,
+                                        const MCRegisterInfo &MRI) {
+  // The set holds references rather than copies, and the lookup lowercases
+  // what it is asked about, so the names have to be lower case and have to
+  // outlive every MCAsmInfo.  They are gathered once into a table of their own
+  // for both of those reasons.
+  static const std::vector<std::string> Names = [&MRI] {
+    std::vector<std::string> V;
+
+    // Every register name, which is every special function register, every
+    // extended one and every X-peripheral one as well as R0 to R15: the parser
+    // looks all of them up before it considers a symbol.  The printer's table
+    // is the assembly spelling, and PC has none - it exists for the debug
+    // information - so it is skipped along with anything else that gains one.
+    for (unsigned I = 1, E = MRI.getNumRegs(); I != E; ++I)
+      if (const char *Name = C166InstPrinter::getRegisterName(I))
+        if (Name[0])
+          V.push_back(StringRef(Name).lower());
+
+    // The condition codes, both spellings of the four that have two.  The
+    // parser takes any "cc_" name to be one of these, so a symbol whose name
+    // merely starts that way is still rejected - but that is a diagnostic
+    // rather than a wrong program, which is the difference that matters.
+    for (unsigned CC = 0; CC != 16; ++CC)
+      if (const char *Name = C166CC::getCondCodeName(C166CC::CondCode(CC)))
+        V.push_back(StringRef(Name).lower());
+    for (auto [Alias, CC] : C166CC::getCondCodeAliases())
+      V.push_back(StringRef(Alias).lower());
+
+    return V;
+  }();
+
+  auto &Set = MAI.getReservedIdentifiers();
+  for (const std::string &Name : Names)
+    Set.insert(CachedHashStringRef(Name));
+}
+
 static MCAsmInfo *createC166MCAsmInfo(const MCRegisterInfo &MRI,
                                       const Triple &TT,
                                       const MCTargetOptions &Options) {
   MCAsmInfo *MAI = new C166MCAsmInfo(TT, Options);
+
+  populateReservedIdentifiers(*MAI, MRI);
 
   // The ABI stack lives in R0 and grows down.  On function entry it points
   // straight at the first stack argument: the return address is kept on the

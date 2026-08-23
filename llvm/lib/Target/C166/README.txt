@@ -486,6 +486,27 @@ assembles to the bytes it came from.  An address with no register at it stays
 a number, and so does a bit-addressable word with nothing mapped at it, while
 "bset psw.10" and "bclr mdc.0" say what they mean.
 
+A register name is therefore not something a symbol can be called.  The parser
+looks one up before it considers a symbol, and it cannot do otherwise: a symbol
+may be defined after it is used, so at the point the name is read there is
+nothing to consult.  "mov r2, t2" is a load from the T2 timer at FE40H, and a
+program with a variable of that name meant something else.
+
+That is why every register name, and every condition code, is in MCAsmInfo's
+reserved identifiers: MCSymbol::print quotes a name that is, so the compiler
+writes "mov r2, \"t2\"".  A quoted name reaches the parser as a string rather
+than an identifier and can only be a symbol, which is what makes the two
+spellings mean different things and what keeps the register's bare spelling
+meaning the register.  Without it, compiling to assembly and assembling that
+back produced a load from FE40H with no relocation and no diagnostic - a
+program that went through the compiler correctly and through the assembler
+broken.  X86 reserves its register names for the same reason, "call rsi" being
+its version of the problem.
+
+A symbol whose name merely starts "cc_" is still rejected rather than quoted,
+since only the sixteen conditions themselves are in the set.  That is a
+diagnostic and not a wrong program, which is the difference that mattered.
+
 The extended special function registers are in the table too, but only as
 addresses.  They sit at the same short addresses as the ordinary ones, mapped
 from F000H and F100H instead of FE00H and FF00H, so a "reg" field cannot tell
