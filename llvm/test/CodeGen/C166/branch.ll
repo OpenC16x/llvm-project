@@ -71,14 +71,14 @@ define i16 @loop(i16 %n) {
 ; CHECK-NEXT:    mov r2, #0
 ; CHECK-NEXT:    mov r4, #0
 ; CHECK-NEXT:    cmp r4, r3
-; CHECK-NEXT:    jmpr cc_SGE, .LBB3_3
-; CHECK-NEXT:  .LBB3_2: ; %body
+; CHECK-NEXT:    jmpr cc_SGE, .LBB3_2
+; CHECK-NEXT:  .LBB3_1: ; %body
 ; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    add r2, r4
 ; CHECK-NEXT:    add r4, #1
 ; CHECK-NEXT:    cmp r4, r3
-; CHECK-NEXT:    jmpr cc_SLT, .LBB3_2
-; CHECK-NEXT:  .LBB3_3: ; %exit
+; CHECK-NEXT:    jmpr cc_SLT, .LBB3_1
+; CHECK-NEXT:  .LBB3_2: ; %exit
 ; CHECK-NEXT:    ret
 entry:
   br label %head

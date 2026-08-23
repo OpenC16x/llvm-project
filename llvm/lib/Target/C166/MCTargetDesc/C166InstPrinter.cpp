@@ -155,6 +155,13 @@ void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
   O << Off;
 }
 
+/// The bit position of a bit address, which is written bare rather than as a
+/// constant: it names which bit of the word, not a value to operate with.
+void C166InstPrinter::printBitPosOperand(const MCInst *MI, unsigned OpNo,
+                                         raw_ostream &O) {
+  O << (MI->getOperand(OpNo).getImm() & 0xf);
+}
+
 void C166InstPrinter::printBitAddrOperand(const MCInst *MI, unsigned OpNo,
                                           raw_ostream &O) {
   printBitOffOperand(MI, OpNo, O);

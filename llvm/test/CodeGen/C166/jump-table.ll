@@ -17,7 +17,7 @@ define i16 @dense(i16 %x) {
 ; CHECK-NEXT:  .LBB0_2: ; %a
 ; CHECK-NEXT:    mov r2, #10
 ; CHECK-NEXT:    ret
-; CHECK-NEXT:  .LBB0_6: ; %e
+; CHECK-NEXT:  .LBB0_3: ; %e
 ; CHECK-NEXT:    mov r2, #50
 ; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_4: ; %c
@@ -26,7 +26,7 @@ define i16 @dense(i16 %x) {
 ; CHECK-NEXT:  .LBB0_5: ; %d
 ; CHECK-NEXT:    mov r2, #40
 ; CHECK-NEXT:    ret
-; CHECK-NEXT:  .LBB0_3: ; %b
+; CHECK-NEXT:  .LBB0_6: ; %b
 ; CHECK-NEXT:    mov r2, #20
 ; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB0_7: ; %f
