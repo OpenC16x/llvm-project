@@ -45,6 +45,7 @@ public:
   void printMemROperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printMemRPostIncOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBitOffOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printBitPosOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBitAddrOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 };
 

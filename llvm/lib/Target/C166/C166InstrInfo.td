@@ -229,6 +229,12 @@ def bitoff : Operand<i16> {
   let ParserMatchClass = BitOffAsmOperand;
 }
 
+// The bit position on its own, for the register forms below: it names which
+// bit of the word rather than a value to operate with, so it is written bare.
+def bitpos : Operand<i16> {
+  let PrintMethod = "printBitPosOperand";
+}
+
 def bitaddr : Operand<i16> {
   let PrintMethod = "printBitAddrOperand";
   let MIOperandInfo = (ops i16imm, i16imm);
@@ -448,6 +454,30 @@ def imm4 : Operand<i16>, ImmLeaf<i16, [{
 }]> {
   let ParserMatchClass = Imm4AsmOperand;
 }
+
+// The mask of an "or" or an "and" that touches exactly one bit, matched as the
+// position of that bit so that a bit instruction can name it.  A sixteen bit
+// constant arrives here sign extended - bit 15 alone is -32768, not 32768 -
+// so both the test and the transform are done on the truncated value.
+def BitPosSet : SDNodeXForm<imm, [{
+  uint16_t Mask = static_cast<uint16_t>(N->getZExtValue());
+  return CurDAG->getTargetConstant(llvm::countr_zero(Mask), SDLoc(N), MVT::i16);
+}]>;
+
+def BitPosClr : SDNodeXForm<imm, [{
+  uint16_t Mask = static_cast<uint16_t>(~N->getZExtValue());
+  return CurDAG->getTargetConstant(llvm::countr_zero(Mask), SDLoc(N), MVT::i16);
+}]>;
+
+def bitpos_set : ImmLeaf<i16, [{
+  uint16_t Mask = static_cast<uint16_t>(Imm);
+  return Mask != 0 && isPowerOf2_32(Mask);
+}], BitPosSet>;
+
+def bitpos_clr : ImmLeaf<i16, [{
+  uint16_t Mask = static_cast<uint16_t>(~Imm);
+  return Mask != 0 && isPowerOf2_32(Mask);
+}], BitPosClr>;
 
 //===----------------------------------------------------------------------===//
 // Complex Patterns
@@ -1518,6 +1548,39 @@ class BitSetClear<bits<4> op, string mnemonic>
 
 def BCLR : BitSetClear<0xE, "bclr">;
 def BSET : BitSetClear<0xF, "bset">;
+
+// The compiler facing forms.  Bitoff F0H to FFH is R0 to R15, so a single bit
+// set or cleared in a value the register allocator has already placed is one
+// two byte instruction instead of a mask and an ALU operation - and, on a
+// bit-addressable word, one indivisible bus operation instead of a read and a
+// write an interrupt can arrive between.
+//
+// They share their encoding with the two above, so they are code generation
+// only: the disassembler has exactly one way to spell the result, and the
+// round trip goes back through the assembler facing form.
+//
+// The flags are not the ones "or" and "and" leave - BSET reports the bit as it
+// was rather than anything about the result - which is sound here only because
+// nothing in this backend reads PSW as a value except the carry chain, and
+// that sees these as the same clobber it sees an ALU instruction as.
+let Constraints = "$src = $dst", Defs = [PSW], isCodeGenOnly = 1,
+    AddedComplexity = 20 in {
+class BitSetClearReg<bits<4> op, string mnemonic, ImmLeaf mask, SDNode opnode>
+    : C166Inst<(outs GR16:$dst), (ins GR16:$src, bitpos:$pos), 2,
+               !strconcat(mnemonic, "\t$dst.$pos"),
+               [(set GR16:$dst, (opnode GR16:$src, mask:$pos))]> {
+  bits<4> dst;
+  bits<4> pos;
+  let Inst{3-0} = op;
+  let Inst{7-4} = pos;
+  let Inst{15-12} = 0b1111;
+  let Inst{11-8} = dst;
+  let Inst{31-16} = 0;
+}
+
+def BCLRr : BitSetClearReg<0xE, "bclr", bitpos_clr, and>;
+def BSETr : BitSetClearReg<0xF, "bset", bitpos_set, or>;
+}
 
 // The two operand bit instructions name the destination first but encode the
 // source first, and pack the two bit positions into the last byte as the
