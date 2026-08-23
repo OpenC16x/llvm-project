@@ -67,7 +67,14 @@ jobs:
           ninja -C build clang lld llc llvm-mc llvm-objdump llvm-objcopy \
             llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump llvm-symbolizer \
             llvm-ar llvm-ranlib llvm-size llvm-config c166-sim \
-            FileCheck count not
+            FileCheck count not split-file
+
+      # A tool the tests ask for and the build did not produce would otherwise
+      # be found an hour in, as "command not found" in the middle of a run.
+      # This reads the names out of the tests, so it is a few seconds and it
+      # keeps itself up to date.
+      - name: Check the tools the tests need were built
+        run: ./llvm/utils/C166Sim/differential/checktools.sh ./build/bin
 
       # Assertions are on, so a malformed node or a bad assumption stops the
       # build rather than producing something that only looks right.
