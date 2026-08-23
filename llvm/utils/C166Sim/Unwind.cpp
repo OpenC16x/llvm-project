@@ -12,6 +12,7 @@
 #include "llvm/DebugInfo/DWARF/DWARFDebugFrame.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Support/Format.h"
 
