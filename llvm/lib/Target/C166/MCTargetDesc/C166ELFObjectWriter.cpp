@@ -69,6 +69,11 @@ protected:
                   "a relative jump to a target this far away should have been "
                   "relaxed");
       return ELF::R_C166_NONE;
+    case C166::fixup_c166_caddr:
+      // The same value as SOF16, said differently: this one is a code address
+      // that the instruction reaches without leaving the segment, which is
+      // what lets the linker check the segment is the one it is in.
+      return ELF::R_C166_CADDR16;
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
     case FK_Data_2:

@@ -176,6 +176,21 @@ segment and there is no indirect form of CALLS, so a pointer to a far function
 would be a near address that nothing could call correctly; taking one is
 diagnosed, both in code and in an initialiser.
 
+The other direction is a constraint on the memory map rather than on the code.
+A near call takes its segment from CSP, so it reaches the segment the caller is
+in and no other, and code placed outside the segment .text ended up in can only
+call functions that are themselves far.  That is not hypothetical: c166.ld puts
+the PSRAM at E0'0000H and the Flash at C0'0000H, so a function in .psramtext
+calling an ordinary one lands in the PSRAM instead - the sixteen bits that fit
+are written and the branch goes to that offset in the wrong segment.
+
+Nothing in the instruction, and nothing in a plain 16 bit relocation, would say
+so, which is why a near branch or call carries R_C166_CADDR16 instead: the same
+sixteen bits, under a name that tells the linker the field is a code address
+reached without changing segments.  LLD then refuses a target that is somewhere
+else, naming both addresses.  .text and .fartext do share a segment in c166.ld,
+which is why an ordinary far function may still be called near from the Flash.
+
 Relocations and assembler syntax
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

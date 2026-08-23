@@ -25,6 +25,12 @@ enum Fixups {
   fixup_c166_rel8w = FirstTargetFixupKind,
   fixup_c166_rel8w_short,
 
+  /// The target of a branch or call that stays in the current segment.  This
+  /// is the same 16 bit field FK_Data_2 would leave, and is a kind of its own
+  /// only so that the linker knows the field is a code address reached without
+  /// changing segments and can check that it is in the segment we are in.
+  fixup_c166_caddr,
+
   LastTargetFixupKind,
   NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind
 };

@@ -61,6 +61,10 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                            const MCSubtargetInfo &STI) const;
 
   /// A 16 bit address ("mem" or "caddr").
+  unsigned getCAddrOpValue(const MCInst &MI, unsigned OpNo,
+                           SmallVectorImpl<MCFixup> &Fixups,
+                           const MCSubtargetInfo &STI) const;
+
   unsigned getAddr16OpValue(const MCInst &MI, unsigned OpNo,
                             SmallVectorImpl<MCFixup> &Fixups,
                             const MCSubtargetInfo &STI) const;
@@ -222,6 +226,17 @@ unsigned C166MCCodeEmitter::getAddr16OpValue(const MCInst &MI, unsigned OpNo,
                                              SmallVectorImpl<MCFixup> &Fixups,
                                              const MCSubtargetInfo &STI) const {
   return encodeRelocatable(MI.getOperand(OpNo), FK_Data_2, Fixups) & 0xffff;
+}
+
+unsigned C166MCCodeEmitter::getCAddrOpValue(const MCInst &MI, unsigned OpNo,
+                                            SmallVectorImpl<MCFixup> &Fixups,
+                                            const MCSubtargetInfo &STI) const {
+  // The same field as any other 16 bit address, under a fixup kind of its own
+  // so that the linker is told this one is a branch or call that stays in the
+  // segment it is in; see C166FixupKinds.h.
+  return encodeRelocatable(MI.getOperand(OpNo), C166::fixup_c166_caddr,
+                           Fixups) &
+         0xffff;
 }
 
 unsigned C166MCCodeEmitter::getData16OpValue(const MCInst &MI, unsigned OpNo,

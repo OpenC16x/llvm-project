@@ -106,6 +106,15 @@ reason to want this is not only speed: a routine that erases or writes the
 Flash cannot be fetched from the Flash while it does so, so it has to be
 somewhere else, and this is the somewhere else.
 
+What such a function may call is the constraint to know about.  The PSRAM is a
+different segment from the Flash, and a near call reaches only the segment it is
+made from, so a function in .psramtext can only call functions that are
+themselves far - the far is what makes the call a CALLS, which names the segment
+it is going to.  Calling an ordinary function from there would land at that
+offset in the PSRAM rather than in the Flash.  The linker refuses it and says
+which call and which two addresses, so this is a build error and not something
+to find at run time; the fix is __attribute__((far)) on the callee as well.
+
 The pages are named by the script, not by crt0.S:
 
   __dpp0_page  __dpp1_page  __dpp2_page  __dpp3_page

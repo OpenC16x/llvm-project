@@ -27,6 +27,9 @@ far:
 ; CHECK: 10c: 0d 7f        jmpr cc_UC, 0x20c
         jmpr    cc_UC, 127
 
+; A branch that had to be relaxed keeps a relocation, and it is the one that
+; says the target has to be in the segment the branch is in - a JMPA takes its
+; segment from CSP and cannot change it.
 ; RELOC:      Section ({{.*}}) .rela.text {
-; RELOC-NEXT:   0x8 R_C166_SOF16 .text 0x10A
+; RELOC-NEXT:   0x8 R_C166_CADDR16 .text 0x10A
 ; RELOC-NEXT: }
