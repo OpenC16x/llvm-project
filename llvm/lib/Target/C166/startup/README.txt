@@ -115,6 +115,16 @@ offset in the PSRAM rather than in the Flash.  The linker refuses it and says
 which call and which two addresses, so this is a build error and not something
 to find at run time; the fix is __attribute__((far)) on the callee as well.
 
+That applies to the calls the compiler makes on its own as well as to the ones
+in the source, and those are the ones easy to be surprised by: the compiler-rt
+builtins are ordinary near functions in the Flash, so a routine in the PSRAM
+must not need one.  A 32 bit multiply and a shift by a constant are emitted
+inline and are fine.  A shift by a variable amount is __ashlsi3, a 32 bit
+division is __udivsi3, and anything in floating point or 64 bit arithmetic is a
+call as well.  A Flash-erase routine has no reason to do any of that, which is
+what makes the restriction bearable, but it is worth knowing before writing one
+- and again the linker says so rather than leaving it to run time.
+
 The pages are named by the script, not by crt0.S:
 
   __dpp0_page  __dpp1_page  __dpp2_page  __dpp3_page

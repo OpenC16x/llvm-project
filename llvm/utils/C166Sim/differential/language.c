@@ -54,11 +54,21 @@ static u32 classify(int c) {
 /* --- a function that runs from RAM ---------------------------------- */
 /* On the C166 this one is executed out of the PSRAM rather than the Flash,
    which is a different segment, so getting the same answer means the startup
-   copy, the inter-segment call and the return all worked. */
+   copy, the inter-segment call and the return all worked.
+   
+   It is also written under the constraint that comes with being there: a near
+   call reaches only the segment it is made from, and the compiler-rt builtins
+   are in the Flash, so code here must not need one.  A 32 bit multiply and a
+   shift by a constant are emitted inline and are fine; a shift by a variable
+   amount and a 32 bit division are calls to __ashlsi3 and __udivsi3 and are
+   not.  Getting that wrong used to link and then run away into the PSRAM; the
+   linker now refuses it, which is how this came to be written this way. */
 static PSRAMTEXT u32 ram_mix(u32 a, u32 b) {
   u32 t = a;
-  for (int i = 0; i < 8; i++)
-    t = t * 33 + (b >> (i & 15)) + (t >> 7);
+  for (int i = 0; i < 8; i++) {
+    t = t * 33 + b + (t >> 7);
+    b = (b << 3) ^ (b >> 5) ^ t;
+  }
   return t;
 }
 

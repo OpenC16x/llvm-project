@@ -377,12 +377,43 @@ not know stops the run and says so rather than doing something quietly wrong.
 Its differential tests are the useful part: each program is compiled twice,
 once for the C166 and once for the machine running the test, and the two
 outputs have to match.  That covers the backend, the compiler-rt builtins, the
-linker, crt0 and the simulator in one go.  Between them the two programs there
-cover every comparison over every pair of a set of awkward values, word and
-byte arithmetic including the overflow edges, shifts of every count, 32 and 64
-bit arithmetic and the libcalls under it, recursion, structures passed and
-returned by value, jump tables, varargs, the block functions including
-overlapping moves, and far objects.
+linker, crt0 and the simulator in one go.  The C166 side is built at every
+optimisation level, because an answer that depends on one has found something
+just as surely as an answer that is always wrong.
+
+  arithmetic.c  every comparison over every pair of a set of awkward values,
+                word and byte arithmetic including the overflow edges, shifts
+                of every count, and 32 bit arithmetic with the libcalls under
+                it
+  language.c    recursion, structures by value, jump tables, varargs, 64 bit
+                arithmetic, the block functions including overlapping moves,
+                far objects, and a function executed from the PSRAM
+  abi.c         how values get from one function to another: arguments past
+                the four that go in registers, in every width and mixed so
+                that a wide one straddles the boundary; structs by value at
+                every awkward size and nested; calls through a pointer;
+                varargs of every width and a va_list passed on; enough live
+                values across a call to need the callee saved registers and
+                the spill slots; mutual recursion; variable sized locals
+  bits.c        bit fields signed and unsigned at widths that do and do not
+                divide a byte, unions and type punning, conversions between
+                every pair of integer widths, byte work through pointers,
+                switches dense and sparse and on a char and over negative
+                values, and the control flow a structured statement does not
+                give
+  floating.c    every operation on both widths over zero, one, the denormals,
+                the largest and smallest normals and both infinities, with
+                every comparison; what a NaN does; conversion between the two
+                widths and between each and every integer type; and floating
+                point through the places a wide value has to travel
+
+Two things that suite says about the part rather than about the compiler.  A
+program that uses double precision has almost no near ROM left: the soft float
+builtins are about 44 KByte of the 48, so floating.c does not fit below -O2 and
+the harness reports that rather than counting it as a failure.  And code that
+runs from the PSRAM cannot call a compiler-rt builtin at all, since those are
+in the Flash and a near call does not leave its segment - which is why
+language.c's PSRAM function is written to need none.
 
 That is also what established the condition codes.  Table 5 of the instruction
 set manual, where the boolean form of each one is written down, did not survive
