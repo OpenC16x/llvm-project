@@ -35,12 +35,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build ccache
 
+      # ccache 3 kept its cache in ~/.ccache and ccache 4 keeps it in
+      # ~/.cache/ccache, so naming either one here depends on which version
+      # the runner image happens to have.  Say where it goes instead.
+      - name: Say where the compiler cache goes
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+          # ccache makes this when it first stores something, which is too
+          # late for a save that runs after a build that failed early.
+          mkdir -p "$HOME/.ccache"
+
       # A from scratch build of this is over an hour; with the cache warm it
       # is a few minutes.  The key moves with the compiler sources so that a
       # change to them does not reuse stale objects, and the restore key lets
       # a new key start from the last one rather than from nothing.
+      #
+      # Restoring and saving are separate steps because actions/cache does its
+      # saving in a post step marked post-if: success(), and a run that failed
+      # is exactly the one whose next attempt should not start from nothing.
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        id: ccache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.ccache
           key: c166-ccache-${{ github.sha }}
@@ -68,6 +84,19 @@ jobs:
             llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump llvm-symbolizer \
             llvm-ar llvm-ranlib llvm-size llvm-config c166-sim \
             FileCheck count not split-file
+
+      - name: Save the compiler cache
+        if: always() && steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: c166-ccache-${{ github.sha }}
+
+      # What the cache actually did, so that a run which quietly rebuilds
+      # everything says so rather than just taking an hour and a half.
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache -s
 
       # A tool the tests ask for and the build did not produce would otherwise
       # be found an hour in, as "command not found" in the middle of a run.
