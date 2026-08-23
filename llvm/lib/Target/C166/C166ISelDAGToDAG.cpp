@@ -46,6 +46,7 @@ public:
   // Complex pattern selectors.
   bool SelectAddrR(SDValue Addr, SDValue &Base);
   bool trySelectPostIncLoad(SDNode *Node);
+  bool trySelectBitRMW(SDNode *Node);
   bool SelectAddrRI(SDValue Addr, SDValue &Base, SDValue &Disp);
   bool SelectAddrAbs(SDValue Addr, SDValue &Address);
 
@@ -264,6 +265,89 @@ bool C166DAGToDAGISel::trySelectPostIncLoad(SDNode *Node) {
   return true;
 }
 
+/// A store of one bit changed in what was just loaded from the same
+/// bit-addressable word, which the machine does in a single instruction.
+///
+/// This is not only three instructions less.  The long form reads the word,
+/// changes the bit and writes it back, and an interrupt arriving in between
+/// reads the old word too - so whatever it sets in that word is thrown away by
+/// the write that follows.  Firmware sets peripheral bits from both sides all
+/// the time, and the loss is silent.  BSET and BCLR do their read and write as
+/// one indivisible bus operation, so there is nowhere for the interrupt to
+/// land.
+bool C166DAGToDAGISel::trySelectBitRMW(SDNode *Node) {
+  auto *St = cast<StoreSDNode>(Node);
+  if (!ISD::isNormalStore(St) || St->getMemoryVT() != MVT::i16 ||
+      St->isAtomic())
+    return false;
+
+  // What is stored has to be exactly one bit changed in some other value.
+  SDValue Val = St->getValue();
+  unsigned Opc = Val.getOpcode();
+  if (Opc != ISD::OR && Opc != ISD::AND)
+    return false;
+  auto *Mask = dyn_cast<ConstantSDNode>(Val.getOperand(1));
+  if (!Mask)
+    return false;
+  uint16_t Bits = static_cast<uint16_t>(Mask->getZExtValue());
+  if (Opc == ISD::AND)
+    Bits = ~Bits;
+  if (!isPowerOf2_32(Bits))
+    return false;
+
+  // That other value has to be a load, and nothing but this may be looking at
+  // it: the load is about to stop existing.
+  auto *Ld = dyn_cast<LoadSDNode>(Val.getOperand(0));
+  if (!Ld || !ISD::isNormalLoad(Ld) || Ld->getMemoryVT() != MVT::i16 ||
+      Ld->isAtomic())
+    return false;
+  if (!Val.hasOneUse() || !SDValue(Ld, 0).hasOneUse() ||
+      !Ld->hasNUsesOfValue(1, 1))
+    return false;
+
+  // The store has to be the next thing on the chain after the load, or fusing
+  // the two would move whatever sits between them across one of them.
+  if (St->getChain() != SDValue(Ld, 1))
+    return false;
+
+  // A volatile word keeps both of its accesses: the instruction still reads it
+  // and writes it back, in that order.  What it loses is the gap.  Mixing a
+  // volatile access with a plain one would change one of them, though.
+  if (Ld->isVolatile() != St->isVolatile())
+    return false;
+
+  // Both have to name the same bit-addressable word.
+  SDValue LdBase, StBase;
+  int64_t LdOffset, StOffset;
+  if (!matchAbsoluteAddress(*CurDAG, Ld->getBasePtr(), LdBase, LdOffset) ||
+      !matchAbsoluteAddress(*CurDAG, St->getBasePtr(), StBase, StOffset))
+    return false;
+  auto *LdC = dyn_cast<ConstantSDNode>(LdBase);
+  auto *StC = dyn_cast<ConstantSDNode>(StBase);
+  if (!LdC || !StC)
+    return false;
+  uint16_t LdAddr = LdC->getZExtValue() + LdOffset;
+  uint16_t StAddr = StC->getZExtValue() + StOffset;
+  if (LdAddr != StAddr)
+    return false;
+
+  int BitOff = C166::getBitOffForAddress(LdAddr);
+  if (BitOff < 0)
+    return false;
+
+  SDLoc DL(Node);
+  SDValue Ops[] = {CurDAG->getTargetConstant(BitOff, DL, MVT::i16),
+                   CurDAG->getTargetConstant(Log2_32(Bits), DL, MVT::i16),
+                   Ld->getChain()};
+  MachineSDNode *New = CurDAG->getMachineNode(
+      Opc == ISD::OR ? C166::BSET : C166::BCLR, DL, MVT::Other, Ops);
+  CurDAG->setNodeMemRefs(New, {St->getMemOperand(), Ld->getMemOperand()});
+
+  ReplaceUses(SDValue(St, 0), SDValue(New, 0));
+  CurDAG->RemoveDeadNode(St);
+  return true;
+}
+
 void C166DAGToDAGISel::Select(SDNode *Node) {
   SDLoc DL(Node);
 
@@ -278,6 +362,13 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
     // A post-incrementing load writes the stepped pointer back as well as the
     // value, which no pattern describes, so it is selected by hand.
     if (trySelectPostIncLoad(Node))
+      return;
+    break;
+  case ISD::STORE:
+    // A read-modify-write of one bit of a bit-addressable word is one
+    // instruction, and no pattern can say so: it has to see that the load and
+    // the store name the same place.
+    if (trySelectBitRMW(Node))
       return;
     break;
   case ISD::FrameIndex: {

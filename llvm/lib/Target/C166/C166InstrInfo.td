@@ -1535,6 +1535,9 @@ def EINIT  : ProtectedInst<0xB5, 0x4A, 0xB5, 0xB5, "einit">;
 //===----------------------------------------------------------------------===//
 
 // BCLR and BSET put the bit position in the high nibble of the opcode byte.
+// They read and write the word they name, which for a bitoff below F0H is
+// memory - one indivisible bus operation, which is the whole point of them.
+let mayLoad = 1, mayStore = 1 in
 class BitSetClear<bits<4> op, string mnemonic>
     : C166Inst<(outs), (ins bitaddr:$addr), 2,
                !strconcat(mnemonic, "\t$addr"), []> {

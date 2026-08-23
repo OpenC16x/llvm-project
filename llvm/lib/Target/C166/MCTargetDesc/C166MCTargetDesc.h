@@ -59,6 +59,22 @@ constexpr bool isSFRBitAddressable(uint8_t Short) {
   return Short >= 0x80 && getSFRAddressForShort(Short) <= 0xFFDE;
 }
 
+/// The bitoff naming the word at absolute address \p Addr, or -1 if no bit
+/// instruction can reach it.  Two windows are bit-addressable: internal RAM
+/// from FD00H to FDFEH and the special function registers from FF00H to FFDEH.
+/// Both are word addresses, so an odd one names no bit-addressable word at
+/// all.  The extended registers are left out on purpose: reaching one needs an
+/// EXTR prefix, which is not the same instruction any more.
+constexpr int getBitOffForAddress(uint16_t Addr) {
+  if (Addr & 1)
+    return -1;
+  if (Addr >= 0xFD00 && Addr <= 0xFDFE)
+    return (Addr - 0xFD00) / 2;
+  if (Addr >= 0xFF00 && Addr <= 0xFFDE)
+    return 0x80 + (Addr - 0xFF00) / 2;
+  return -1;
+}
+
 /// Where the extended special function register with short address \p Short is
 /// mapped.  The extended space holds a second set of registers at the same
 /// short addresses, from different bases.
