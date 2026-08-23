@@ -129,6 +129,87 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   switch (MI.getOpcode()) {
   default:
     return false;
+  case C166::ATOMADD16:
+  case C166::ATOMSUB16:
+  case C166::ATOMAND16:
+  case C166::ATOMOR16:
+  case C166::ATOMXOR16:
+  case C166::ATOMADD8:
+  case C166::ATOMSUB8:
+  case C166::ATOMAND8:
+  case C166::ATOMOR8:
+  case C166::ATOMXOR8:
+  case C166::ATOMSWAP16:
+  case C166::ATOMSWAP8: {
+    // ATOMIC #n holds interrupts and PEC transfers off for the next n
+    // instructions, so what follows has to be exactly the n instructions
+    // counted here: a read, the change, and the write back.  Nothing in it
+    // changes the program flow and nothing in it is an EXTend, which are the
+    // two things the single instruction counter cannot survive.
+    bool Swap = MI.getOpcode() == C166::ATOMSWAP16 ||
+                MI.getOpcode() == C166::ATOMSWAP8;
+    bool Byte = MI.getOpcode() == C166::ATOMADD8 ||
+                MI.getOpcode() == C166::ATOMSUB8 ||
+                MI.getOpcode() == C166::ATOMAND8 ||
+                MI.getOpcode() == C166::ATOMOR8 ||
+                MI.getOpcode() == C166::ATOMXOR8 ||
+                MI.getOpcode() == C166::ATOMSWAP8;
+
+    Register Dst = MI.getOperand(0).getReg();
+    Register Tmp = Swap ? Register() : MI.getOperand(1).getReg();
+    Register Addr = MI.getOperand(Swap ? 1 : 2).getReg();
+    Register Val = MI.getOperand(Swap ? 2 : 3).getReg();
+
+    unsigned LoadOpc = Byte ? C166::MOVB8rp : C166::MOV16rp;
+    unsigned StoreOpc = Byte ? C166::MOVB8pr : C166::MOV16pr;
+    unsigned CopyOpc = Byte ? C166::MOVB8rr : C166::MOV16rr;
+
+    unsigned AluOpc = 0;
+    switch (MI.getOpcode()) {
+    case C166::ATOMADD16:
+      AluOpc = C166::ADD16rr;
+      break;
+    case C166::ATOMSUB16:
+      AluOpc = C166::SUB16rr;
+      break;
+    case C166::ATOMAND16:
+      AluOpc = C166::AND16rr;
+      break;
+    case C166::ATOMOR16:
+      AluOpc = C166::OR16rr;
+      break;
+    case C166::ATOMXOR16:
+      AluOpc = C166::XOR16rr;
+      break;
+    case C166::ATOMADD8:
+      AluOpc = C166::ADDB8rr;
+      break;
+    case C166::ATOMSUB8:
+      AluOpc = C166::SUBB8rr;
+      break;
+    case C166::ATOMAND8:
+      AluOpc = C166::ANDB8rr;
+      break;
+    case C166::ATOMOR8:
+      AluOpc = C166::ORB8rr;
+      break;
+    case C166::ATOMXOR8:
+      AluOpc = C166::XORB8rr;
+      break;
+    }
+
+    // An exchange is a read and a write; anything else copies what it read so
+    // that the old value survives the change, and is four.
+    Emit(C166::ATOMIC).addImm(Swap ? 2 : 4);
+    Emit(LoadOpc).addReg(Dst, RegState::Define).addReg(Addr);
+    if (!Swap) {
+      Emit(CopyOpc).addReg(Tmp, RegState::Define).addReg(Dst);
+      Emit(AluOpc).addReg(Tmp, RegState::Define).addReg(Tmp).addReg(Val);
+    }
+    Emit(StoreOpc).addReg(Addr).addReg(Swap ? Val : Tmp);
+    MI.eraseFromParent();
+    return true;
+  }
   case C166::BRCC16rr:
   case C166::BRCC16ri:
   case C166::BRCC8rr:

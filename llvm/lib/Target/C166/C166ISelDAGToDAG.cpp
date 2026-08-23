@@ -48,6 +48,7 @@ public:
   bool trySelectPostIncLoad(SDNode *Node);
   bool trySelectBitRMW(SDNode *Node);
   bool trySelectBitBranch(SDNode *Node);
+  bool trySelectAtomicRMW(SDNode *Node);
   bool SelectAddrRI(SDValue Addr, SDValue &Base, SDValue &Disp);
   bool SelectAddrAbs(SDValue Addr, SDValue &Address);
 
@@ -457,6 +458,68 @@ bool C166DAGToDAGISel::trySelectBitBranch(SDNode *Node) {
   return true;
 }
 
+/// An atomic read-modify-write, which becomes ATOMIC over a load, an
+/// operation and a store.
+///
+/// It stays one instruction until after register allocation.  ATOMIC counts
+/// instructions rather than marking a region, so a spill dropped into the
+/// middle by the allocator would not merely lengthen the sequence - it would
+/// push the store out from under the count, and the write back would be
+/// interruptible again with nothing to say so.
+///
+/// The scratch the sequence needs is a second result of the pseudo, so it is a
+/// register the allocator handed out.  That is what a tablegen pattern cannot
+/// describe here, since the DAG node has one result and the instruction has
+/// two, and why this is selected by hand.
+bool C166DAGToDAGISel::trySelectAtomicRMW(SDNode *Node) {
+  auto *AN = cast<AtomicSDNode>(Node);
+  MVT VT = AN->getMemoryVT().getSimpleVT();
+  if (VT != MVT::i8 && VT != MVT::i16)
+    return false;
+  bool Byte = VT == MVT::i8;
+
+  unsigned Opc;
+  switch (Node->getOpcode()) {
+  case ISD::ATOMIC_LOAD_ADD:
+    Opc = Byte ? C166::ATOMADD8 : C166::ATOMADD16;
+    break;
+  case ISD::ATOMIC_LOAD_SUB:
+    Opc = Byte ? C166::ATOMSUB8 : C166::ATOMSUB16;
+    break;
+  case ISD::ATOMIC_LOAD_AND:
+    Opc = Byte ? C166::ATOMAND8 : C166::ATOMAND16;
+    break;
+  case ISD::ATOMIC_LOAD_OR:
+    Opc = Byte ? C166::ATOMOR8 : C166::ATOMOR16;
+    break;
+  case ISD::ATOMIC_LOAD_XOR:
+    Opc = Byte ? C166::ATOMXOR8 : C166::ATOMXOR16;
+    break;
+  case ISD::ATOMIC_SWAP:
+    Opc = Byte ? C166::ATOMSWAP8 : C166::ATOMSWAP16;
+    break;
+  default:
+    return false;
+  }
+
+  SDLoc DL(Node);
+  SDValue Ops[] = {AN->getBasePtr(), AN->getVal(), AN->getChain()};
+  MachineSDNode *New;
+  if (Node->getOpcode() == ISD::ATOMIC_SWAP) {
+    New = CurDAG->getMachineNode(Opc, DL, VT, MVT::Other, Ops);
+    ReplaceUses(SDValue(Node, 0), SDValue(New, 0));
+    ReplaceUses(SDValue(Node, 1), SDValue(New, 1));
+  } else {
+    // Result 1 is the scratch, which nothing outside the sequence reads.
+    New = CurDAG->getMachineNode(Opc, DL, VT, VT, MVT::Other, Ops);
+    ReplaceUses(SDValue(Node, 0), SDValue(New, 0));
+    ReplaceUses(SDValue(Node, 1), SDValue(New, 2));
+  }
+  CurDAG->setNodeMemRefs(New, {AN->getMemOperand()});
+  CurDAG->RemoveDeadNode(Node);
+  return true;
+}
+
 void C166DAGToDAGISel::Select(SDNode *Node) {
   SDLoc DL(Node);
 
@@ -471,6 +534,15 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
     // A post-incrementing load writes the stepped pointer back as well as the
     // value, which no pattern describes, so it is selected by hand.
     if (trySelectPostIncLoad(Node))
+      return;
+    break;
+  case ISD::ATOMIC_LOAD_ADD:
+  case ISD::ATOMIC_LOAD_SUB:
+  case ISD::ATOMIC_LOAD_AND:
+  case ISD::ATOMIC_LOAD_OR:
+  case ISD::ATOMIC_LOAD_XOR:
+  case ISD::ATOMIC_SWAP:
+    if (trySelectAtomicRMW(Node))
       return;
     break;
   case C166ISD::BR_CC:

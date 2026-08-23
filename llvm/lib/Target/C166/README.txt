@@ -694,3 +694,50 @@ Known limitations / things to do
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
   same as a part agreeing with both.
+
+Atomics
+-------
+
+Atomics up to a word are instructions rather than library calls.  A byte, or a
+word at an even address, crosses the bus in one cycle, so an atomic load or
+store of one is already indivisible and is the ordinary MOV; the ordering asked
+for needs nothing either, because this is one core with no store buffer and no
+cache, so what an interrupt handler sees is whatever the last instruction to
+retire left behind.
+
+Changing a word is not indivisible, and ATOMIC is what makes it so: it holds
+interrupts and PEC transfers off for the next 1 to 4 instructions, which is
+exactly long enough to read a word, copy it so the old value survives, change
+it, and write it back.  Add, subtract, and, or, xor and exchange fit; an
+exchange needs no copy and no arithmetic, so it is two instructions rather than
+four.  NAND is an AND and a complement, and the minimum and maximum need a
+comparison and a choice, so those go round a compare and exchange loop instead,
+which is longer per turn but has no count to overrun.
+
+The sequences stay one instruction until after register allocation.  ATOMIC
+counts instructions rather than marking a region, so a spill dropped into the
+middle would not merely lengthen the sequence, it would push the write out from
+under the count and leave it interruptible with nothing to say so.
+
+A compare and exchange stores only when what it read matched, so it branches,
+and a branch is one of the two things a sequence must not contain.  That one
+clears PSW.IEN instead and puts the whole word back afterwards, which restores
+the bit along with flags that are dead by then - the only reader was the branch
+above.  Having no counter is also why that one is built before register
+allocation: a spill landing inside only makes the window longer.
+
+Caveats the hardware imposes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The single instruction counter is shared with the EXTend instructions, and it
+keeps counting whatever runs next.  So a sequence must contain nothing that
+changes the flow - the rest of the count goes with it, protecting instructions
+nobody meant to protect and leaving the ones that needed it uncovered - and
+nothing that extends again, which overwrites the count still in use.
+
+That is a rule the compiler has to remember, so it is held to it: the simulator
+stops with an error if a sequence ever reaches either kind of instruction, and
+every program the differential suite runs goes through that check.
+
+An atomic on a far pointer is refused with a diagnostic.  Reaching one needs an
+EXTend, and an ATOMIC sequence has no counter left to give it.

@@ -88,6 +88,19 @@ public:
   bool isLegalICmpImmediate(int64_t Imm) const override;
   bool isLegalAddImmediate(int64_t Imm) const override;
 
+  AtomicExpansionKind
+  shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const override;
+
+  AtomicExpansionKind
+  shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *CI) const override;
+
+  AtomicExpansionKind shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
+
+  AtomicExpansionKind shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
+
+  MachineBasicBlock *emitCmpXchg(MachineInstr &MI,
+                                 MachineBasicBlock *BB) const;
+
   MachineBasicBlock *
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *BB) const override;

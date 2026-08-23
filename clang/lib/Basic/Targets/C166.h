@@ -52,6 +52,12 @@ public:
     // what a signal handler can safely touch.
     SigAtomicType = SignedInt;
 
+    // A byte or an aligned word is one bus cycle, and ATOMIC covers the read,
+    // the change and the write back of one, so up to a word is lock free.
+    // Anything wider is a library call, which is what the default of zero was
+    // making even a word into.
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 16;
+
     resetDataLayout();
   }
 

@@ -1952,3 +1952,117 @@ def : Pat<(store (i16 (C166Wrapper tglobaladdr:$src)), addrri:$dst),
           (MOV16mr addrri:$dst, (MOV16ri tglobaladdr:$src))>;
 def : Pat<(store (i16 (C166Wrapper tglobaladdr:$src)), addrabs:$dst),
           (MOV16ar addrabs:$dst, (MOV16ri tglobaladdr:$src))>;
+
+//===----------------------------------------------------------------------===//
+// Atomic Load and Store
+//===----------------------------------------------------------------------===//
+//
+// A byte, or a word at an even address, crosses the bus in one cycle, so
+// nothing can catch one half written and an atomic load or store of one is the
+// ordinary instruction.  The ordering asked for needs nothing either: this is
+// one core with no store buffer and no cache, so what an interrupt handler
+// sees is whatever the last instruction to retire left behind.
+
+// [Rw] on its own is two bytes where [Rw + #0] is four, so it is preferred
+// here for the same reason the ordinary load and store prefer it.
+let AddedComplexity = 10 in {
+def : Pat<(i16 (atomic_load_16 addrr:$src)), (MOV16rp addrr:$src)>;
+def : Pat<(i8 (atomic_load_8 addrr:$src)),   (MOVB8rp addrr:$src)>;
+def : Pat<(atomic_store_16 GR16:$src, addrr:$dst), (MOV16pr addrr:$dst, GR16:$src)>;
+def : Pat<(atomic_store_8 GR8:$src, addrr:$dst),   (MOVB8pr addrr:$dst, GR8:$src)>;
+}
+
+def : Pat<(i16 (atomic_load_16 addrri:$src)),  (MOV16rm addrri:$src)>;
+def : Pat<(i16 (atomic_load_16 addrabs:$src)), (MOV16ra addrabs:$src)>;
+def : Pat<(i8 (atomic_load_8 addrri:$src)),  (MOVB8rm addrri:$src)>;
+def : Pat<(i8 (atomic_load_8 addrabs:$src)), (MOVB8ra addrabs:$src)>;
+
+def : Pat<(atomic_store_16 GR16:$src, addrri:$dst),  (MOV16mr addrri:$dst, GR16:$src)>;
+def : Pat<(atomic_store_16 GR16:$src, addrabs:$dst), (MOV16ar addrabs:$dst, GR16:$src)>;
+def : Pat<(atomic_store_8 GR8:$src, addrri:$dst),  (MOVB8mr addrri:$dst, GR8:$src)>;
+def : Pat<(atomic_store_8 GR8:$src, addrabs:$dst), (MOVB8ar addrabs:$dst, GR8:$src)>;
+
+//===----------------------------------------------------------------------===//
+// Atomic Read-Modify-Write
+//===----------------------------------------------------------------------===//
+//
+// ATOMIC #n holds off interrupts and PEC transfers for the next 1 to 4
+// instructions, which is exactly long enough to read a word, change it and
+// write it back.  Nothing else on this part gives that: without it a
+// read-modify-write is a window an interrupt can land in, and the handler's
+// change is lost.
+//
+// These stay one instruction until after register allocation so that nothing
+// can be scheduled into the middle of the sequence, and so that the scratch
+// the sequence needs is a register the allocator handed out rather than one
+// picked here.  What they expand into is in expandPostRAPseudo().
+//
+// Two rules the sequence has to obey, both from the single instruction counter
+// the hardware keeps: nothing inside it may change the program flow, and
+// nothing inside it may be an EXTend.  The second is why a far pointer is
+// turned away in C166TargetLowering rather than handled here - reaching one
+// needs the EXTend that would take the counter over.
+// The scratch is a second result rather than a fixed register, so the
+// allocator hands one out; that is also why these carry no pattern and are
+// selected by hand in C166ISelDAGToDAG.cpp - a tablegen pattern has to account
+// for every result, and this one has a result the DAG node does not.
+let mayLoad = 1, mayStore = 1, Defs = [PSW],
+    Constraints = "@earlyclobber $dst,@earlyclobber $tmp" in {
+class AtomicRMW16
+    : Pseudo<(outs GR16:$dst, GR16:$tmp), (ins GR16:$addr, GR16:$val),
+             "#atomic-rmw", []>;
+
+class AtomicRMW8
+    : Pseudo<(outs GR8:$dst, GR8:$tmp), (ins GR16:$addr, GR8:$val),
+             "#atomic-rmw", []>;
+}
+
+def ATOMADD16 : AtomicRMW16;
+def ATOMSUB16 : AtomicRMW16;
+def ATOMAND16 : AtomicRMW16;
+def ATOMOR16  : AtomicRMW16;
+def ATOMXOR16 : AtomicRMW16;
+
+def ATOMADD8 : AtomicRMW8;
+def ATOMSUB8 : AtomicRMW8;
+def ATOMAND8 : AtomicRMW8;
+def ATOMOR8  : AtomicRMW8;
+def ATOMXOR8 : AtomicRMW8;
+
+// An exchange needs no scratch and no arithmetic: read the word, write the new
+// one over it.  Two instructions rather than four.
+let mayLoad = 1, mayStore = 1, Constraints = "@earlyclobber $dst" in {
+def ATOMSWAP16 : Pseudo<(outs GR16:$dst), (ins GR16:$addr, GR16:$val),
+                        "#atomic-swap", []>;
+def ATOMSWAP8 : Pseudo<(outs GR8:$dst), (ins GR16:$addr, GR8:$val),
+                       "#atomic-swap", []>;
+}
+
+//===----------------------------------------------------------------------===//
+// Atomic Compare and Exchange
+//===----------------------------------------------------------------------===//
+//
+// A compare and exchange stores only when what it read matches, so it needs a
+// branch, and a branch is one of the two things an ATOMIC sequence cannot
+// contain: the instruction counter keeps running across it and the count no
+// longer describes the code it covers.
+//
+// So this one holds interrupts off the documented way instead, by clearing
+// PSW.IEN and putting back what was there afterwards.  There is no counter
+// involved, which is also why this one can be built before register
+// allocation: a spill landing inside only makes the window longer, where in an
+// ATOMIC sequence it would push the write out from under the count.
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1, Defs = [PSW] in {
+def CMPXCHG16 : Pseudo<(outs GR16:$dst),
+                       (ins GR16:$addr, GR16:$cmp, GR16:$new),
+                       "#cmpxchg",
+                       [(set GR16:$dst, (atomic_cmp_swap_i16 GR16:$addr,
+                                                             GR16:$cmp,
+                                                             GR16:$new))]>;
+def CMPXCHG8 : Pseudo<(outs GR8:$dst),
+                      (ins GR16:$addr, GR8:$cmp, GR8:$new),
+                      "#cmpxchg",
+                      [(set GR8:$dst, (atomic_cmp_swap_i8 GR16:$addr,
+                                                          GR8:$cmp,
+                                                          GR8:$new))]>;
+}

@@ -482,10 +482,65 @@ uint32_t reg8Address(Machine &M, const MCRegisterInfo &MRI, MCRegister R) {
   return M.regFieldAddress(MRI.getEncodingValue(R));
 }
 
+/// The two things a sequence covered by ATOMIC or an EXTend must not contain.
+///
+/// The hardware keeps one instruction counter and it keeps counting whatever
+/// runs next.  An instruction that changes the flow carries the rest of the
+/// count off to wherever it goes, so the protection lands on instructions
+/// nobody meant to protect and stops covering the ones that needed it; a
+/// second extend overwrites the count the first one was still using.  The
+/// manual says not to do either.  This says so out loud when it happens,
+/// which turns a rule the compiler has to remember into one it is held to.
+static bool breaksExtendSequence(Op O) {
+  switch (O) {
+  case Op::JMPA:
+  case Op::JMPAcc:
+  case Op::JMPR:
+  case Op::JMPRcc:
+  case Op::JMPI:
+  case Op::JMPS:
+  case Op::JB:
+  case Op::JNB:
+  case Op::JBC:
+  case Op::JNBS:
+  case Op::CALLA:
+  case Op::CALLI:
+  case Op::CALLS:
+  case Op::TRAP:
+  case Op::RET:
+  case Op::RETI:
+  case Op::RETS:
+  case Op::EXTSi:
+  case Op::EXTSr:
+  case Op::EXTSRi:
+  case Op::EXTSRr:
+  case Op::EXTPi:
+  case Op::EXTPr:
+  case Op::EXTPRi:
+  case Op::EXTPRr:
+  case Op::EXTR:
+  case Op::ATOMIC:
+    return true;
+  default:
+    return false;
+  }
+}
+
 void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   Decoder &D = decoder();
   const MCRegisterInfo &MRI = *D.MRI;
   Executor E(M);
+
+  // A non-zero count means this instruction is one an ATOMIC or an EXTend is
+  // covering, and there are two kinds it must not be.
+  if (M.ExtendCount > 0 && breaksExtendSequence(O)) {
+    M.Stop = StopReason::BadSequence;
+    M.StopDetail =
+        (Twine("an ATOMIC or EXTend sequence reaches the instruction at ") +
+         addrStr(PC) + ", which changes the flow or extends again")
+            .str();
+    return;
+  }
 
   auto NumOps = MI.getNumOperands();
   auto Reg = [&](unsigned I) { return MI.getOperand(I).getReg(); };
