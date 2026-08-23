@@ -21,6 +21,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/WithColor.h"

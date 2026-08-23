@@ -43,6 +43,31 @@ instance - and looking at the walk is what tests it.
   #1 c0c006 in farmid at prog.c:3
   #2 c0010e in outer at prog.c:4
 
+The tests
+---------
+
+differential/ holds the programs that get compiled twice - once for the C166
+and run here, once for the host and run natively - with the two outputs
+compared.  It is what checks the backend, the builtins, the linker, crt0 and
+this simulator together, which is as close to running on the part as anything
+here gets.
+
+  mksysroot.sh   builds crt0.o, libc.a and the compiler-rt builtins, which a
+                 program has to link against and the LLVM build does not make
+  run.sh         the hand written programs, at every optimisation level
+  generate.py    emits a program from a seed
+  fuzz.sh        sweeps seeds through the same comparison
+  roundtrip.sh   checks that what the compiler writes assembles back to the
+                 bytes it emitted directly
+
+All of it runs in CI - .github/workflows/c166.yml - and all of it can be run by
+hand, which is what the arguments to each script are for.  A seed that
+disagrees is reproduced with one command:
+
+  generate.py --seed 110 > seed110.c
+
+and made smaller with --depth, --statements and --functions.
+
 Debugging a program
 -------------------
 

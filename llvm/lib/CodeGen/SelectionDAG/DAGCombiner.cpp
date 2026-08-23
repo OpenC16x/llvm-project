@@ -31128,6 +31128,13 @@ SDValue DAGCombiner::foldSelectOfBinops(SDNode *N) {
       (N1.getResNo() != N2.getResNo()))
     return SDValue();
 
+  // Both folds below rebuild the binop from exactly two operands, so anything
+  // that has more of them cannot go through here: the legacy carry opcodes
+  // ADDE and SUBE take a carry in as a third, and rebuilding one without it
+  // produces a node that is malformed rather than merely wrong.
+  if (N1->getNumOperands() != 2 || N2->getNumOperands() != 2)
+    return SDValue();
+
   // The use checks are intentionally on SDNode because we may be dealing
   // with opcodes that produce more than one SDValue.
   if (!N1->hasOneUse() || !N2->hasOneUse())

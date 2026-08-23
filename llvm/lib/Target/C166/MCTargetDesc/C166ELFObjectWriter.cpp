@@ -9,6 +9,7 @@
 #include "MCTargetDesc/C166FixupKinds.h"
 #include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixup.h"
