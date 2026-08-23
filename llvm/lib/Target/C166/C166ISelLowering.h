@@ -73,6 +73,7 @@ public:
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerShiftParts(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFarSymbol(SDValue Op, SelectionDAG &DAG) const;
 
   ConstraintType getConstraintType(StringRef Constraint) const override;

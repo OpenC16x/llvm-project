@@ -205,6 +205,29 @@ not something to do further arithmetic on.
 Caveats the hardware imposes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Wide shifts
+-----------
+
+A shift of a value two words wide by an amount only known at run time is
+expanded inline rather than becoming a call to __ashlsi3 and its relatives.
+The shift instructions take their count from a register, so the pieces are
+there; what has to be worked around is that the count is read as its low four
+bits, which makes a shift by sixteen a shift by nothing.
+
+The obvious expansion brings the bits that cross between the halves over with
+a shift by "16 - amount", and that is wrong at an amount of zero: instead of
+contributing nothing it contributes the whole word.  Shifting by "15 - amount"
+and then once more is right there and the same everywhere else, and costs one
+instruction rather than a test and a branch.
+
+The same masking is useful in the other direction.  When the amount is sixteen
+or more the answer is one half shifted by "amount - 16", and the hardware is
+already reading the count modulo sixteen, so that is the same instruction the
+small case needs, computed once and used twice.
+
+Which half ends up where is then two selects on bit 4 of the amount.  A 32 bit
+division is still a call.
+
 EXTS does not exist on the SAB 8XC166(W) devices, and no subtarget feature
 guards that yet.  Inside a class A or class B trap handler the EXTend
 instructions do nothing while a class B trap flag is set, so a far access in
