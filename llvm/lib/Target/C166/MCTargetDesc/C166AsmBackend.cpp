@@ -42,6 +42,7 @@ public:
         // name                      offset bits flags
         {"fixup_c166_rel8w", 0, 8, 0},
         {"fixup_c166_rel8w_short", 0, 8, 0},
+        {"fixup_c166_caddr", 0, 16, 0},
     };
     static_assert(std::size(Infos) == C166::NumTargetFixupKinds,
                   "Not all fixup kinds added to Infos array");

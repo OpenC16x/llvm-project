@@ -41,6 +41,19 @@ public:
   void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
                             RegScavenger *RS) const override;
 
+  /// Say where the callee saved registers went, so that a debugger can put
+  /// back the caller's copies rather than only naming the frame.
+  void emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI,
+                                 const DebugLoc &DL) const;
+
+  /// Emit the rules that say where the return address is and how to get back
+  /// to the caller's hardware stack pointer, given that \p Depth bytes have
+  /// been pushed onto that stack since the function was entered.
+  void emitUnwindRules(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                       const DebugLoc &DL, unsigned Depth,
+                       MachineInstr::MIFlag Flag) const;
+
   bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator MI,
                                  ArrayRef<CalleeSavedInfo> CSI,

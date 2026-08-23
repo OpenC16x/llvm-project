@@ -39,6 +39,7 @@ llvm_config.use_lld()
 config.substitutions.append(("%llvm_src_root", config.llvm_src_root))
 
 tool_patterns = [
+    "c166-sim",
     "llc",
     "llvm-as",
     "llvm-cgdata",

@@ -18,9 +18,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "InputSection.h"
+#include "OutputSections.h"
 #include "Symbols.h"
 #include "Target.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Endian.h"
 
 using namespace llvm;
@@ -38,6 +41,7 @@ public:
                      const uint8_t *loc) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
+  void relocateAlloc(InputSection &sec, uint8_t *buf) const override;
 };
 } // namespace
 
@@ -105,6 +109,12 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     // there is nothing to check.
     write16le(loc, val & 0xffff);
     break;
+  case R_C166_CADDR16:
+    // The same field, for a branch or call that does not leave the segment.
+    // Whether it should have is checked in relocateAlloc below, which is where
+    // the address of the instruction itself is known.
+    write16le(loc, val & 0xffff);
+    break;
   case R_C166_PAG10:
     // The page is bits 23 to 14 of the address, in the low ten bits of the
     // word; the six above it belong to the instruction.
@@ -117,6 +127,42 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     break;
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << rel.type;
+  }
+}
+
+// JMPA and CALLA take their segment from CSP, so they reach the segment the
+// instruction is in and no other.  Nothing in the instruction says which one
+// that is, and a target somewhere else is not diagnosed by anything else: the
+// sixteen bits that fit are written, the branch goes to that offset in the
+// wrong segment, and the program runs somewhere it was never meant to.
+//
+// It is a real way to get there rather than a theoretical one.  A function
+// placed in the PSRAM at E0'0000H - which is what that memory is for, and what
+// a routine that rewrites the Flash has to do - calls an ordinary function in
+// the Flash at C0'xxxxH with a CALLA, and the call lands in the PSRAM instead.
+// So the only fix is that such a call must not be near, and the only place that
+// can be seen is here.
+//
+// The relocation exists to carry that question this far; everything else about
+// it is R_C166_SOF16.
+void C166::relocateAlloc(InputSection &sec, uint8_t *buf) const {
+  const uint64_t secAddr = sec.getOutputSection()->addr + sec.outSecOff;
+  for (const Relocation &rel : sec.relocs()) {
+    uint8_t *loc = buf + rel.offset;
+    const uint64_t p = secAddr + rel.offset;
+    const uint64_t val = SignExtend64(sec.getRelocTargetVA(ctx, rel, p), 32);
+
+    if (rel.type == R_C166_CADDR16 && (val >> 16) != (p >> 16))
+      Err(ctx) << getErrorLoc(ctx, loc) << "branch or call to "
+               << (rel.sym ? rel.sym->getName() : StringRef("target"))
+               << " leaves the segment it is in: the target is at "
+               << utohexstr(val, /*LowerCase=*/true) << " and the instruction "
+               << "at " << utohexstr(p, /*LowerCase=*/true)
+               << ", and this form of branch cannot change segments - a call "
+                  "out of one segment into another has to be a far one";
+
+    if (rel.expr != R_RELAX_HINT)
+      relocate(loc, rel, val);
   }
 }
 

@@ -72,9 +72,17 @@ define i16 @not_in_tail_position(i16 %a) {
 define i16 @from_interrupt(i16 %a) #0 {
 ; CHECK-LABEL: from_interrupt:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    push mdc
 ; CHECK-NEXT:    push mdl
 ; CHECK-NEXT:    push mdh
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x08, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x06, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x0c ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x08 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x0a ; caller's PSW
 ; CHECK-NEXT:    sub r0, #20
 ; CHECK-NEXT:    .cfi_def_cfa_offset 20
 ; CHECK-NEXT:    mov [r0+#18], r2 ; 2-byte Folded Spill
@@ -87,6 +95,16 @@ define i16 @from_interrupt(i16 %a) #0 {
 ; CHECK-NEXT:    mov [r0+#4], r9 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0+#2], r10 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0], r11 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r2, -2
+; CHECK-NEXT:    .cfi_offset r3, -4
+; CHECK-NEXT:    .cfi_offset r4, -6
+; CHECK-NEXT:    .cfi_offset r5, -8
+; CHECK-NEXT:    .cfi_offset r6, -10
+; CHECK-NEXT:    .cfi_offset r7, -12
+; CHECK-NEXT:    .cfi_offset r8, -14
+; CHECK-NEXT:    .cfi_offset r9, -16
+; CHECK-NEXT:    .cfi_offset r10, -18
+; CHECK-NEXT:    .cfi_offset r11, -20
 ; CHECK-NEXT:    mov r3, #1
 ; CHECK-NEXT:    calla cc_UC, callee
 ; CHECK-NEXT:    mov r11, [r0] ; 2-byte Folded Reload
@@ -104,6 +122,10 @@ define i16 @from_interrupt(i16 %a) #0 {
 ; CHECK-NEXT:    pop mdh
 ; CHECK-NEXT:    pop mdl
 ; CHECK-NEXT:    pop mdc
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
+; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
 ; CHECK-NEXT:    reti
   %r = tail call i16 @callee(i16 %a, i16 1)
   ret i16 %r
@@ -146,6 +168,9 @@ define i16 @to_far(i16 %a) {
 define i16 @from_far(i16 %a) #1 {
 ; CHECK-LABEL: from_far:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x04 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
 ; CHECK-NEXT:    mov r3, #1
 ; CHECK-NEXT:    calla cc_UC, callee
 ; CHECK-NEXT:    rets
@@ -160,6 +185,9 @@ declare i16 @far_many(i16, i16, i16, i16, i16, i16) #1
 define i16 @far_to_far(i16 %a) #1 {
 ; CHECK-LABEL: far_to_far:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x04 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
 ; CHECK-NEXT:    jmps #seg(far_callee), sof(far_callee)
   %r = tail call i16 @far_callee(i16 %a)
   ret i16 %r
@@ -170,6 +198,9 @@ define i16 @far_to_far(i16 %a) #1 {
 define i16 @far_indirect(ptr %f, i16 %a) #1 {
 ; CHECK-LABEL: far_indirect:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x04 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
 ; CHECK-NEXT:    mov r4, r2
 ; CHECK-NEXT:    mov r2, r3
 ; CHECK-NEXT:    calli cc_UC, [r4]
@@ -181,6 +212,9 @@ define i16 @far_indirect(ptr %f, i16 %a) #1 {
 define i16 @far_stack_arguments(i16 %a) #1 {
 ; CHECK-LABEL: far_stack_arguments:
 ; CHECK:       ; %bb.0:
+; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
+; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x04 ; caller's hardware stack pointer
+; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
 ; CHECK-NEXT:    sub r0, #4
 ; CHECK-NEXT:    .cfi_def_cfa_offset 4
 ; CHECK-NEXT:    mov r3, #5

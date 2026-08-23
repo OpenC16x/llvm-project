@@ -176,6 +176,21 @@ segment and there is no indirect form of CALLS, so a pointer to a far function
 would be a near address that nothing could call correctly; taking one is
 diagnosed, both in code and in an initialiser.
 
+The other direction is a constraint on the memory map rather than on the code.
+A near call takes its segment from CSP, so it reaches the segment the caller is
+in and no other, and code placed outside the segment .text ended up in can only
+call functions that are themselves far.  That is not hypothetical: c166.ld puts
+the PSRAM at E0'0000H and the Flash at C0'0000H, so a function in .psramtext
+calling an ordinary one lands in the PSRAM instead - the sixteen bits that fit
+are written and the branch goes to that offset in the wrong segment.
+
+Nothing in the instruction, and nothing in a plain 16 bit relocation, would say
+so, which is why a near branch or call carries R_C166_CADDR16 instead: the same
+sixteen bits, under a name that tells the linker the field is a code address
+reached without changing segments.  LLD then refuses a target that is somewhere
+else, naming both addresses.  .text and .fartext do share a segment in c166.ld,
+which is why an ordinary far function may still be called near from the Flash.
+
 Relocations and assembler syntax
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -362,18 +377,100 @@ not know stops the run and says so rather than doing something quietly wrong.
 Its differential tests are the useful part: each program is compiled twice,
 once for the C166 and once for the machine running the test, and the two
 outputs have to match.  That covers the backend, the compiler-rt builtins, the
-linker, crt0 and the simulator in one go.  Between them the two programs there
-cover every comparison over every pair of a set of awkward values, word and
-byte arithmetic including the overflow edges, shifts of every count, 32 and 64
-bit arithmetic and the libcalls under it, recursion, structures passed and
-returned by value, jump tables, varargs, the block functions including
-overlapping moves, and far objects.
+linker, crt0 and the simulator in one go.  The C166 side is built at every
+optimisation level, because an answer that depends on one has found something
+just as surely as an answer that is always wrong.
+
+  arithmetic.c  every comparison over every pair of a set of awkward values,
+                word and byte arithmetic including the overflow edges, shifts
+                of every count, and 32 bit arithmetic with the libcalls under
+                it
+  language.c    recursion, structures by value, jump tables, varargs, 64 bit
+                arithmetic, the block functions including overlapping moves,
+                far objects, and a function executed from the PSRAM
+  abi.c         how values get from one function to another: arguments past
+                the four that go in registers, in every width and mixed so
+                that a wide one straddles the boundary; structs by value at
+                every awkward size and nested; calls through a pointer;
+                varargs of every width and a va_list passed on; enough live
+                values across a call to need the callee saved registers and
+                the spill slots; mutual recursion; variable sized locals
+  bits.c        bit fields signed and unsigned at widths that do and do not
+                divide a byte, unions and type punning, conversions between
+                every pair of integer widths, byte work through pointers,
+                switches dense and sparse and on a char and over negative
+                values, and the control flow a structured statement does not
+                give
+  floating.c    every operation on both widths over zero, one, the denormals,
+                the largest and smallest normals and both infinities, with
+                every comparison; what a NaN does; conversion between the two
+                widths and between each and every integer type; and floating
+                point through the places a wide value has to travel
+
+Two things that suite says about the part rather than about the compiler.  A
+program that uses double precision has almost no near ROM left: the soft float
+builtins are about 44 KByte of the 48, so floating.c does not fit below -O2 and
+the harness reports that rather than counting it as a failure.  And code that
+runs from the PSRAM cannot call a compiler-rt builtin at all, since those are
+in the Flash and a near call does not leave its segment - which is why
+language.c's PSRAM function is written to need none.
 
 That is also what established the condition codes.  Table 5 of the instruction
 set manual, where the boolean form of each one is written down, did not survive
 the extraction this backend was written against; the sixteen conditions were
 taken as the conventional readings of their names and then checked by running
 them.
+
+Debug information
+-----------------
+
+An address in the debug information is four bytes and holds the whole physical
+address, which is not what a pointer in the program does.  A pointer is a 16 bit
+offset that the data page pointers or CSP place somewhere in the 16 MByte the
+part addresses, so two bytes cannot say where anything is: on a part whose Flash
+is at C0'0000H every function would be described as living in segment 0.  The
+relocation is therefore ABS32 rather than the SOF16 an instruction operand
+takes.  DW_AT_byte_size of a pointer type comes from the source type and is
+unaffected; this is only how the debug information says where something is.
+
+Unwinding is the harder half, because DWARF describes a frame with one canonical
+frame address and a rule per register, and the return address here is in neither
+of those places.  It is on the hardware stack, addressed by SP, while the CFA is
+measured from R0 on the ABI stack.  So no offset from the CFA finds it and the
+rule is a DWARF expression instead - and since the return address is 24 bits,
+the expression assembles it out of a segment and an offset.
+
+What the hardware stack holds at function entry depends on how the function was
+entered:
+
+  near        IP                 2 bytes, and the caller's CSP is our CSP
+  far         IP, CSP            4 bytes, entered with CALLS
+  interrupt   IP, CSP, PSW       6 bytes, put there by the hardware
+
+The near case is what nearly every function looks like, so it is in the CIE and
+those functions say nothing of their own; the other two override it.  So do the
+handlers that save the multiply/divide unit, since those three PUSHes are on the
+same hardware stack and move every offset the rules are written in terms of.
+
+The return address column is a register called PC that no instruction can name.
+DWARF needs the column to be some register number, and on this part nothing
+holds the return address, so PC stands for the CSP:IP pair the expression
+computes.  It has no assembly name on purpose: every register name here is a
+word the assembler reserves, and this one would be reserving "pc" for something
+nothing can write.
+
+The callee saved registers are the ordinary case - they are on the ABI stack, so
+they take an ordinary offset from the CFA.
+
+None of this is checkable by reading the assembly, so it is checked by running
+it: c166-sim --backtrace walks the stack with the call frame information the
+executable carries, using LLVM's own reader for it, and lld/test/ELF has a test
+that links a mixed near and far call chain and compares the walk against the
+symbol table.
+
+c166-sim --gdb serves the same machine over the GDB remote serial protocol, so
+that something outside can drive it; llvm/utils/C166Sim/README.txt has what it
+supports and how to connect.
 
 Encodings and the MC layer
 --------------------------
@@ -434,6 +531,27 @@ the assembler accepts and what the disassembler prints back cannot drift apart:
 assembles to the bytes it came from.  An address with no register at it stays
 a number, and so does a bit-addressable word with nothing mapped at it, while
 "bset psw.10" and "bclr mdc.0" say what they mean.
+
+A register name is therefore not something a symbol can be called.  The parser
+looks one up before it considers a symbol, and it cannot do otherwise: a symbol
+may be defined after it is used, so at the point the name is read there is
+nothing to consult.  "mov r2, t2" is a load from the T2 timer at FE40H, and a
+program with a variable of that name meant something else.
+
+That is why every register name, and every condition code, is in MCAsmInfo's
+reserved identifiers: MCSymbol::print quotes a name that is, so the compiler
+writes "mov r2, \"t2\"".  A quoted name reaches the parser as a string rather
+than an identifier and can only be a symbol, which is what makes the two
+spellings mean different things and what keeps the register's bare spelling
+meaning the register.  Without it, compiling to assembly and assembling that
+back produced a load from FE40H with no relocation and no diagnostic - a
+program that went through the compiler correctly and through the assembler
+broken.  X86 reserves its register names for the same reason, "call rsi" being
+its version of the problem.
+
+A symbol whose name merely starts "cc_" is still rejected rather than quoted,
+since only the sixteen conditions themselves are in the set.  That is a
+diagnostic and not a wrong program, which is the difference that mattered.
 
 The extended special function registers are in the table too, but only as
 addresses.  They sit at the same short addresses as the ordinary ones, mapped
@@ -533,6 +651,13 @@ Known limitations / things to do
 * Only the X-peripheral registers the XC164CM's own two manuals name are
   modelled.  The CAN module has a manual of its own that this was not built
   from, so its registers have to be written as addresses.
+* No debugger knows the c166 architecture, so nothing puts a source level front
+  end on this yet.  What is in place is everything under one: the debug
+  information is right, the unwind information is right and the simulator walks
+  it, and "c166-sim --gdb" serves the GDB remote serial protocol over stdin and
+  stdout - registers, memory, breakpoints, stepping - with the registers
+  described to the client rather than assumed.  A port of GDB or LLDB to this
+  target is what is left.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

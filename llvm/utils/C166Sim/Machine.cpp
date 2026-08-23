@@ -26,6 +26,28 @@ static constexpr uint32_t SFR_STKOV = 0xFE14, SFR_STKUN = 0xFE16;
 static constexpr uint32_t SFR_MDC = 0xFF0E, SFR_PSW = 0xFF10;
 static constexpr uint32_t SFR_CPUCON1 = 0xFE18, SFR_VECSEG = 0xFF12;
 
+// The clock, which is modelled only as far as startup code needs: PLLCON reads
+// back what was written, and SYSSTAT reports the PLL locked once the VCO is
+// running.  That is the one thing a peripheral register reading back its own
+// value would get wrong, because startup code does wait on it - crt0.S spins on
+// PLLLOCK before switching the CPU over, and against storage that spin would
+// never end.  These two are in the extended space, which is why their addresses
+// are below the SFR window rather than in it.
+//
+// Locking means the VCO has something to lock to, which is PLLCTRL = 01B or
+// 11B; both have bit 13 set, and 10B, where the VCO free-runs with the
+// oscillator input off, does not.  So a program that waits for lock without
+// starting the VCO waits forever here, which is what the part does.
+//
+// And it takes time, which is why the spin loop exists at all, so PLLLOCK comes
+// up clear and reads set a fixed number of instructions after the PLL was told
+// to run.  The number is arbitrary - this simulator has no clock to convert a
+// lock time into instructions - and is only large enough that a wait loop goes
+// round rather than falling straight through.
+static constexpr uint32_t ESFR_PLLCON = 0xF1D0, ESFR_SYSSTAT = 0xF1E4;
+static constexpr uint16_t PLLCON_VCO_LOCKS = 1u << 13;
+static constexpr uint16_t SYSSTAT_PLLLOCK = 1u << 14;
+
 /// True when Phys names one of the CPU registers rather than storage.
 static bool isCPUSFR(uint32_t Phys) {
   switch (Phys) {
@@ -44,6 +66,8 @@ static bool isCPUSFR(uint32_t Phys) {
   case SFR_PSW:
   case SFR_CPUCON1:
   case SFR_VECSEG:
+  case ESFR_PLLCON:
+  case ESFR_SYSSTAT:
     return true;
   default:
     return false;
@@ -84,6 +108,12 @@ uint16_t Machine::read16(uint32_t Phys) {
       return VECSEG;
     case SFR_PSW:
       return PSW;
+    case ESFR_PLLCON:
+      return PLLCON;
+    case ESFR_SYSSTAT:
+      // Only PLLLOCK is modelled; the oscillator watchdog and the clock loss
+      // detectors that share this register read back as nothing reported.
+      return Steps >= PLLLockStep ? SYSSTAT_PLLLOCK : 0;
     }
   }
   return uint16_t(Mem[Phys]) | (uint16_t(Mem[(Phys + 1) & AddressMask]) << 8);
@@ -137,6 +167,13 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
       return;
     case SFR_PSW:
       PSW = V;
+      return;
+    case ESFR_PLLCON:
+      PLLCON = V;
+      PLLLockStep = (V & PLLCON_VCO_LOCKS) ? Steps + PLLLockDelay : NeverLocks;
+      return;
+    case ESFR_SYSSTAT:
+      // Read only, and writing it is not an error.
       return;
     }
   }

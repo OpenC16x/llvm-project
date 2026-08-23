@@ -382,6 +382,54 @@ static uint64_t resolveAVR(uint64_t Type, uint64_t Offset, uint64_t S,
   }
 }
 
+// The absolute relocations a C166 object can carry in a section that is data
+// rather than instructions, which is what this is asked about: the plain widths
+// and the four that take a field out of a 24 bit address.  The PC relative ones
+// are branch displacements, measured from the instruction after the one being
+// relocated, so they appear only in executable sections and there is nothing
+// here for them to mean.
+static bool supportsC166(uint64_t Type) {
+  switch (Type) {
+  case ELF::R_C166_ABS8:
+  case ELF::R_C166_ABS16:
+  case ELF::R_C166_ABS32:
+  case ELF::R_C166_ABS64:
+  case ELF::R_C166_SEG8:
+  case ELF::R_C166_SOF16:
+  case ELF::R_C166_PAG10:
+  case ELF::R_C166_POF14:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static uint64_t resolveC166(uint64_t Type, uint64_t Offset, uint64_t S,
+                            uint64_t /*LocData*/, int64_t Addend) {
+  uint64_t V = S + Addend;
+  switch (Type) {
+  case ELF::R_C166_ABS8:
+    return V & 0xFF;
+  case ELF::R_C166_ABS16:
+    return V & 0xFFFF;
+  case ELF::R_C166_ABS32:
+    return V & 0xFFFFFFFF;
+  case ELF::R_C166_ABS64:
+    return V;
+  // The segment, the offset within it, the page and the offset within that.
+  case ELF::R_C166_SEG8:
+    return (V >> 16) & 0xFF;
+  case ELF::R_C166_SOF16:
+    return V & 0xFFFF;
+  case ELF::R_C166_PAG10:
+    return (V >> 14) & 0x3FF;
+  case ELF::R_C166_POF14:
+    return V & 0x3FFF;
+  default:
+    llvm_unreachable("Invalid relocation type");
+  }
+}
+
 static bool supportsLanai(uint64_t Type) {
   return Type == ELF::R_LANAI_32;
 }
@@ -863,6 +911,8 @@ getRelocationResolver(const ObjectFile &Obj) {
       return {supportsARM, resolveARM};
     case Triple::avr:
       return {supportsAVR, resolveAVR};
+    case Triple::c166:
+      return {supportsC166, resolveC166};
     case Triple::lanai:
       return {supportsLanai, resolveLanai};
     case Triple::loongarch32:

@@ -409,13 +409,11 @@ static int64_t matchCondCode(StringRef Name) {
   }
 
   // The architecture gives several encodings two names; getCondCodeName only
-  // returns one of each pair, so match the aliases here.
-  return StringSwitch<int64_t>(Name.lower())
-      .Case("cc_z", C166CC::COND_Z)
-      .Case("cc_nz", C166CC::COND_NZ)
-      .Case("cc_c", C166CC::COND_ULT)
-      .Case("cc_nc", C166CC::COND_UGE)
-      .Default(-1);
+  // returns one of each pair, so the other names come from the list beside it.
+  for (auto [Alias, CC] : C166CC::getCondCodeAliases())
+    if (Name.equals_insensitive(Alias))
+      return CC;
+  return -1;
 }
 
 bool C166AsmParser::parseBracketedRegister(OperandVector &Operands) {

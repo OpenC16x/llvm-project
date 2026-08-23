@@ -41,3 +41,11 @@ ELF_RELOC(R_C166_SEG8,      8)
 ELF_RELOC(R_C166_SOF16,     9)
 ELF_RELOC(R_C166_PAG10,    10)
 ELF_RELOC(R_C166_POF14,    11)
+
+// A branch or call that does not leave the segment it is in - what the manual
+// calls a "caddr".  The value written is (S + A) & 0xffff, the same as SOF16,
+// and it is a relocation of its own so that the linker can check the one thing
+// SOF16 cannot be checked for: the instruction takes its segment from CSP, so
+// a target in another segment is not reached at all, and nothing in the
+// instruction or in a plain SOF16 would say so.
+ELF_RELOC(R_C166_CADDR16,  13)

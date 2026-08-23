@@ -24,6 +24,7 @@ define void @locals() {
 ; FP-NEXT:    sub r0, #22
 ; FP-NEXT:    .cfi_def_cfa_offset 22
 ; FP-NEXT:    mov [r0+#20], r1 ; 2-byte Folded Spill
+; FP-NEXT:    .cfi_offset r1, -2
 ; FP-NEXT:    mov r1, r0
 ; FP-NEXT:    .cfi_def_cfa_register r1
 ; FP-NEXT:    mov r2, r1
@@ -44,6 +45,7 @@ define i16 @dynamic_alloca(i16 %n) {
 ; CHECK-NEXT:    sub r0, #2
 ; CHECK-NEXT:    .cfi_def_cfa_offset 2
 ; CHECK-NEXT:    mov [r0], r1 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r1, -2
 ; CHECK-NEXT:    mov r1, r0
 ; CHECK-NEXT:    .cfi_def_cfa_register r1
 ; CHECK-NEXT:    shl r2, #1
@@ -63,6 +65,7 @@ define i16 @dynamic_alloca(i16 %n) {
 ; FP-NEXT:    sub r0, #2
 ; FP-NEXT:    .cfi_def_cfa_offset 2
 ; FP-NEXT:    mov [r0], r1 ; 2-byte Folded Spill
+; FP-NEXT:    .cfi_offset r1, -2
 ; FP-NEXT:    mov r1, r0
 ; FP-NEXT:    .cfi_def_cfa_register r1
 ; FP-NEXT:    shl r2, #1
@@ -91,6 +94,10 @@ define i16 @callee_saved(i16 %a, i16 %b, i16 %c, i16 %d) {
 ; CHECK-NEXT:    mov [r0+#4], r13 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0+#2], r14 ; 2-byte Folded Spill
 ; CHECK-NEXT:    mov [r0], r15 ; 2-byte Folded Spill
+; CHECK-NEXT:    .cfi_offset r12, -2
+; CHECK-NEXT:    .cfi_offset r13, -4
+; CHECK-NEXT:    .cfi_offset r14, -6
+; CHECK-NEXT:    .cfi_offset r15, -8
 ; CHECK-NEXT:    mov r12, r5
 ; CHECK-NEXT:    mov r13, r4
 ; CHECK-NEXT:    mov r14, r3
@@ -125,6 +132,11 @@ define i16 @callee_saved(i16 %a, i16 %b, i16 %c, i16 %d) {
 ; FP-NEXT:    mov [r0+#4], r13 ; 2-byte Folded Spill
 ; FP-NEXT:    mov [r0+#2], r14 ; 2-byte Folded Spill
 ; FP-NEXT:    mov [r0], r15 ; 2-byte Folded Spill
+; FP-NEXT:    .cfi_offset r1, -2
+; FP-NEXT:    .cfi_offset r12, -4
+; FP-NEXT:    .cfi_offset r13, -6
+; FP-NEXT:    .cfi_offset r14, -8
+; FP-NEXT:    .cfi_offset r15, -10
 ; FP-NEXT:    mov r1, r0
 ; FP-NEXT:    .cfi_def_cfa_register r1
 ; FP-NEXT:    mov r12, r5

@@ -5,6 +5,7 @@ set(LLVM_LINK_COMPONENTS
   MC
   MCDisassembler
   Object
+  DebugInfoDWARF
   Support
   )
 
@@ -12,4 +13,6 @@ add_llvm_utility(c166-sim
   c166-sim.cpp
   Machine.cpp
   Execute.cpp
+  Unwind.cpp
+  GDBServer.cpp
   )

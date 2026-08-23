@@ -306,13 +306,34 @@ def addr16 : Operand<i16> {
 }
 
 // Branch and call destinations ("caddr") are printed bare (no '#' prefix).
+//
+// These are the near forms, which take their segment from CSP and so can only
+// reach the segment they are in.  Nothing in the instruction says which segment
+// that is, so the relocation does: it is a kind of its own rather than the
+// plain 16 bit one, which is what lets the linker refuse a target that is
+// somewhere else.  See C166FixupKinds.h.
 def brtarget : Operand<OtherVT> {
+  let PrintMethod = "printBrTargetOperand";
+  let EncoderMethod = "getCAddrOpValue";
+  let ParserMatchClass = AddrAsmOperand;
+}
+
+def calltarget : Operand<i16> {
+  let PrintMethod = "printCallTargetOperand";
+  let EncoderMethod = "getCAddrOpValue";
+  let ParserMatchClass = AddrAsmOperand;
+}
+
+// The offset half of a far branch or call, whose segment is the jseg8 beside
+// it.  Leaving the segment is the whole point of those, so this is the plain
+// 16 bit relocation and there is nothing to check.
+def farbrtarget : Operand<OtherVT> {
   let PrintMethod = "printBrTargetOperand";
   let EncoderMethod = "getAddr16OpValue";
   let ParserMatchClass = AddrAsmOperand;
 }
 
-def calltarget : Operand<i16> {
+def farcalltarget : Operand<i16> {
   let PrintMethod = "printCallTargetOperand";
   let EncoderMethod = "getAddr16OpValue";
   let ParserMatchClass = AddrAsmOperand;
@@ -563,7 +584,7 @@ def TCRETURNa : Pseudo<(outs), (ins calltarget:$dst), "#TCRETURNa", []>;
 def TCRETURNi : Pseudo<(outs), (ins GR16:$dst), "#TCRETURNi", []>;
 // A far tail call names the target segment, since JMPA would only reach
 // inside the one this function happens to have been called into.
-def TCRETURNs : Pseudo<(outs), (ins jseg8:$seg, calltarget:$dst),
+def TCRETURNs : Pseudo<(outs), (ins jseg8:$seg, farcalltarget:$dst),
                        "#TCRETURNs", []>;
 
 let isCodeGenOnly = 1 in {
@@ -580,7 +601,7 @@ def TAILJMPi : InstS<0x9C, (outs), (ins GR16:$dst), "jmpi\tcc_UC, [$dst]",
   let Inst{15-12} = 0b0000;   // cc_UC
   let Inst{11-8} = dst;
 }
-def TAILJMPs : InstL<0xFA, (outs), (ins jseg8:$seg, calltarget:$dst),
+def TAILJMPs : InstL<0xFA, (outs), (ins jseg8:$seg, farcalltarget:$dst),
                      "jmps\t$seg, $dst", []> {
   bits<8> seg;
   bits<16> dst;
@@ -1651,7 +1672,7 @@ def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
 
 // Inter-segment control flow.
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def JMPS : InstL<0xFA, (outs), (ins jseg8:$seg, brtarget:$dst),
+def JMPS : InstL<0xFA, (outs), (ins jseg8:$seg, farbrtarget:$dst),
                  "jmps\t$seg, $dst", []> {
   bits<8> seg;
   bits<16> dst;
@@ -1663,7 +1684,7 @@ let isCall = 1,
     Defs = [R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
             PSW, MDL, MDH, MDC, SYSSP],
     Uses = [R0, SYSSP] in
-def CALLS : InstL<0xDA, (outs), (ins jseg8:$seg, calltarget:$dst),
+def CALLS : InstL<0xDA, (outs), (ins jseg8:$seg, farcalltarget:$dst),
                   "calls\t$seg, $dst", []> {
   bits<8> seg;
   bits<16> dst;

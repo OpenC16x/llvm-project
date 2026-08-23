@@ -28,10 +28,15 @@ define void @f() {
 ; DISASM-NEXT:  10: f6 f2 00 00   mov 0, r2
 ; DISASM-NEXT:  14: cb 00         ret
 
+; The data references are SOF16, the offset within whichever page a data page
+; pointer put the object in.  The call is CADDR16, which is the same sixteen
+; bits under a name that says they are a code address the instruction reaches
+; without changing segments - which is what lets the linker refuse a callee
+; that turns out to be somewhere else.
 ; CHECK:      Section {{.*}} .rela.text {
 ; CHECK-NEXT:   0x2 R_C166_SOF16 g 0x0
 ; CHECK-NEXT:   0x6 R_C166_SOF16 g 0x0
-; CHECK-NEXT:   0xA R_C166_SOF16 callee 0x0
+; CHECK-NEXT:   0xA R_C166_CADDR16 callee 0x0
 ; CHECK-NEXT:   0xE R_C166_SOF16 g 0x0
 ; CHECK-NEXT:   0x12 R_C166_SOF16 g 0x0
 ; CHECK-NEXT: }
