@@ -60,12 +60,14 @@ jobs:
             -DLLVM_INCLUDE_EXAMPLES=OFF \
             -DLLVM_OPTIMIZED_TABLEGEN=ON
 
+      # llvm-lit is deliberately not in this list: cmake writes it at configure
+      # time rather than building it, so asking ninja for it is an error.
       - name: Build
         run: |
           ninja -C build clang lld llc llvm-mc llvm-objdump llvm-objcopy \
             llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump llvm-symbolizer \
             llvm-ar llvm-ranlib llvm-size llvm-config c166-sim \
-            FileCheck count not llvm-lit
+            FileCheck count not
 
       # Assertions are on, so a malformed node or a bad assumption stops the
       # build rather than producing something that only looks right.
