@@ -15,6 +15,7 @@
 #include "C166Subtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -315,8 +316,33 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 //
 //===----------------------------------------------------------------------===//
 
+/// The bit branches, whose condition is which bit of what rather than a
+/// condition code, and which are inverted by swapping the two opcodes.
+static bool isBitBranchOpcode(unsigned Opc) {
+  return Opc == C166::JBr || Opc == C166::JNBr || Opc == C166::JBm ||
+         Opc == C166::JNBm;
+}
+
+static unsigned getInvertedBitBranch(unsigned Opc) {
+  switch (Opc) {
+  case C166::JBr:
+    return C166::JNBr;
+  case C166::JNBr:
+    return C166::JBr;
+  case C166::JBm:
+    return C166::JNBm;
+  case C166::JNBm:
+    return C166::JBm;
+  }
+  llvm_unreachable("not a bit branch");
+}
+
 static bool isCondBranchOpcode(unsigned Opc) {
   switch (Opc) {
+  case C166::JBr:
+  case C166::JNBr:
+  case C166::JBm:
+  case C166::JNBm:
   case C166::BRCC16rr:
   case C166::BRCC16ri:
   case C166::BRCC8rr:
@@ -336,6 +362,14 @@ static void parseCondBranch(MachineInstr &MI, MachineBasicBlock *&Target,
   Target = MI.getOperand(0).getMBB();
   Cond.push_back(MachineOperand::CreateImm(MI.getOpcode()));
 
+  // A bit branch carries which word and which bit; the opcode itself says
+  // whether it goes on set or on clear.
+  if (isBitBranchOpcode(MI.getOpcode())) {
+    Cond.push_back(MI.getOperand(1));
+    Cond.push_back(MI.getOperand(2));
+    return;
+  }
+
   if (MI.getOpcode() == C166::JMPAcc || MI.getOpcode() == C166::JMPRcc) {
     Cond.push_back(MI.getOperand(1));
     return;
@@ -348,8 +382,15 @@ static void parseCondBranch(MachineInstr &MI, MachineBasicBlock *&Target,
 
 bool C166InstrInfo::reverseBranchCondition(
     SmallVectorImpl<MachineOperand> &Cond) const {
-  assert((Cond.size() == 2 || Cond.size() == 4) &&
+  assert((Cond.size() == 2 || Cond.size() == 3 || Cond.size() == 4) &&
          "Invalid branch condition!");
+
+  // Testing the same bit the other way round is a different instruction
+  // rather than a different condition code.
+  if (isBitBranchOpcode(Cond[0].getImm())) {
+    Cond[0].setImm(getInvertedBitBranch(Cond[0].getImm()));
+    return false;
+  }
 
   auto CC = static_cast<C166CC::CondCode>(Cond[1].getImm());
   C166CC::CondCode Opposite = C166CC::getOppositeCondition(CC);
@@ -464,7 +505,8 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
                                      ArrayRef<MachineOperand> Cond,
                                      const DebugLoc &DL, int *BytesAdded) const {
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
-  assert((Cond.size() == 0 || Cond.size() == 2 || Cond.size() == 4) &&
+  assert((Cond.size() == 0 || Cond.size() == 2 || Cond.size() == 3 ||
+          Cond.size() == 4) &&
          "Invalid branch condition!");
 
   if (BytesAdded)
@@ -480,11 +522,16 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   unsigned Opc = Cond[0].getImm();
   MachineInstrBuilder MIB = BuildMI(&MBB, DL, get(Opc)).addMBB(TBB);
-  if (Opc != C166::JMPAcc && Opc != C166::JMPRcc) {
+  if (isBitBranchOpcode(Opc)) {
+    MIB.add(Cond[1]);
     MIB.add(Cond[2]);
-    MIB.add(Cond[3]);
+  } else {
+    if (Opc != C166::JMPAcc && Opc != C166::JMPRcc) {
+      MIB.add(Cond[2]);
+      MIB.add(Cond[3]);
+    }
+    MIB.add(Cond[1]);
   }
-  MIB.add(Cond[1]);
 
   if (BytesAdded)
     *BytesAdded += getInstSizeInBytes(*MIB);
@@ -496,6 +543,71 @@ unsigned C166InstrInfo::insertBranch(MachineBasicBlock &MBB,
   if (BytesAdded)
     *BytesAdded += getInstSizeInBytes(MI);
   return 2;
+}
+
+unsigned C166InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  // A bundle holds an EXTend and the access it covers, and carries no size of
+  // its own; what it costs is what is inside it.
+  if (MI.isBundle())
+    return getInstBundleSize(MI);
+
+  // Debug values, labels and the like are written down rather than assembled.
+  if (MI.isMetaInstruction())
+    return 0;
+
+  // Inline assembly is however long the text turns out to be.
+  if (MI.isInlineAsm()) {
+    const MachineFunction &MF = *MI.getParent()->getParent();
+    return getInlineAsmLength(MI.getOperand(0).getSymbolName(),
+                              MF.getTarget().getMCAsmInfo());
+  }
+
+  // JMPR is two bytes, but the assembler grows it to a four byte JMPA when the
+  // target turns out to be too far, and that happens after everything here has
+  // measured the code.  Reporting the larger size makes every offset the
+  // branch relaxation works from an upper bound, so a bit branch it judges to
+  // be in range really is one.
+  switch (MI.getOpcode()) {
+  case C166::JMPR:
+  case C166::JMPRcc:
+    return 4;
+  default:
+    return MI.getDesc().getSize();
+  }
+}
+
+MachineBasicBlock *
+C166InstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
+  // Every branch here keeps its target in operand 0, including the bit
+  // branches, which is why their operands are not in the order they print in.
+  return MI.getOperand(0).getMBB();
+}
+
+bool C166InstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
+                                          int64_t BrOffset) const {
+  // The bit branches are the only ones with a range to run out of: they take a
+  // signed 8 bit count of words from the instruction after them, and the
+  // instruction set has no long form to grow them into.  Everything else
+  // either names an address outright or is a JMPR, which the assembler turns
+  // into a JMPA when it has to.
+  if (!isBitBranchOpcode(BranchOpc))
+    return true;
+
+  // BrOffset is measured from the start of the four byte branch.
+  int64_t FromNext = BrOffset - 4;
+  assert(!(FromNext & 1) && "instructions are an even number of bytes");
+  return isInt<8>(FromNext / 2);
+}
+
+void C166InstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
+                                         MachineBasicBlock &DestBB,
+                                         MachineBasicBlock &RestoreBB,
+                                         const DebugLoc &DL, int64_t BrOffset,
+                                         RegScavenger *RS) const {
+  // Reached only when a plain jump cannot get there either, and JMPA covers
+  // the whole 64K segment a function lives in, so a function big enough to
+  // need this has other problems.
+  report_fatal_error("C166: a branch target too far away for JMPA");
 }
 
 std::pair<unsigned, unsigned>

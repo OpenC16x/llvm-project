@@ -1648,6 +1648,50 @@ class BitBranch<bits<8> op, string mnemonic, bit setsFlags>
 
 def JB   : BitBranch<0x8A, "jb",   0>;
 def JNB  : BitBranch<0x9A, "jnb",  0>;
+
+// The compiler facing forms.  Testing one bit is this single instruction
+// instead of a mask, a compare and a jump, and it leaves the value alone where
+// masking it needs a scratch register.
+//
+// The branch target comes first in the operand list, which is not the order it
+// is written in: every other conditional branch here keeps its block in
+// operand 0, and analyzeBranch, insertBranch and the relaxation below all
+// depend on that.  The assembly string puts it back where it belongs.
+let isBranch = 1, isTerminator = 1, isCodeGenOnly = 1 in {
+// One bit of a register, whose bitoff is F0H + n.
+class BitBranchReg<bits<8> op, string mnemonic>
+    : InstL<op, (outs), (ins reltarget:$dst, GR16:$reg, bitpos:$pos),
+            !strconcat(mnemonic, "\t$reg.$pos, $dst"), []> {
+  bits<4> reg;
+  bits<4> pos;
+  bits<8> dst;
+  let Inst{15-12} = 0b1111;
+  let Inst{11-8} = reg;
+  let Inst{23-16} = dst;
+  let Inst{27-24} = 0;
+  let Inst{31-28} = pos;
+}
+
+// One bit of a bit-addressable word in memory, which the instruction reads
+// for itself rather than needing it loaded first.
+let mayLoad = 1 in
+class BitBranchMem<bits<8> op, string mnemonic>
+    : InstL<op, (outs), (ins reltarget:$dst, bitoff:$off, bitpos:$pos),
+            !strconcat(mnemonic, "\t$off.$pos, $dst"), []> {
+  bits<8> off;
+  bits<4> pos;
+  bits<8> dst;
+  let Inst{15-8} = off;
+  let Inst{23-16} = dst;
+  let Inst{27-24} = 0;
+  let Inst{31-28} = pos;
+}
+
+def JBr  : BitBranchReg<0x8A, "jb">;
+def JNBr : BitBranchReg<0x9A, "jnb">;
+def JBm  : BitBranchMem<0x8A, "jb">;
+def JNBm : BitBranchMem<0x9A, "jnb">;
+}
 // JBC and JNBS also change the bit they tested.
 def JBC  : BitBranch<0xAA, "jbc",  1>;
 def JNBS : BitBranch<0xBA, "jnbs", 1>;

@@ -47,6 +47,7 @@ public:
   bool SelectAddrR(SDValue Addr, SDValue &Base);
   bool trySelectPostIncLoad(SDNode *Node);
   bool trySelectBitRMW(SDNode *Node);
+  bool trySelectBitBranch(SDNode *Node);
   bool SelectAddrRI(SDValue Addr, SDValue &Base, SDValue &Disp);
   bool SelectAddrAbs(SDValue Addr, SDValue &Address);
 
@@ -348,6 +349,114 @@ bool C166DAGToDAGISel::trySelectBitRMW(SDNode *Node) {
   return true;
 }
 
+/// A branch on one bit, which the machine tests and jumps on in a single
+/// instruction.  Masking the value, comparing it and jumping is three
+/// instructions and costs a register to hold the masked copy; JB and JNB do
+/// not disturb what they test, and on a bit-addressable word in memory they
+/// read it themselves rather than needing it loaded first.
+bool C166DAGToDAGISel::trySelectBitBranch(SDNode *Node) {
+  SDValue Chain = Node->getOperand(0);
+  SDValue Dest = Node->getOperand(1);
+  SDValue LHS = Node->getOperand(2);
+  SDValue RHS = Node->getOperand(3);
+
+  // The bit instructions address words, and everything here is a comparison
+  // against a constant.
+  auto *CCN = dyn_cast<ConstantSDNode>(Node->getOperand(4));
+  auto *RHSC = dyn_cast<ConstantSDNode>(RHS);
+  if (!CCN || !RHSC || LHS.getValueType() != MVT::i16)
+    return false;
+  auto CC = static_cast<C166CC::CondCode>(CCN->getZExtValue());
+  int16_t Against = static_cast<int16_t>(RHSC->getZExtValue());
+
+  // A test of the top bit reaches here as a sign test: the combiner rewrites
+  // "x & 8000H" against zero into a signed comparison of x itself, since a
+  // sixteen bit word is negative exactly when bit 15 is set.  It spells that
+  // either way round depending on how the branch was written, so both are
+  // taken here and turned into the one that reads as "bit 15 is set".
+  bool TopBitSet = false, IsTopBitTest = false;
+  if (Against == 0 && (CC == C166CC::COND_SLT || CC == C166CC::COND_SGE)) {
+    IsTopBitTest = true;
+    TopBitSet = CC == C166CC::COND_SLT;
+  } else if (Against == -1 &&
+             (CC == C166CC::COND_SLE || CC == C166CC::COND_SGT)) {
+    IsTopBitTest = true;
+    TopBitSet = CC == C166CC::COND_SLE;
+  }
+
+  if (!IsTopBitTest && Against != 0)
+    return false;
+
+  SDValue Tested;
+  unsigned Bit;
+  bool OnClear;
+
+  if (!IsTopBitTest) {
+    // Masking one bit and asking whether the result is zero.  Zero means the
+    // bit was clear, so that is the branch that goes on clear.
+    if ((CC != C166CC::COND_Z && CC != C166CC::COND_NZ) ||
+        LHS.getOpcode() != ISD::AND || !LHS.hasOneUse())
+      return false;
+    auto *MaskN = dyn_cast<ConstantSDNode>(LHS.getOperand(1));
+    if (!MaskN)
+      return false;
+    uint16_t Mask = static_cast<uint16_t>(MaskN->getZExtValue());
+    if (!isPowerOf2_32(Mask))
+      return false;
+    Tested = LHS.getOperand(0);
+    Bit = Log2_32(Mask);
+    OnClear = CC == C166CC::COND_Z;
+  } else {
+    // Worth it only when the word is in memory, where it saves the load as
+    // well; on a register a compare and a jump are already the same four
+    // bytes the bit branch would be.
+    if (!isa<LoadSDNode>(LHS))
+      return false;
+    Tested = LHS;
+    Bit = 15;
+    OnClear = !TopBitSet;
+  }
+
+  SDLoc DL(Node);
+  SDValue Pos = CurDAG->getTargetConstant(Bit, DL, MVT::i16);
+
+  // A bit-addressable word in memory, which the instruction reads for itself.
+  // As with the read-modify-write above, this only holds when the load feeds
+  // nothing else and the branch is the next thing on its chain.
+  if (auto *Ld = dyn_cast<LoadSDNode>(Tested)) {
+    SDValue Base;
+    int64_t Offset;
+    int BitOff = -1;
+    if (ISD::isNormalLoad(Ld) && Ld->getMemoryVT() == MVT::i16 &&
+        !Ld->isAtomic() && Tested.hasOneUse() && Chain == SDValue(Ld, 1) &&
+        Ld->hasNUsesOfValue(1, 1) &&
+        matchAbsoluteAddress(*CurDAG, Ld->getBasePtr(), Base, Offset))
+      if (auto *C = dyn_cast<ConstantSDNode>(Base))
+        BitOff = C166::getBitOffForAddress(C->getZExtValue() + Offset);
+
+    if (BitOff >= 0) {
+      SDValue Ops[] = {Dest, CurDAG->getTargetConstant(BitOff, DL, MVT::i16),
+                       Pos, Ld->getChain()};
+      MachineSDNode *New = CurDAG->getMachineNode(
+          OnClear ? C166::JNBm : C166::JBm, DL, MVT::Other, Ops);
+      CurDAG->setNodeMemRefs(New, {Ld->getMemOperand()});
+      ReplaceNode(Node, New);
+      return true;
+    }
+  }
+
+  // The sign test shape is only worth it when the load folds away, so if it
+  // did not, leave it to the compare and jump it would have been.
+  if (IsTopBitTest)
+    return false;
+
+  // Otherwise the value is in a register, whose bitoff is F0H + its number.
+  SDValue Ops[] = {Dest, Tested, Pos, Chain};
+  ReplaceNode(Node, CurDAG->getMachineNode(OnClear ? C166::JNBr : C166::JBr, DL,
+                                           MVT::Other, Ops));
+  return true;
+}
+
 void C166DAGToDAGISel::Select(SDNode *Node) {
   SDLoc DL(Node);
 
@@ -362,6 +471,12 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
     // A post-incrementing load writes the stepped pointer back as well as the
     // value, which no pattern describes, so it is selected by hand.
     if (trySelectPostIncLoad(Node))
+      return;
+    break;
+  case C166ISD::BR_CC:
+    // A branch on one bit is one instruction, and no pattern can say so: it
+    // has to look through the mask to the bit being tested.
+    if (trySelectBitBranch(Node))
       return;
     break;
   case ISD::STORE:

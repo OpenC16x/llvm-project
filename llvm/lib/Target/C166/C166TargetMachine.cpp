@@ -97,4 +97,11 @@ void C166PassConfig::addPreEmitPass() {
   // looks at is which of them touch memory.
   if (getOptLevel() != CodeGenOptLevel::None)
     addPass(createC166MergeExtendPass());
+
+  // The bit branches reach a signed 8 bit count of words and the instruction
+  // set gives them no long form to grow into, so one that cannot reach has to
+  // be turned into a short branch the other way over a jump that can.  Every
+  // other branch here either names an address outright or is a JMPR, which the
+  // assembler grows by itself.
+  addPass(&BranchRelaxationPassID);
 }
