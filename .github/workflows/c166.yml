@@ -1,0 +1,107 @@
+# The C166 backend's own checks.
+#
+# Nothing else here runs them: every workflow this repository inherits from
+# upstream is gated on the llvm organisation, and the ones that build anything
+# want LLVM's own runner fleet, so on a fork they all skip.  This one is
+# deliberately ungated and sized to fit a stock runner.
+#
+# It builds only what the target needs, then runs, in order: the lit suites,
+# the assembly round trip, and the differential tests - which are the part
+# that actually executes code, comparing what the simulator computes against
+# what the host computes for the same program.
+
+name: C166
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: c166-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test the C166 target
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the build needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      # A from scratch build of this is over an hour; with the cache warm it
+      # is a few minutes.  The key moves with the compiler sources so that a
+      # change to them does not reuse stale objects, and the restore key lets
+      # a new key start from the last one rather than from nothing.
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: c166-ccache-${{ github.sha }}
+          restore-keys: |
+            c166-ccache-
+
+      - name: Configure
+        run: |
+          cmake -S llvm -B build -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_TARGETS_TO_BUILD="X86" \
+            -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="C166" \
+            -DLLVM_CCACHE_BUILD=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_OPTIMIZED_TABLEGEN=ON
+
+      - name: Build
+        run: |
+          ninja -C build clang lld llc llvm-mc llvm-objdump llvm-objcopy \
+            llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump llvm-symbolizer \
+            llvm-ar llvm-ranlib llvm-size llvm-config c166-sim \
+            FileCheck count not llvm-lit
+
+      # Assertions are on, so a malformed node or a bad assumption stops the
+      # build rather than producing something that only looks right.
+      - name: Lit tests
+        run: |
+          ./build/bin/llvm-lit -sv \
+            llvm/test/CodeGen/C166 \
+            llvm/test/MC/C166 \
+            llvm/test/DebugInfo/C166 \
+            llvm/test/tools/c166-sim
+
+      - name: lld tests for C166
+        run: |
+          ./build/bin/llvm-lit -sv $(git ls-files 'lld/test/ELF/*c166*')
+
+      # What comes out of the compiler has to assemble back to the same bytes,
+      # which is what catches a name or a syntax the assembler reads
+      # differently from the way the compiler wrote it.
+      - name: Assembly round trip
+        run: ./llvm/utils/C166Sim/differential/roundtrip.sh ./build/bin
+
+      # crt0, the block functions and the compiler-rt builtins: code for the
+      # target, which the build above does not produce.
+      - name: Build the sysroot
+        run: ./llvm/utils/C166Sim/differential/mksysroot.sh ./build "$HOME/c166-sysroot"
+
+      - name: Differential tests
+        run: |
+          ./llvm/utils/C166Sim/differential/run.sh ./build/bin \
+            "$HOME/c166-sysroot" llvm/lib/Target/C166/startup/c166.ld
+
+      # Programs nobody wrote, so that the cover is not limited to what
+      # somebody thought of.  The seed range moves with the run number, so
+      # each run tries programs the last one did not.
+      - name: Generated programs
+        run: |
+          FIRST=$(( (${{ github.run_number }} * 40) % 100000 + 1 ))
+          ./llvm/utils/C166Sim/differential/fuzz.sh ./build/bin \
+            "$HOME/c166-sysroot" llvm/lib/Target/C166/startup/c166.ld 40 "$FIRST"

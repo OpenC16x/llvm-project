@@ -407,6 +407,38 @@ just as surely as an answer that is always wrong.
                 widths and between each and every integer type; and floating
                 point through the places a wide value has to travel
 
+The programs are not all written by hand.  generate.py emits one from a seed,
+and fuzz.sh sweeps seeds: the same program compiled both ways has to print the
+same thing, and a seed that disagrees is a reproducer one command long.  Two
+things every generated program has to avoid, or a disagreement would be the
+generator's fault rather than the compiler's - undefined behaviour, which the
+two are entitled to disagree about, and integer promotion, since promotion
+stops at int and int is sixteen bits here and thirty two on the host.  So all
+arithmetic is unsigned and therefore wraps, every divisor has a bit forced into
+it, every shift count is masked, and each operation is written at a width that
+promotes the same way on both machines.
+
+That found a compiler crash on its first sweep, in generic code rather than in
+this backend: the DAG combiner's foldSelectOfBinops rebuilds a binary operation
+from exactly two operands, and ADDE and SUBE - the carry opcodes this target
+makes legal - take a carry in as a third.  A select between two 32 bit
+additions produced an ADDE with no carry in at all.  Most targets never reach
+it because they use UADDO_CARRY, whose carry is an ordinary value rather than
+glue; this one is among the few that still want the older nodes, because the
+carry really does live in the PSW here.
+
+roundtrip.sh is the other standing check: what the compiler writes has to
+assemble back to what it emitted directly.  Those are different code paths -
+the printer and the parser against the code emitter - and -S and -save-temps
+quietly depend on them agreeing.  A global named after a special function
+register used to compile to "mov r2, t2" and assemble back into a load from the
+T2 timer, with no relocation and no diagnostic, and nothing but this notices
+that.
+
+All of it runs in CI, which is .github/workflows/c166.yml: every workflow this
+repository inherits from upstream is gated on the llvm organisation and skips
+on a fork, so that one is ungated and sized for a stock runner.
+
 Two things that suite says about the part rather than about the compiler.  A
 program that uses double precision has almost no near ROM left: the soft float
 builtins are about 44 KByte of the 48, so floating.c does not fit below -O2 and

@@ -16,29 +16,20 @@ copied into a project and adjusted rather than installed.
 Building it
 -----------
 
-The driver looks for crt0.o and -lc in <sysroot>/c166-elf/lib, so build them
-and put them there:
+Three things have to exist that the LLVM build does not produce, because they
+are code for the target rather than for the machine doing the building: crt0.o
+and libc.a, which the driver looks for in <sysroot>/c166-elf/lib, and the
+compiler-rt builtins, which are what the compiler calls for the things the
+instruction set does not do - 32 bit shifts and division, 64 bit arithmetic,
+and all of floating point, which this part has no unit for.
 
-  mkdir -p sysroot/c166-elf/lib
-  clang -target c166 -c crt0.S -o sysroot/c166-elf/lib/crt0.o
-  clang -target c166 -O2 -c mem.c -o mem.o
-  llvm-ar rcs sysroot/c166-elf/lib/libc.a mem.o
+One script builds all three:
 
-The compiler-rt builtins are what the compiler calls for the things the
-instruction set does not do, such as dividing two longs.  Build them into the
-resource directory, where the driver already knows to look:
+  llvm/utils/C166Sim/differential/mksysroot.sh <build-dir> <sysroot>
 
-  cmake -S compiler-rt/lib/builtins -B build-crt -GNinja \
-      -DCMAKE_C_COMPILER=<...>/clang -DCMAKE_ASM_COMPILER=<...>/clang \
-      -DCMAKE_AR=<...>/llvm-ar -DCMAKE_RANLIB=<...>/llvm-ranlib \
-      -DCMAKE_NM=<...>/llvm-nm \
-      -DCMAKE_C_COMPILER_TARGET=c166 -DCMAKE_ASM_COMPILER_TARGET=c166 \
-      -DCOMPILER_RT_BAREMETAL_BUILD=ON -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
-      -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
-      -DCOMPILER_RT_INSTALL_PATH=<...>/lib/clang/<version> \
-      -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_ASM_COMPILER_WORKS=1 \
-      -DLLVM_CONFIG_PATH=<...>/llvm-config
-  ninja -C build-crt install
+It is in that directory because the differential tests need a sysroot before
+they can run anything, and there is no reason to have two ways of building the
+same thing.
 
 Then a whole program is one command:
 
