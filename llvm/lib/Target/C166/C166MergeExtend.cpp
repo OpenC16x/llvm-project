@@ -17,11 +17,17 @@
 //   - The two EXTends name the same segment or page.  Identical operands do,
 //     and so do two offsets into the same object: "seg(g)" and "seg(g + 2)"
 //     differ only if g straddles a segment boundary.  Nothing in the object
-//     file says it does not, so the linker script says it instead - c166.ld
-//     asserts that no section a far access can reach crosses a segment
-//     boundary, which is what makes this sound.  It is also where the value is:
-//     a program reaches two fields of a far structure far more often than it
-//     reaches the same word twice.
+//     file says it does not, and once the two have been folded there is no
+//     second segment left to disagree with the first, so a straddling object
+//     would simply be reached at the right offset in the wrong segment.  The
+//     linker rules that out: it rejects a far object whose placement crosses a
+//     boundary, which is where the placement is finally known.  c166.ld
+//     asserts the same of its regions, earlier and more coarsely, so a script
+//     that gets it wrong is caught either way.
+//
+//     This is also where the value is: a program reaches two fields of a far
+//     structure far more often than it reaches the same word twice.  Folding
+//     only identical operands would keep about a fifth of the merges.
 //
 //   - Nothing between them touches memory.  The instructions in the gap are
 //     currently addressed the ordinary way, through the data page pointers, and

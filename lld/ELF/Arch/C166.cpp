@@ -98,12 +98,43 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     *loc = offset & 0xff;
     break;
   }
-  case R_C166_SEG8:
+  case R_C166_SEG8: {
     // The segment is the top eight bits of a 24 bit address.  Anything above
     // that is not addressable at all.
     checkUInt(ctx, loc, val, 24, rel);
+    // A far access names its object's segment as an immediate, and the
+    // compiler folds two of those into one EXTend whenever both reach the
+    // same object: "seg(g)" and "seg(g + 2)" are the same segment unless g
+    // straddles a segment boundary.  Nothing in an object file rules that
+    // out, and by the time the fold has happened there is no second segment
+    // left to disagree with the first - the wrong one would simply be used,
+    // and the access would land at the right offset in the wrong segment.
+    //
+    // So it is ruled out here, where the placement is finally known.  This is
+    // a little stronger than the fold strictly needs: an object that crosses
+    // a boundary is rejected even in code that happened not to be folded and
+    // would have worked.  The alternative is to carry the fold's assumption
+    // into the object file as a relocation of its own, which is a larger
+    // thing to add than the case is worth - an object placed across a segment
+    // boundary is not something a working program does on purpose.
+    if (rel.sym) {
+      uint64_t size = rel.sym->getSize();
+      if (size > 1) {
+        uint64_t base = rel.sym->getVA(ctx);
+        if ((base >> 16) != ((base + size - 1) >> 16))
+          Err(ctx) << getErrorLoc(ctx, loc) << "far object '" << rel.sym->getName()
+                   << "' crosses a segment boundary: it is placed at 0x"
+                   << utohexstr(base) << " and is " << Twine(size)
+                   << " bytes, so it ends in segment 0x"
+                   << utohexstr((base + size - 1) >> 16) << " rather than 0x"
+                   << utohexstr(base >> 16)
+                   << ". A far access names one segment for the whole object, "
+                      "so place it inside a single 64 KByte segment.";
+      }
+    }
     *loc = (val >> 16) & 0xff;
     break;
+  }
   case R_C166_SOF16:
     // The offset within the segment named by an EXTS.  It fills the word, so
     // there is nothing to check.

@@ -134,6 +134,19 @@ Neither half of the address needs a register when both are settled at link
 time: EXTS covers a long (mem) address just as it covers an indirect one, so a
 far global is read with "exts #seg(g), #1" and then "mov r2, sof(g)" outright.
 
+Two EXTends reaching the same object are folded into one, which is worth about
+a quarter of the code of a far-data-heavy program.  That is sound only if the
+object does not straddle a segment boundary, and nothing in an object file says
+it does not: once the two have been folded there is no second segment left to
+disagree with the first, so a straddling object would be reached at the right
+offset in the wrong segment.  The linker rejects such a placement, which is
+where the placement is finally known - c166.ld asserts the same of its regions,
+earlier and more coarsely, so a script that gets it wrong is caught either way.
+The check is a little stronger than the fold needs, since it also rejects a
+straddling object in code that happened not to be folded; carrying the fold's
+assumption into the object file as a relocation of its own would be a larger
+thing to add than the case is worth.
+
 A constant offset into a far object folds into its address rather than
 becoming arithmetic on it, since both relocations carry an addend.  That only
 applies to an object actually declared in the far address space: a near one
@@ -834,10 +847,21 @@ earlyclobber.  Without that the allocator is free to hand it the divisor's
 register - which it does, the second divide then dividing by the first one's
 quotient.
 
-Signed 32 bit division is left as a call.  The decomposition above is an
-unsigned argument; the signed form would be magnitudes and sign fixups around
-the same two divides, which is a good deal of inline code for something whose
-call is four bytes.  Nothing has measured it either way.
+Signed 32 bit division by a word goes through the same two divides, on
+magnitudes, with the signs put back afterwards - each one negated by an
+exclusive or with its sign mask and a subtract of it, so there is no branch.
+Both magnitudes are representable, which is what to check before believing it
+works at the edges: the dividend's is at most 2^31, a 32 bit value, and the
+divisor's at most 32768, a 16 bit one.
+
+It is not done when the function is being compiled for size.  The sign handling
+is about twenty instructions on top of the seven the division takes, against
+four bytes for a call, and that trade goes both ways depending on what is being
+measured.  On a program doing nothing but these divisions it is 13130 executed
+instructions and 808 bytes before, 1064 and 412 after - faster and smaller,
+because the routine leaves the image once nothing needs it.  Over the
+differential programs, where one call site is not enough to unlink anything, it
+is 62 bytes more at -O2 and unchanged at -Os.
 
 On a program doing nothing but 32 bit divisions by a word the change is 19170
 executed instructions and 728 bytes before, 658 instructions and 354 bytes
@@ -851,7 +875,7 @@ Compares the flags already answer
 Nearly every arithmetic and logical instruction sets Z and N from the value it
 produced, so "and r6, #16" followed by "cmp r6, #0" asks a question the AND has
 already answered.  C166FoldCompare removes the compare.  Over the differential
-programs that is 83 of them, 166 bytes, and 83 instructions that no longer run.
+programs that is 91 of them, 182 bytes, and 91 instructions that no longer run.
 
 It is a pass rather than the usual optimizeCompareInstr() hook because of when
 the compare exists.  Until the post register allocation expansion a conditional
@@ -877,10 +901,21 @@ answer.  That is not a theory: the version that walked back removed half as
 many compares again and turned two of the differential programs into infinite
 loops.
 
-Adjacency is not free.  It is 83 compares rather than 128, so about a third are
-out of reach.  Reaching them would need a list of what really preserves Z and
-N, which is a claim about the part, to be checked against the part rather than
-against a model that is already wrong on this point.
+Adjacency is not free, and what it costs was measured rather than guessed: of
+the compares it gives up, the gap is a move in every case but one.  A move is
+exactly what cannot be stepped over, so no rule about what preserves the flags
+reaches them - only reordering would, by lifting the move above the instruction
+that set the flags, and 46 compares is not enough to justify moving
+instructions around after register allocation.
+
+Looking at the moves did pay, though, in the other direction.  A move sets Z
+and N from the value it moved, so a move that writes the register being
+compared answers the question itself - and the list of which forms do that is
+taken from the simulator, which implements the flag behaviour, rather than from
+the machine description, which does not model it.  Two near misses came out of
+that check: the pre-decrement stores set no flags at all, and ADDC and SUBC set
+Z only if it was already set, so that a wide value tests as zero exactly when
+every word of it did.  Neither is in the list.
 
 Scheduling
 ~~~~~~~~~~

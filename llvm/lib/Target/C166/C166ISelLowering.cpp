@@ -87,7 +87,7 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   // than a call; see ReplaceNodeResults().  i32 is not a legal type here, so
   // the custom action reaches these through the type legalizer, and anything
   // that is not that shape falls back to the libcall.
-  for (unsigned Opc : {ISD::UDIV, ISD::UREM})
+  for (unsigned Opc : {ISD::UDIV, ISD::UREM, ISD::SDIV, ISD::SREM})
     setOperationAction(Opc, MVT::i32, Custom);
 
   for (MVT VT : {MVT::i8, MVT::i16}) {
@@ -726,6 +726,10 @@ void C166TargetLowering::ReplaceNodeResults(SDNode *N,
   case ISD::UREM:
     ReplaceDivBy16Results(N, Results, DAG);
     return;
+  case ISD::SDIV:
+  case ISD::SREM:
+    ReplaceSignedDivBy16Results(N, Results, DAG);
+    return;
   }
 }
 
@@ -775,6 +779,77 @@ void C166TargetLowering::ReplaceDivBy16Results(
   // the answer is zero.
   Results.push_back(DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, Div.getValue(2),
                                 DAG.getConstant(0, DL, MVT::i16)));
+}
+
+/// The signed form of the above: magnitudes through the same two divides, with
+/// the signs put back afterwards.
+///
+/// Both magnitudes are representable, which is the thing to check before
+/// believing this works at the edges.  The dividend's is at most 2^31, which
+/// is a 32 bit value; the divisor's is at most 32768, which is a 16 bit one.
+/// So -2147483648 / -32768 goes through as 2147483648 / 32768 and comes back
+/// as 65536, and nothing along the way needs a bit it does not have.
+///
+/// It is not done when the function is being compiled for size.  The sign
+/// handling is around twenty instructions on top of the seven the division
+/// itself takes, against the four bytes of a call, and unlike the unsigned
+/// case the library routine does not disappear from the image - the compiler
+/// still emits calls to it from anywhere this did not fire.
+void C166TargetLowering::ReplaceSignedDivBy16Results(
+    SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
+  if (N->getValueType(0) != MVT::i32 || DAG.shouldOptForSize())
+    return;
+
+  // A divisor that is genuinely a signed 16 bit value: everything above bit 15
+  // repeats bit 15.
+  SDValue Divisor = N->getOperand(1);
+  if (DAG.ComputeNumSignBits(Divisor) < 17)
+    return;
+
+  SDLoc DL(N);
+  SDValue N32 = N->getOperand(0);
+
+  // The sign of each operand as a mask of all ones or all zeroes, which is
+  // what turns "negate if negative" into an exclusive or and a subtract.
+  SDValue NSign = DAG.getNode(ISD::SRA, DL, MVT::i32, N32,
+                              DAG.getShiftAmountConstant(31, MVT::i32, DL));
+  SDValue D16 = DAG.getNode(ISD::TRUNCATE, DL, MVT::i16, Divisor);
+  SDValue DSign = DAG.getNode(ISD::SRA, DL, MVT::i16, D16,
+                              DAG.getShiftAmountConstant(15, MVT::i16, DL));
+
+  SDValue NAbs = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                             DAG.getNode(ISD::XOR, DL, MVT::i32, N32, NSign),
+                             NSign);
+  SDValue DAbs = DAG.getNode(ISD::SUB, DL, MVT::i16,
+                             DAG.getNode(ISD::XOR, DL, MVT::i16, D16, DSign),
+                             DSign);
+
+  SDValue Lo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, NAbs,
+                           DAG.getIntPtrConstant(0, DL));
+  SDValue Hi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, NAbs,
+                           DAG.getIntPtrConstant(1, DL));
+  SDVTList VTs = DAG.getVTList(MVT::i16, MVT::i16, MVT::i16);
+  SDValue Div = DAG.getNode(C166ISD::UDIVREM32BY16, DL, VTs, Lo, Hi, DAbs);
+
+  if (N->getOpcode() == ISD::SDIV) {
+    // The quotient is negative when the operands' signs differ.
+    SDValue DSign32 = DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i32, DSign);
+    SDValue QSign = DAG.getNode(ISD::XOR, DL, MVT::i32, NSign, DSign32);
+    SDValue Q = DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, Div.getValue(0),
+                            Div.getValue(1));
+    Results.push_back(
+        DAG.getNode(ISD::SUB, DL, MVT::i32,
+                    DAG.getNode(ISD::XOR, DL, MVT::i32, Q, QSign), QSign));
+    return;
+  }
+
+  // The remainder takes the dividend's sign.  Its magnitude is below the
+  // divisor's, so at most 32767, and it is a signed word before it is widened.
+  SDValue RSign = DAG.getNode(ISD::TRUNCATE, DL, MVT::i16, NSign);
+  SDValue R = DAG.getNode(
+      ISD::SUB, DL, MVT::i16,
+      DAG.getNode(ISD::XOR, DL, MVT::i16, Div.getValue(2), RSign), RSign);
+  Results.push_back(DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i32, R));
 }
 
 //===----------------------------------------------------------------------===//

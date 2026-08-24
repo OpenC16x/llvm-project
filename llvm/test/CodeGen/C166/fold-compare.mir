@@ -6,7 +6,8 @@
 --- |
   define void @zn_condition() { ret void }
   define void @cv_condition() { ret void }
-  define void @not_flag_setting() { ret void }
+  define void @no_flags_at_all() { ret void }
+  define void @move_sets_flags() { ret void }
 ...
 ---
 # Condition 6 is cc_N, which reads N alone - and AND set N from the value it
@@ -42,9 +43,26 @@ body:             |
 # CHECK:      AND16ri3
 # CHECK-NEXT: CMP16ri3
 ---
-# A move is not modelled as writing PSW at all, because it leaves C alone.  It
-# does clobber Z and N on the part, so it can never stand in for the compare.
-name:            not_flag_setting
+# The pre-decrement store sets no flags at all - it is one of the two near
+# misses in the list, checked against the simulator rather than assumed - so it
+# can never stand in for the compare.
+name:            no_flags_at_all
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = MOV16prd $r2, $r3
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 6, implicit $psw
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: no_flags_at_all
+# CHECK:      MOV16prd
+# CHECK-NEXT: CMP16ri3
+---
+# An ordinary move does set Z and N, from the value it moved, so a compare of
+# the register it wrote against zero is answered.
+name:            move_sets_flags
 body:             |
   bb.0:
     successors: %bb.1
@@ -54,6 +72,6 @@ body:             |
   bb.1:
     RET implicit $r2, implicit $syssp, implicit-def $syssp
 ...
-# CHECK-LABEL: name: not_flag_setting
+# CHECK-LABEL: name: move_sets_flags
 # CHECK:      MOV16rr
-# CHECK-NEXT: CMP16ri3
+# CHECK-NEXT: JMPRcc
