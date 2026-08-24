@@ -190,6 +190,14 @@ public:
   /// simulator by name, as any unimplemented instruction does.
   int64_t ACC = 0;
   uint16_t MCW = 0;
+
+  /// MSW's upper byte, which is the unit's flags.  Nothing here generates
+  /// them, so they are only carried: a program that writes MSW reads back what
+  /// it wrote, which is what an interrupt handler saving and restoring the
+  /// coprocessor needs and is all that is claimed.  The register's low byte is
+  /// not here at all - it is MAE, the accumulator's top eight bits, and it
+  /// comes straight off ACC.
+  uint16_t MSWFlags = 0;
   uint16_t DPP[4] = {0, 1, 2, 3};
   uint16_t CSP = 0;
   uint16_t IP = 0;
