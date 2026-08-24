@@ -16,9 +16,8 @@ define void @isr() #0 {
 ; CHECK-NEXT:    .cfi_def_cfa_offset 2
 ; CHECK-NEXT:    mov [r0], r2 ; 2-byte Folded Spill
 ; CHECK-NEXT:    .cfi_offset r2, -2
-; CHECK-NEXT:    mov r2, count
-; CHECK-NEXT:    add r2, #1
-; CHECK-NEXT:    mov count, r2
+; CHECK-NEXT:    mov r2, #1
+; CHECK-NEXT:    add count, r2
 ; CHECK-NEXT:    mov r2, [r0] ; 2-byte Folded Reload
 ; CHECK-NEXT:    add r0, #2
 ; CHECK-NEXT:    .cfi_def_cfa r0, 0
@@ -212,15 +211,7 @@ define void @isr_with_argument(i16 %v) #0 {
 ; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x06 ; caller's hardware stack pointer
 ; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
 ; CHECK-NEXT:    .cfi_escape 0x10, 0x20, 0x03, 0x92, 0x24, 0x04 ; caller's PSW
-; CHECK-NEXT:    sub r0, #2
-; CHECK-NEXT:    .cfi_def_cfa_offset 2
-; CHECK-NEXT:    mov [r0], r2 ; 2-byte Folded Spill
-; CHECK-NEXT:    .cfi_offset r2, -2
-; CHECK-NEXT:    add r2, count
-; CHECK-NEXT:    mov count, r2
-; CHECK-NEXT:    mov r2, [r0] ; 2-byte Folded Reload
-; CHECK-NEXT:    add r0, #2
-; CHECK-NEXT:    .cfi_def_cfa r0, 0
+; CHECK-NEXT:    add count, r2
 ; CHECK-NEXT:    reti
   %c = load volatile i16, ptr @count
   %n = add i16 %c, %v

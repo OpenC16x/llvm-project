@@ -2203,7 +2203,7 @@ def DIVLUr : InstS<0x7B, (outs), (ins GR16:$src), "divlu\t$src", []> {
 // target otherwise expands.
 let Defs = [PSW] in
 def PRIORrr : InstS<0x2B, (outs GR16:$dst), (ins GR16:$src), "prior\t$dst, $src",
-                    []> {
+                    [(set GR16:$dst, (ctlz_zero_poison GR16:$src))]> {
   bits<4> dst;
   bits<4> src;
   let Inst{15-12} = dst;
@@ -2427,3 +2427,56 @@ def CMPB8rppi : InstS<0x49, (outs), (ins GR8:$src1, memrppi:$src2),
   let Inst{9-8} = src2;
 }
 }
+
+//===----------------------------------------------------------------------===//
+// Memory Destination Arithmetic
+//===----------------------------------------------------------------------===//
+//
+// A load, an operation and a store back, in one instruction.  The address has
+// to appear twice in the pattern and be the same both times, which is what
+// makes this a read-modify-write rather than two unrelated accesses.
+//
+// The source is a GPR rather than the "reg" field the assembler facing form
+// takes, for the reason given there: that field's class holds special function
+// registers as well and is not allocatable.
+//
+// ADDC and SUBC are deliberately not here.  Their carry out is a result the
+// rest of a wide chain reads, and folding one into a store would leave that
+// result behind with nothing to say where the chain continues.
+let Defs = [PSW], isCodeGenOnly = 1, mayLoad = 1, mayStore = 1 in {
+class ArithMemDstW<bits<8> op, string mnemonic, SDNode opnode>
+    : InstL<op, (outs), (ins addr16:$dst, GR16:$src),
+            !strconcat(mnemonic, "\t$dst, $src"),
+            [(store (opnode (load addrabs:$dst), GR16:$src), addrabs:$dst)]> {
+  bits<16> dst;
+  bits<4> src;
+  let Inst{15-12} = 0b1111;
+  let Inst{11-8} = src;
+  let Inst{31-16} = dst;
+}
+
+class ArithMemDstB<bits<8> op, string mnemonic, SDNode opnode>
+    : InstL<op, (outs), (ins addr16:$dst, GR8:$src),
+            !strconcat(mnemonic, "\t$dst, $src"),
+            [(store (opnode (i8 (load addrabs:$dst)), GR8:$src),
+                    addrabs:$dst)]> {
+  bits<16> dst;
+  bits<4> src;
+  let Inst{15-12} = 0b1111;
+  let Inst{11-8} = src;
+  let Inst{31-16} = dst;
+}
+}
+
+def ADD16am : ArithMemDstW<0x04, "add", add>;
+def SUB16am : ArithMemDstW<0x24, "sub", sub>;
+def AND16am : ArithMemDstW<0x64, "and", and>;
+def OR16am  : ArithMemDstW<0x74, "or",  or>;
+def XOR16am : ArithMemDstW<0x54, "xor", xor>;
+
+def ADDB8am : ArithMemDstB<0x05, "addb", add>;
+def SUBB8am : ArithMemDstB<0x25, "subb", sub>;
+def ANDB8am : ArithMemDstB<0x65, "andb", and>;
+def ORB8am  : ArithMemDstB<0x75, "orb",  or>;
+def XORB8am : ArithMemDstB<0x55, "xorb", xor>;
+

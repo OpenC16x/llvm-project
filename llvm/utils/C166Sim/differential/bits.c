@@ -346,7 +346,61 @@ static u32 arrays(void) {
   return h;
 }
 
+/* --- read-modify-write on a global, and counting leading zeroes ------ */
+/* Both are single instructions on this machine and were neither of them
+   selected until recently: "g |= x" is a load, an operation and a store back
+   in one, and the leftmost set bit is what PRIOR reports.  Neither appeared
+   anywhere in this suite, so a change to either would have gone unnoticed by
+   everything that runs here. */
+
+/* Volatile, and not static, for two separate reasons.  A file scope static one
+   is promoted out of memory entirely and then there is no store to fold
+   anything into; and without volatile the compiler forwards each store to the
+   next load and folds the whole run into one operation, which is correct and
+   leaves nothing here to look at.  Volatile makes each of these the load, the
+   operation and the store back that the instruction does in one. */
+volatile u16 rmw_acc;
+volatile u8 rmw_accb;
+
+static void rmw(u16 x, u8 b) {
+  rmw_acc = 0x0F0F;
+  rmw_acc += x;
+  rmw_acc -= 3;
+  rmw_acc |= x;
+  rmw_acc &= 0x7FFF;
+  rmw_acc ^= 0x5A5A;
+  puthex(rmw_acc, 4);
+
+  rmw_accb = 0x33;
+  rmw_accb += b;
+  rmw_accb |= b;
+  rmw_accb &= 0x7F;
+  rmw_accb ^= 0x11;
+  puthex(rmw_accb, 2);
+}
+
+/* An unsigned is sixteen bits here and thirty two on the host, so the count
+   has to be taken at the width it is meant to be taken at on each. */
+#ifdef __c166__
+#define CLZ16(v) ((unsigned)__builtin_clz((unsigned)(v)))
+#else
+#define CLZ16(v) ((unsigned)__builtin_clz((unsigned)(v)) - 16u)
+#endif
+
+static void leading(void) {
+  static const u16 vals[] = {1, 2, 3, 0x8000, 0x4000, 0x0100, 0x00FF,
+                             0x0001, 0xFFFF, 0x1234};
+  for (unsigned i = 0; i < sizeof vals / sizeof vals[0]; i++)
+    puthex(CLZ16(vals[i]), 2);
+  /* Zero is the one the instruction does not answer, so it is asked for
+     separately and the compiler has to put the test back. */
+  volatile u16 z = 0;
+  puthex(z ? CLZ16(z) : 16u, 2);
+}
+
 int main(void) {
+  rmw(0x1357, 0x5A);
+  leading();
   puthex(bitfields(), 8);
   puthex(unions(), 8);
   puthex(conversions(), 8);

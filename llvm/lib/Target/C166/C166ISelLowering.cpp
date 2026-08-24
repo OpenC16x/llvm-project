@@ -88,7 +88,14 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::ROTR, VT, VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::BSWAP, VT, Expand);
     setOperationAction(ISD::CTTZ, VT, Expand);
+    // PRIOR counts how far the leftmost set bit is from the top, which is the
+    // count of leading zeroes and is what CTLZ_ZERO_POISON asks for.  It leaves
+    // zero behind for a source of zero, where CTLZ wants sixteen, so the full
+    // one stays expanded - the generic expansion is this instruction and a
+    // test for zero rather than the twenty five instruction bit smear it was.
     setOperationAction(ISD::CTLZ, VT, Expand);
+    setOperationAction(ISD::CTLZ_ZERO_POISON, VT,
+                       VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
     setOperationAction(ISD::SDIVREM, VT, Expand);
     setOperationAction(ISD::UDIVREM, VT, Expand);

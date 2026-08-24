@@ -735,6 +735,40 @@ Known limitations / things to do
   language, but a simulator agreeing with itself about the manual is not the
   same as a part agreeing with both.
 
+Memory destination arithmetic
+-----------------------------
+
+A load, an operation and a store back are one instruction when all three name
+the same place, so "g |= x" on a global is four bytes rather than ten.  Add,
+subtract, and, or and exclusive or are selected this way, in both widths.
+
+ADDC and SUBC are deliberately not.  Their carry out is a result the rest of a
+wide chain reads, and folding one into a store would leave that result with
+nothing to say where the chain continues, so a wide add through memory stays a
+pair of register operations with a store each.
+
+The fold only applies when nothing else wants what was loaded or computed: a
+result used again afterwards has to exist in a register, and a load from one
+place feeding a store to another is two accesses rather than one.  A volatile
+word is folded, on the same reasoning as the bit instructions - the instruction
+still reads it and writes it back, in that order, and what it loses is the gap.
+
+The indirect source form was tried and dropped.  "add Rw, [Rw]" folds the load
+too, but its pointer field is two bits, so selecting it asks the register
+allocator to keep every folded pointer in R0 to R3.  Measured over the
+differential programs it cost 8 bytes more than it saved, so the instruction is
+assembled and not selected.  Anything that revisits this should measure the
+same way rather than reasoning about it.
+
+Counting leading zeroes
+-----------------------
+
+PRIOR reports how far the leftmost set bit is from the top, which is what
+CTLZ_ZERO_POISON asks for, so that is the instruction on its own.  PRIOR leaves
+zero behind for a source of zero where CTLZ wants sixteen, so the full one is
+that instruction and a test for zero - still most of the twenty five
+instruction bit smear and population count it used to be.
+
 Atomics
 -------
 

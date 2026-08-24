@@ -42,11 +42,13 @@ define void @ram_set() {
 }
 
 ; FE00H is a special function register but not a bit-addressable one - only
-; FF00H upwards is - so this stays a read, a change and a write.
+; FF00H upwards is - so no bit instruction reaches it.  It is still a load, a
+; change and a store, but the memory destination ALU form does all three, so
+; what used to be three instructions is two.
 define void @sfr_not_bit_addressable() {
 ; CHECK-LABEL: sfr_not_bit_addressable:
-; CHECK: mov r2, dpp0
-; CHECK: mov dpp0, r2
+; CHECK: mov r2, #16
+; CHECK-NEXT: or dpp0, r2
   %v = load volatile i16, ptr inttoptr (i16 -512 to ptr)
   %r = or i16 %v, 16
   store volatile i16 %r, ptr inttoptr (i16 -512 to ptr)
@@ -56,8 +58,8 @@ define void @sfr_not_bit_addressable() {
 ; Two bits is not one bit.
 define void @two_bits() {
 ; CHECK-LABEL: two_bits:
-; CHECK: or r2, p3
-; CHECK: mov p3, r2
+; CHECK: mov r2, #768
+; CHECK-NEXT: or p3, r2
   %v = load volatile i16, ptr inttoptr (i16 -60 to ptr)
   %r = or i16 %v, 768
   store volatile i16 %r, ptr inttoptr (i16 -60 to ptr)
@@ -106,8 +108,8 @@ define void @load_and_store_differ() {
 ; An odd address names no bit-addressable word: they are word addresses.
 define void @odd_address() {
 ; CHECK-LABEL: odd_address:
-; CHECK: mov r2, 65281
-; CHECK: mov 65281, r2
+; CHECK-NOT: bset
+; CHECK: or 65281, r2
   %v = load volatile i16, ptr inttoptr (i16 -255 to ptr)
   %r = or i16 %v, 2
   store volatile i16 %r, ptr inttoptr (i16 -255 to ptr)
