@@ -30,6 +30,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166Target() {
   initializeC166AsmPrinterPass(PR);
   initializeC166DAGToDAGISelLegacyPass(PR);
   initializeC166MergeExtendPass(PR);
+  initializeC166FoldComparePass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -95,8 +96,12 @@ bool C166PassConfig::addInstSelector() {
 void C166PassConfig::addPreEmitPass() {
   // Late, so that it sees the instructions as they will be emitted: what it
   // looks at is which of them touch memory.
-  if (getOptLevel() != CodeGenOptLevel::None)
+  if (getOptLevel() != CodeGenOptLevel::None) {
     addPass(createC166MergeExtendPass());
+    // After the branch pseudos have been split, which is where the compare
+    // this looks at first becomes an instruction of its own.
+    addPass(createC166FoldComparePass());
+  }
 
   // The bit branches reach a signed 8 bit count of words and the instruction
   // set gives them no long form to grow into, so one that cannot reach has to

@@ -1,0 +1,59 @@
+# RUN: llc -mtriple=c166 -run-pass=c166-fold-compare -o - %s | FileCheck %s
+#
+# The condition gate, which cannot be reached from IR: the shapes below are
+# what the branch pseudo expansion produces, and a compare against zero with a
+# condition reading C or V is not answered by the flags the ALU left behind.
+--- |
+  define void @zn_condition() { ret void }
+  define void @cv_condition() { ret void }
+  define void @not_flag_setting() { ret void }
+...
+---
+# Condition 6 is cc_N, which reads N alone - and AND set N from the value it
+# wrote, so the compare adds nothing.
+name:            zn_condition
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = AND16ri3 $r2, 4, implicit-def $psw
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 6, implicit $psw
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: zn_condition
+# CHECK:      AND16ri3
+# CHECK-NEXT: JMPRcc
+---
+# Condition 12 is cc_SLT, which reads N and V.  A compare against zero clears
+# V; the AND cleared it
+# too, but the pass does not reason about that and keeps the compare.
+name:            cv_condition
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = AND16ri3 $r2, 4, implicit-def $psw
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 12, implicit $psw
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: cv_condition
+# CHECK:      AND16ri3
+# CHECK-NEXT: CMP16ri3
+---
+# A move is not modelled as writing PSW at all, because it leaves C alone.  It
+# does clobber Z and N on the part, so it can never stand in for the compare.
+name:            not_flag_setting
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = MOV16rr $r3
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 6, implicit $psw
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: not_flag_setting
+# CHECK:      MOV16rr
+# CHECK-NEXT: CMP16ri3

@@ -171,6 +171,8 @@ FunctionPass *createC166ISelDag(C166TargetMachine &TM,
 /// thing and nothing between them touches memory.
 FunctionPass *createC166MergeExtendPass();
 void initializeC166MergeExtendPass(PassRegistry &);
+FunctionPass *createC166FoldComparePass();
+void initializeC166FoldComparePass(PassRegistry &);
 
 void initializeC166AsmPrinterPass(PassRegistry &);
 void initializeC166DAGToDAGISelLegacyPass(PassRegistry &);
