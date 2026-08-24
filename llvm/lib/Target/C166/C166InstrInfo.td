@@ -45,6 +45,15 @@ def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
                                                 SDTCisVT<1, i16>,
                                                 SDTCisVT<2, i16>]>;
 
+// A 32 bit dividend as a low and a high word and a 16 bit divisor, giving the
+// two words of the quotient and the one word remainder.
+def SDT_C166DivL         : SDTypeProfile<3, 3, [SDTCisVT<0, i16>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>,
+                                                SDTCisVT<3, i16>,
+                                                SDTCisVT<4, i16>,
+                                                SDTCisVT<5, i16>]>;
+
 //===----------------------------------------------------------------------===//
 // C166 Specific Node Definitions
 //===----------------------------------------------------------------------===//
@@ -76,6 +85,7 @@ def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def C166udivl32  : SDNode<"C166ISD::UDIVREM32BY16", SDT_C166DivL>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -725,6 +735,41 @@ def SREM16rr  : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
 def UREM16rr  : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
                        "#UREM16rr",
                        [(set GR16:$dst, (urem GR16:$src1, GR16:$src2))]>;
+
+// One DIV leaves the quotient in MDL and the remainder in MDH, so a division
+// that wants both is one divide rather than two.  DIV is the slowest
+// instruction on the core, so the pair being separate nodes - each expanding
+// to a divide of its own - is worth more than the usual common subexpression.
+def SDIVREM16rr : Pseudo<(outs GR16:$quot, GR16:$rem),
+                         (ins GR16:$src1, GR16:$src2),
+                         "#SDIVREM16rr",
+                         [(set GR16:$quot, GR16:$rem,
+                               (sdivrem GR16:$src1, GR16:$src2))]>;
+def UDIVREM16rr : Pseudo<(outs GR16:$quot, GR16:$rem),
+                         (ins GR16:$src1, GR16:$src2),
+                         "#UDIVREM16rr",
+                         [(set GR16:$quot, GR16:$rem,
+                               (udivrem GR16:$src1, GR16:$src2))]>;
+
+// A 32 bit division by a 16 bit divisor, as two divides instead of a call to
+// __udivsi3.  The whole thing is one pseudo because the two divides are
+// joined through MDH: DIVU leaves its remainder exactly where DIVLU needs to
+// find it, so keeping them together saves the pair of moves that carrying it
+// through a general purpose register would cost.  See ReplaceNodeResults()
+// for why neither divide can overflow.
+// The high quotient is read out of MDL between the two divides, so it is
+// defined while the divisor and the low word of the dividend are both still
+// live.  Without the earlyclobber the allocator is free to give it whichever
+// of those registers it thinks is dead - and the second divide then divides
+// by the first one's quotient.
+def UDIVREM32by16 : Pseudo<(outs GR16:$qlo, GR16:$qhi, GR16:$rem),
+                           (ins GR16:$lo, GR16:$hi, GR16:$src),
+                           "#UDIVREM32by16",
+                           [(set GR16:$qlo, GR16:$qhi, GR16:$rem,
+                                 (C166udivl32 GR16:$lo, GR16:$hi,
+                                              GR16:$src))]> {
+  let Constraints = "@earlyclobber $qhi";
+}
 }
 
 //===----------------------------------------------------------------------===//

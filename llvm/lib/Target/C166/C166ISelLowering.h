@@ -52,6 +52,8 @@ public:
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
+  void ReplaceDivBy16Results(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                             SelectionDAG &DAG) const;
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
 

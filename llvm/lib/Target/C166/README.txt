@@ -760,6 +760,59 @@ differential programs it cost 8 bytes more than it saved, so the instruction is
 assembled and not selected.  Anything that revisits this should measure the
 same way rather than reasoning about it.
 
+Division
+--------
+
+One DIV answers both "a / b" and "a % b": the quotient is left in MDL and the
+remainder in MDH whether or not anything wanted the second one.  A function
+asking for both therefore issues one divide, not two.  The generic combiner
+declines to pair them when plain division is legal, on the reasoning that a
+legal divide means the ordinary expansion is fine, so the pairing is done in
+the target instead.  That reasoning does not hold here: DIV is the slowest
+instruction on the core, and the second answer is already sitting in a
+register.  Where only one half is wanted, the move that would read the other
+is not made at all.
+
+A 32 bit division whose divisor fits in a word is two divides rather than a
+call to __udivsi3.  The high word is divided on its own, which is what DIVU
+does, and its remainder is then divided together with the low word, which is
+what DIVLU does.  Nothing carries the remainder between them - DIVU leaves it
+in MDH and DIVLU reads it from there - so only MDL is written for the second
+divide, and the whole thing is one pseudo rather than two so that the register
+allocator cannot put a move in between.
+
+The reason the pair is safe is that neither divide can overflow, and that is
+worth stating because it is invisible in the generated code.  The first is a
+16 by 16 divide, whose quotient cannot exceed its dividend.  The second
+divides r:lo by d where r is the first one's remainder, so r < d, so the
+dividend is below d * 65536 and the quotient is below 65536.  DIVLU on a
+dividend that did not arise this way has no such guarantee - it sets V and
+leaves garbage behind - which is why a divisor that is genuinely 32 bits keeps
+the library call.
+
+What the divisor is tested for is that its high word is known to be zero, not
+that it has a zero extension on it.  That is what catches the shapes a front
+end produces: "a / b" written next to "a % b" leaves the divisor behind a
+freeze, and a masked value never had an extension to find.  Matching the
+extension alone looked correct and fired on nothing.
+
+The high quotient is read out of MDL between the two divides, while the
+divisor and the low word of the dividend are both still live, so it is an
+earlyclobber.  Without that the allocator is free to hand it the divisor's
+register - which it does, the second divide then dividing by the first one's
+quotient.
+
+Signed 32 bit division is left as a call.  The decomposition above is an
+unsigned argument; the signed form would be magnitudes and sign fixups around
+the same two divides, which is a good deal of inline code for something whose
+call is four bytes.  Nothing has measured it either way.
+
+On a program doing nothing but 32 bit divisions by a word the change is 19170
+executed instructions and 728 bytes before, 658 instructions and 354 bytes
+after: the routine drops out of the image entirely when nothing else needs
+it.  Over the differential programs the size is unchanged, because the signed
+division there keeps __udivsi3 linked in for its own use.
+
 Counting leading zeroes
 -----------------------
 
