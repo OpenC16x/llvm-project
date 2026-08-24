@@ -377,6 +377,53 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(Remainder ? C166::MOVfromMDH : C166::MOVfromMDL).addDef(Dst);
     break;
   }
+  case C166::SDIVREM16rr:
+  case C166::UDIVREM16rr: {
+    // The one divide leaves both halves of the answer behind.
+    Register Quot = MI.getOperand(0).getReg();
+    Register Rem = MI.getOperand(1).getReg();
+    Register Src1 = MI.getOperand(2).getReg();
+    Register Src2 = MI.getOperand(3).getReg();
+    bool Unsigned = MI.getOpcode() == C166::UDIVREM16rr;
+
+    Emit(C166::MOVtoMDL).addReg(Src1);
+    Emit(Unsigned ? C166::DIVUr : C166::DIVr).addReg(Src2);
+    if (!MI.getOperand(0).isDead())
+      Emit(C166::MOVfromMDL).addDef(Quot);
+    if (!MI.getOperand(1).isDead())
+      Emit(C166::MOVfromMDH).addDef(Rem);
+    break;
+  }
+  case C166::UDIVREM32by16: {
+    // Two divides.  The first takes the high word alone, which is what DIVU
+    // does, and the second takes its remainder together with the low word,
+    // which is what DIVLU does.  Nothing moves the remainder between them:
+    // DIVU leaves it in MDH and DIVLU reads it from there, so only MDL is
+    // written for the second divide.  The high quotient has to come out of
+    // MDL before that happens, which is why it is read where it is.
+    Register QLo = MI.getOperand(0).getReg();
+    Register QHi = MI.getOperand(1).getReg();
+    Register Rem = MI.getOperand(2).getReg();
+    Register Lo = MI.getOperand(3).getReg();
+    Register Hi = MI.getOperand(4).getReg();
+    Register Src = MI.getOperand(5).getReg();
+
+    Emit(C166::MOVtoMDL).addReg(Hi);
+    Emit(C166::DIVUr).addReg(Src);
+    // A division that only wants the remainder has no use for either half of
+    // the quotient, and one that only wants the quotient has none for the
+    // remainder.  Nothing after this pass would remove the moves, so they are
+    // not made in the first place.
+    if (!MI.getOperand(1).isDead())
+      Emit(C166::MOVfromMDL).addDef(QHi);
+    Emit(C166::MOVtoMDL).addReg(Lo);
+    Emit(C166::DIVLUr).addReg(Src);
+    if (!MI.getOperand(0).isDead())
+      Emit(C166::MOVfromMDL).addDef(QLo);
+    if (!MI.getOperand(2).isDead())
+      Emit(C166::MOVfromMDH).addDef(Rem);
+    break;
+  }
   }
 
   MI.eraseFromParent();

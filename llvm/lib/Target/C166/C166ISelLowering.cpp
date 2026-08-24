@@ -83,6 +83,13 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::MULHS, MVT::i16, Legal);
   setOperationAction(ISD::MULHU, MVT::i16, Legal);
 
+  // A 32 bit division whose divisor came from 16 bits is two divides rather
+  // than a call; see ReplaceNodeResults().  i32 is not a legal type here, so
+  // the custom action reaches these through the type legalizer, and anything
+  // that is not that shape falls back to the libcall.
+  for (unsigned Opc : {ISD::UDIV, ISD::UREM})
+    setOperationAction(Opc, MVT::i32, Custom);
+
   for (MVT VT : {MVT::i8, MVT::i16}) {
     setOperationAction(ISD::ROTL, VT, VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::ROTR, VT, VT == MVT::i16 ? Legal : Expand);
@@ -97,8 +104,11 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::CTLZ_ZERO_POISON, VT,
                        VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
-    setOperationAction(ISD::SDIVREM, VT, Expand);
-    setOperationAction(ISD::UDIVREM, VT, Expand);
+    // One DIV produces the quotient and the remainder together, so keeping
+    // DIVREM whole is what stops "a / b" and "a % b" issuing two of the
+    // slowest instruction on the core.  A byte one is promoted to a word.
+    setOperationAction(ISD::SDIVREM, VT, VT == MVT::i16 ? Legal : Expand);
+    setOperationAction(ISD::UDIVREM, VT, VT == MVT::i16 ? Legal : Expand);
     // A word multiply already produces both halves, so keeping MUL_LOHI whole
     // is what stops a widening multiply issuing the MUL twice.  A byte one is
     // promoted to a word before it gets here.
@@ -164,6 +174,7 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setIndexedLoadAction(ISD::POST_INC, MVT::i16, Legal);
 
   setTargetDAGCombine(ISD::ADD);
+  setTargetDAGCombine({ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM});
 
   // A far pointer is an i32, which is not a legal type, so an access through
   // one is caught while the type legalizer is expanding the pointer operand.
@@ -583,6 +594,49 @@ SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
                                  ST->getMemoryVT(), ST->getMemOperand());
 }
 
+/// One DIV answers both "a / b" and "a % b", so a function that asks for both
+/// should issue one rather than two.
+///
+/// The generic combiner declines to form DIVREM when plain division is legal,
+/// on the reasoning that a target with a legal divide is better served by the
+/// ordinary expansion.  That reasoning does not hold here.  DIV is the slowest
+/// instruction on the core, and it leaves the quotient in MDL and the
+/// remainder in MDH whether or not anything wants the second one, so pairing
+/// them costs a register move and saves an entire divide.
+static SDValue combineDivRem(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
+  unsigned Opc = N->getOpcode();
+  bool IsSigned = Opc == ISD::SDIV || Opc == ISD::SREM;
+  bool IsDiv = Opc == ISD::SDIV || Opc == ISD::UDIV;
+  unsigned SiblingOpc = IsDiv ? (IsSigned ? ISD::SREM : ISD::UREM)
+                              : (IsSigned ? ISD::SDIV : ISD::UDIV);
+  unsigned DivRemOpc = IsSigned ? ISD::SDIVREM : ISD::UDIVREM;
+
+  EVT VT = N->getValueType(0);
+  if (VT != MVT::i16)
+    return SDValue();
+
+  // Find the other half of the pair: same operands, opposite opcode.
+  SDValue Op0 = N->getOperand(0), Op1 = N->getOperand(1);
+  SDNode *Sibling = nullptr;
+  for (SDNode *User : Op0->users()) {
+    if (User->getOpcode() != SiblingOpc || User->use_empty() ||
+        User->getOperand(0) != Op0 || User->getOperand(1) != Op1)
+      continue;
+    Sibling = User;
+    break;
+  }
+  if (!Sibling)
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  SDValue Pair = DAG.getNode(DivRemOpc, DL,
+                             DAG.getVTList(MVT::i16, MVT::i16), Op0, Op1);
+  // Replace the sibling here; returning only covers the node being visited.
+  DCI.CombineTo(Sibling, Pair.getValue(IsDiv ? 1 : 0));
+  return Pair.getValue(IsDiv ? 0 : 1);
+}
+
 /// A constant added to the address of a far object is part of that address
 /// rather than arithmetic on it: the relocations carry an addend, so the
 /// linker can do the adding.  Without this the offset survives to become a
@@ -590,6 +644,16 @@ SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
 /// by then a far address has been split into its two halves.
 SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
+  switch (N->getOpcode()) {
+  case ISD::SDIV:
+  case ISD::UDIV:
+  case ISD::SREM:
+  case ISD::UREM:
+    return combineDivRem(N, DCI);
+  default:
+    break;
+  }
+
   if (N->getOpcode() != ISD::ADD)
     return SDValue();
 
@@ -658,7 +722,59 @@ void C166TargetLowering::ReplaceNodeResults(SDNode *N,
   case ISD::BlockAddress:
     Results.push_back(LowerFarSymbol(SDValue(N, 0), DAG));
     return;
+  case ISD::UDIV:
+  case ISD::UREM:
+    ReplaceDivBy16Results(N, Results, DAG);
+    return;
   }
+}
+
+/// A 32 bit unsigned division whose divisor came from 16 bits, as two divides
+/// rather than a call to __udivsi3.
+///
+/// The dividend is split at the word boundary and divided in two steps.  The
+/// first divides the high word, which DIVU does on its own; the second divides
+/// the remainder of that, carried in MDH, together with the low word, which is
+/// what DIVLU is for.  Neither step can overflow, and that is the whole reason
+/// the pair is safe to emit: the first is a 16 by 16 divide, whose quotient is
+/// at most the dividend, and the second divides r:lo by d with r < d, so its
+/// quotient is below 65536.  DIVLU on a general 32 bit dividend has no such
+/// guarantee, which is why nothing here tries to use it for a divisor that did
+/// not start out 16 bits wide.
+void C166TargetLowering::ReplaceDivBy16Results(
+    SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
+  if (N->getValueType(0) != MVT::i32)
+    return;
+
+  // Only a divisor that is genuinely 16 bits.  Asking what is known about the
+  // high word rather than looking for a zero extension is what catches the
+  // shapes a front end actually produces: "a / b" and "a % b" written next to
+  // each other leaves the divisor behind a freeze, and a masked value never
+  // had an extension to find in the first place.
+  SDValue Divisor = N->getOperand(1);
+  if (!DAG.MaskedValueIsZero(Divisor, APInt::getHighBitsSet(32, 16)))
+    return;
+
+  SDLoc DL(N);
+  SDValue D = DAG.getNode(ISD::TRUNCATE, DL, MVT::i16, Divisor);
+  SDValue N32 = N->getOperand(0);
+  SDValue Lo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, N32,
+                           DAG.getIntPtrConstant(0, DL));
+  SDValue Hi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, N32,
+                           DAG.getIntPtrConstant(1, DL));
+
+  SDVTList VTs = DAG.getVTList(MVT::i16, MVT::i16, MVT::i16);
+  SDValue Div = DAG.getNode(C166ISD::UDIVREM32BY16, DL, VTs, Lo, Hi, D);
+
+  if (N->getOpcode() == ISD::UDIV) {
+    Results.push_back(DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32,
+                                  Div.getValue(0), Div.getValue(1)));
+    return;
+  }
+  // The remainder is below the divisor, so it is a word and the high half of
+  // the answer is zero.
+  Results.push_back(DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, Div.getValue(2),
+                                DAG.getConstant(0, DL, MVT::i16)));
 }
 
 //===----------------------------------------------------------------------===//
