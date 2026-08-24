@@ -174,6 +174,9 @@ void initializeC166MergeExtendPass(PassRegistry &);
 FunctionPass *createC166FoldComparePass();
 void initializeC166FoldComparePass(PassRegistry &);
 
+FunctionPass *createC166MACChainPass();
+void initializeC166MACChainPass(PassRegistry &);
+
 void initializeC166AsmPrinterPass(PassRegistry &);
 void initializeC166DAGToDAGISelLegacyPass(PassRegistry &);
 
