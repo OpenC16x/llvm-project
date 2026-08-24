@@ -446,6 +446,20 @@ static unsigned baseStateTime(Op O, bool Taken) {
   case Op::MOV16rm:
   case Op::MOVB8rm:
     return 4;
+  // The MAC unit.  Table 11 is the original C166's and says nothing about a
+  // coprocessor that core does not have, so these come from the C166S V2
+  // Architecture Overview Handbook's instruction set summary, which counts in
+  // cycles rather than states: CoLOAD, CoMUL, CoMAC and CoSTORE are one cycle
+  // each, and the rounding forms two.  One cycle is two states - the same
+  // table gives "MOV mem, reg" as 4 bytes and 1 cycle, and Table 11 gives it
+  // two states - so a plain MAC instruction costs what any ordinary
+  // instruction does.  That it agrees with the default below is worth saying
+  // out loud rather than leaving to chance: the figure is read, not assumed.
+  case Op::CoLOAD_rr:
+  case Op::CoMUL_rr:
+  case Op::CoMAC_rr:
+  case Op::CoSTORE_sr:
+    return 2;
   default:
     return 2;
   }

@@ -194,8 +194,20 @@ of each instruction:
   CoMAC  Rwn, Rwm   ACC <- ACC + that product
   CoSTORE Rwn, creg the named MAC register into Rwn
 
+What that is worth, measured rather than assumed: a sixteen element dot
+product written both ways is 488 states through MUL and 236 through CoMAC, a
+little over twice as fast.  The win is per multiply-accumulate rather than per
+loop - MUL alone is ten states and CoMAC is two, so even one "acc += a * b"
+with the accumulator loaded and stored around it is eight states against
+eighteen.  Nothing selects any of this yet; the point of the number is that
+it says what selecting it would be worth.
+
 with the product one-bit left shifted first when MCW.MP is set, which it is
-not at reset.  MCW.MP is bit 10 and MCW.MS, the saturation control, is bit 9;
+not at reset.  Their state times come from the same handbook's instruction set
+summary, which counts cycles: each of the four is one cycle and the rounding
+forms are two.  One cycle is two states - that summary gives "MOV mem, reg" as
+4 bytes and 1 cycle where Table 11 gives it two states - so a MAC instruction
+costs what an ordinary instruction does.  MCW.MP is bit 10 and MCW.MS, the saturation control, is bit 9;
 the register resets to 0000H.
 
 Reading that rather than assuming it is what stopped CoMAC being implemented
