@@ -857,17 +857,22 @@ divisor's at most 32768, a 16 bit one.
 It is not done when the function is being compiled for size.  The sign handling
 is about twenty instructions on top of the seven the division takes, against
 four bytes for a call, and that trade goes both ways depending on what is being
-measured.  On a program doing nothing but these divisions it is 13130 executed
-instructions and 808 bytes before, 1064 and 412 after - faster and smaller,
+measured.  On a program doing nothing but these divisions it is 28970 states
+and 808 bytes before, 3510 states and 412 bytes after - faster and smaller,
 because the routine leaves the image once nothing needs it.  Over the
 differential programs, where one call site is not enough to unlink anything, it
 is 62 bytes more at -O2 and unchanged at -Os.
 
-On a program doing nothing but 32 bit divisions by a word the change is 19170
-executed instructions and 728 bytes before, 658 instructions and 354 bytes
-after: the routine drops out of the image entirely when nothing else needs
-it.  Over the differential programs the size is unchanged, because the signed
-division there keeps __udivsi3 linked in for its own use.
+On a program doing nothing but 32 bit divisions by a word the change is 41530
+states and 728 bytes before, 2536 states and 354 bytes after: the routine drops
+out of the image entirely when nothing else needs it.  Over the differential
+programs the size is unchanged, because the signed division there keeps
+__udivsi3 linked in for its own use.
+
+That is 16 times faster, not the 29 times the instruction counts say.  The
+inline sequence is two divides, twenty states each, against a loop of two state
+instructions - which is exactly the sort of thing counting instructions gets
+wrong, and why the simulator counts states.
 
 Compares the flags already answer
 ---------------------------------
@@ -920,12 +925,13 @@ every word of it did.  Neither is in the list.
 Scheduling
 ~~~~~~~~~~
 
-There is no scheduling model.  Adding one was considered and not done: what it
-would buy is measured in cycles, and nothing here counts cycles.  The simulator
-counts instructions, which is the wrong unit for a question about latency, and
-the part's timing is dominated by memory wait states that vary between members
-of the family.  A model written without something to check it against would be
-a set of numbers that look authoritative and are not.
+There is still no scheduling model, but the reason has changed.  It used to be
+that nothing here counted anything but instructions, which is the wrong unit
+for a question about latency; the simulator now counts states, so the question
+can be asked.  What is missing is the second half: a scheduling model describes
+which instructions can issue together and where the stalls are, and the state
+counts below are a per-instruction cost, not a pipeline.  Writing one would
+still be writing numbers with nothing to check them against.
 
 Counting leading zeroes
 -----------------------

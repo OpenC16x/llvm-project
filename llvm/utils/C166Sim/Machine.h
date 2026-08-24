@@ -28,6 +28,10 @@ namespace c166sim {
 static constexpr uint32_t AddressSpaceSize = 1u << 24;
 static constexpr uint32_t AddressMask = AddressSpaceSize - 1;
 
+/// Filling the pipeline, which the manual counts once for a whole program
+/// rather than against any instruction (Instruction Set Manual, section 7.1).
+static constexpr uint64_t PipelineFillStates = 6;
+
 /// The special function registers are memory mapped at the top of segment 0.
 static constexpr uint32_t SFRBase = 0x00FE00;
 static constexpr uint32_t SFREnd = 0x010000;
@@ -116,6 +120,7 @@ public:
   bool flag(PSWBit B) const { return (PSW >> B) & 1; }
   void setFlag(PSWBit B, bool V) {
     PSW = (PSW & ~(uint16_t(1) << B)) | (uint16_t(V) << B);
+    WrotePSW = true;
   }
 
   // -- the system stack --------------------------------------------------
@@ -179,6 +184,24 @@ public:
 
   uint64_t Steps = 0;
   uint64_t MaxSteps = 0; ///< 0 means no limit
+
+  /// Execution time in states, where one state is one CPU clock period.
+  ///
+  /// This is what the Instruction Set Manual's chapter 7 calls Ttot: the sum
+  /// of each instruction's time plus six states for the solitary filling of
+  /// the pipeline.  It counts a program executing from the internal program
+  /// memory, which is where the linker script here puts .text; running from
+  /// RAM or through the external bus controller costs more, and by an amount
+  /// that depends on the bus mode and the programmed waitstates rather than
+  /// on the program, so none of that is modelled.  See stateTime() for what
+  /// is and is not counted.
+  uint64_t States = PipelineFillStates;
+
+  /// Whether the instruction just retired wrote PSW, which a conditional
+  /// branch immediately after it pays a state for.
+  bool PrevWrotePSW = false;
+  /// Set by setFlag() while the current instruction runs.
+  bool WrotePSW = false;
 
   bool Trace = false;
   llvm::raw_ostream *TraceOS = nullptr;

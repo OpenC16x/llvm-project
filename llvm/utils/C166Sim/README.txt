@@ -132,12 +132,45 @@ that they are, the condition flags, the multiply/divide unit, the system stack
 with its STKOV and STKUN bounds, the DPP window and the EXTP/EXTS overrides
 that replace it, and bit addressing.
 
-Not modelled: interrupts and traps, the peripherals, timing, and the extended
+Not modelled: interrupts and traps, the peripherals, and the extended
 SFR space that EXTR selects.  A peripheral register reads back what was
 written to it, which is enough to run code that configures a peripheral it
 then never waits on.  ATOMIC and EXTR are accepted and counted so that the
 length of an EXTend sequence stays right, but they lock nothing, because there
 is nothing to lock.
+
+Counting time
+-------------
+
+--count-states prints how long the program took, in states.  One state is one
+CPU clock period, which is the unit the instruction set manual counts in, and
+the figures are its own: Table 11 for what each instruction costs and section
+7.3 for what gets added.  Most instructions are two states, a multiply is ten
+and a divide twenty, the branches are four when they branch and two when they
+do not, and six states are added once for filling the pipeline.
+
+It counts a program executing from the internal program memory, which is where
+the linker script here puts .text.  Running from RAM or through the external
+bus controller costs more, by an amount the manual gives in ALE cycle times -
+which depend on the bus mode and the programmed waitstates, and so are a fact
+about a board rather than about a program.  That is why none of it is here.
+
+Two of the additions in section 7.3 are charged: a conditional branch pays a
+state when the instruction before it wrote PSW, and reading PSW as an operand
+pays two.  The rest are not, each for a reason written down in Execute.cpp
+next to the ones that are.  So a state count is a lower bound - exact for
+straight line code in Flash, and optimistic by a state here and there
+elsewhere.
+
+It is worth having because instruction counts mislead in the direction that
+flatters.  Inlining a 32 bit division by a word is 29 times fewer instructions
+than the library call and 16 times fewer states, because what replaced the
+call is two divides at twenty states each while the loop it replaced was
+almost all two state instructions.
+
+test/tools/c166-sim/states.s is the check on all of this: a short program
+whose count is worked out by hand from Table 11 in the comments, so that the
+simulator is measured against the document rather than against itself.
 
 Where the semantics come from
 -----------------------------

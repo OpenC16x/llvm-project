@@ -38,6 +38,12 @@ static cl::opt<std::string>
 static cl::opt<unsigned long long>
     MaxSteps("max-steps", cl::init(100000000),
              cl::desc("give up after this many instructions (0 = no limit)"));
+static cl::opt<bool>
+    Stats("count-states",
+          cl::desc("print the instruction and state counts when the program "
+                   "stops; a state is one CPU clock period, and the counts are "
+                   "the instruction set manual's for execution out of the "
+                   "internal program memory"));
 static cl::opt<bool> Trace("trace",
                            cl::desc("print each instruction executed"));
 static cl::opt<bool>
@@ -97,6 +103,8 @@ int main(int argc, char **argv) {
       errs() << formatv("MDL={0:x-4} MDH={1:x-4} steps={2}\n", M.MDL, M.MDH,
                         M.Steps);
     }
+    if (Stats)
+      errs() << formatv("instructions {0}  states {1}\n", M.Steps, M.States);
     switch (M.Stop) {
     case StopReason::Exited:
       return M.ExitCode;
