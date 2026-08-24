@@ -134,6 +134,19 @@ Neither half of the address needs a register when both are settled at link
 time: EXTS covers a long (mem) address just as it covers an indirect one, so a
 far global is read with "exts #seg(g), #1" and then "mov r2, sof(g)" outright.
 
+Two EXTends reaching the same object are folded into one, which is worth about
+a quarter of the code of a far-data-heavy program.  That is sound only if the
+object does not straddle a segment boundary, and nothing in an object file says
+it does not: once the two have been folded there is no second segment left to
+disagree with the first, so a straddling object would be reached at the right
+offset in the wrong segment.  The linker rejects such a placement, which is
+where the placement is finally known - c166.ld asserts the same of its regions,
+earlier and more coarsely, so a script that gets it wrong is caught either way.
+The check is a little stronger than the fold needs, since it also rejects a
+straddling object in code that happened not to be folded; carrying the fold's
+assumption into the object file as a relocation of its own would be a larger
+thing to add than the case is worth.
+
 A constant offset into a far object folds into its address rather than
 becoming arithmetic on it, since both relocations carry an addend.  That only
 applies to an object actually declared in the far address space: a near one
