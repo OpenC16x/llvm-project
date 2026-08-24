@@ -64,6 +64,9 @@ class C166Operand : public MCParsedAsmOperand {
     // which one was written has to survive parsing.
     bool HasDisp;
     bool PostInc;
+    // "[-Rw]" steps the pointer back before writing through it, which is the
+    // only auto-stepping store the machine has.
+    bool PreDec;
     // What the MAC unit's pointer forms do to the pointer after reading it.
     // The values are the ones the instruction carries: 1 leaves it alone, 2
     // and 3 step it by a word, and 4 to 7 step it by one of the two offset
@@ -98,15 +101,15 @@ public:
   bool isAddr() const { return Kind == k_Address || Kind == k_SFR; }
   bool isCondCode() const { return Kind == k_CondCode; }
   bool isMemR() const {
-    return Kind == k_Memory && !Mem.HasDisp && !Mem.PostInc && !Mem.IsIdx &&
-           Mem.CoUpdate == 1;
+    return Kind == k_Memory && !Mem.HasDisp && !Mem.PostInc && !Mem.PreDec &&
+           !Mem.IsIdx && Mem.CoUpdate == 1;
   }
 
   /// A MAC unit pointer: any of the update forms, on a general purpose
   /// register.  "[Rw]" and "[Rw+]" are also ordinary memory operands, and
   /// which one an instruction wants is what tells them apart.
   bool isCoPtr() const {
-    return Kind == k_Memory && !Mem.HasDisp && !Mem.IsIdx;
+    return Kind == k_Memory && !Mem.HasDisp && !Mem.IsIdx && !Mem.PreDec;
   }
 
   /// The same on IDX0 or IDX1.
@@ -115,6 +118,16 @@ public:
   }
   bool isMemRI() const { return Kind == k_Memory && Mem.HasDisp; }
   bool isMemRPostInc() const { return Kind == k_Memory && Mem.PostInc; }
+  bool isMemRPreDec() const { return Kind == k_Memory && Mem.PreDec; }
+
+  /// The ALU's indirect forms reach only R0 to R3, which is all their two bit
+  /// pointer field can name.
+  bool isPointerReg() const {
+    return Mem.Base == C166::R0 || Mem.Base == C166::R1 ||
+           Mem.Base == C166::R2 || Mem.Base == C166::R3;
+  }
+  bool isMemRP() const { return isMemR() && isPointerReg(); }
+  bool isMemRPPostInc() const { return isMemRPostInc() && isPointerReg(); }
 
   /// True when this is an immediate whose value is known and in [Low, High].
   /// A symbol reference is accepted for the wider fields, which can hold a
@@ -296,13 +309,14 @@ public:
   static std::unique_ptr<C166Operand> createMem(MCRegister Base,
                                                 const MCExpr *Disp,
                                                 bool HasDisp, bool PostInc,
-                                                unsigned CoUpdate, bool IsIdx,
-                                                SMLoc S, SMLoc E) {
+                                                bool PreDec, unsigned CoUpdate,
+                                                bool IsIdx, SMLoc S, SMLoc E) {
     auto Op = std::make_unique<C166Operand>(k_Memory, S, E);
     Op->Mem.Base = Base;
     Op->Mem.Disp = Disp;
     Op->Mem.HasDisp = HasDisp;
     Op->Mem.PostInc = PostInc;
+    Op->Mem.PreDec = PreDec;
     Op->Mem.CoUpdate = CoUpdate;
     Op->Mem.IsIdx = IsIdx;
     return Op;
@@ -442,6 +456,15 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   SMLoc S = getLexer().getLoc();
   Lex(); // eat '['
 
+  // "[-Rw]" steps the pointer back before writing through it.  It is the only
+  // auto-stepping store form, which is why there is no "[Rw-]" to go with the
+  // post-incrementing load.
+  bool PreDec = false;
+  if (getLexer().is(AsmToken::Minus)) {
+    Lex(); // eat '-'
+    PreDec = true;
+  }
+
   MCRegister Base;
   SMLoc RegStart = getLexer().getLoc();
   SMLoc RegEnd;
@@ -510,7 +533,7 @@ bool C166AsmParser::parseMemory(OperandVector &Operands) {
   Lex();
 
   Operands.push_back(C166Operand::createMem(Base, Disp, HasDisp, PostInc,
-                                            CoUpdate, IsIdx, S, E));
+                                            PreDec, CoUpdate, IsIdx, S, E));
   return false;
 }
 

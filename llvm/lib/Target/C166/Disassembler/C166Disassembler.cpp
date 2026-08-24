@@ -126,6 +126,14 @@ static DecodeStatus decodeBitAddrOperand(MCInst &MI, uint64_t Imm,
 /// register, anything else is the short address of a special function
 /// register.  Only the special function registers the backend models can be
 /// named, so the rest of the SFR space does not decode.
+/// The ALU's indirect forms carry their pointer in two bits, so it names one
+/// of R0 to R3 rather than any word register.
+static DecodeStatus decodeMemRPOperand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  return DecodeGR16RegisterClass(MI, Imm & 0x3, Address, Decoder);
+}
+
 static DecodeStatus decodeReg8Operand(MCInst &MI, uint64_t Imm,
                                       uint64_t Address,
                                       const MCDisassembler *Decoder) {

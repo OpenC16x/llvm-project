@@ -680,32 +680,22 @@ Known limitations / things to do
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
   win, being self-consistent across all 180.
-* Thirty three of the instruction forms in the manual cannot be assembled.
-  llvm/utils/C166Sim/tools/coverage.sh offers every mnemonic to the assembler
-  with operands of the right shape and reports what it rejects; today it covers
-  104 of 137.  What is missing falls into families rather than being scattered:
+* The instruction forms nothing generates are assembled and disassembled but
+  their encodings are derived rather than read off the page.  Each ALU group's
+  columns were already fixed by the forms the compiler emits - x0 register, x2
+  memory source, x6 immediate, x8 short immediate - and the ones added since
+  are the opcodes those columns left free: x4 for the memory destination and
+  the top half of x8 for the indirect source.  The derivation was checked the
+  one way it can be from inside this tree, and it held: the set of opcodes the
+  disassembler could not decode beforehand was exactly the set predicted, with
+  none left over on either side.
 
-    op mem, reg     the memory destination form of all eight ALU operations,
-                    which is the whole x4 and x5 column of the opcode map
-    op reg, [Rw]    the indirect source form of the same eight, so an ALU
-                    operation can fold a load only through an absolute address
-    cmp reg, mem    both memory forms of CMP, which is defined apart from the
-                    others because it has no destination
-    ADDCB, SUBCB    the byte add and subtract with carry, in every form
-    mov [-Rw], Rw   the pre-decrementing store, which the comment in
-                    C166ISelLowering.cpp about indexed stores already mentions
-    DIVL, DIVLU     the 32 by 16 divide
-    CALLR, PCALL, RETP, CMPD1, CMPD2, CMPI1, CMPI2, SCXT, PRIOR
-
-  None of it is unreachable by other means, so nothing generated is wrong; what
-  it costs is inline assembly, which cannot name any of them, and a disassembly
-  of code built elsewhere, which stops at the first one.  Some would also be
-  worth selecting - a memory destination ALU form is a load, an operation and a
-  store in one instruction, and PRIOR is the CTLZ this target expands.
-
-  The script is deliberately not a CI check.  Filling a gap means adding an
-  encoding, and an encoding has to come from the manual: the opcode map is
-  regular enough to guess from and that is exactly why guessing is unsafe.
+  That is strong agreement and it is not the manual, so anyone holding V2.0
+  should read llvm/test/MC/C166/rest-of-set.s first; it lists every one of
+  them with its bytes.  llvm/test/tools/c166-sim/rest-of-set.s runs them, so
+  what they do is checked even though what they encode to is inferred, and
+  llvm/utils/C166Sim/tools/coverage.sh reports anything missing - it covers
+  137 of 137 forms today.
 
 * The branch prediction bit of JMPA and CALLA is always left at 0, which the
   C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
