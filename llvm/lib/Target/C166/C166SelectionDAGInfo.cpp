@@ -29,9 +29,9 @@ C166SelectionDAGInfo::~C166SelectionDAGInfo() = default;
 // does.  Sizes stay 16 bit, so one call cannot cross more than a segment's
 // worth of bytes.
 //
-//   void *__memcpy_far (void __far *dst, const void __far *src, unsigned n);
-//   void *__memmove_far(void __far *dst, const void __far *src, unsigned n);
-//   void *__memset_far (void __far *dst, int c, unsigned n);
+//   void __far *__memcpy_far (void __far *dst, const void __far *src, unsigned n);
+//   void __far *__memmove_far(void __far *dst, const void __far *src, unsigned n);
+//   void __far *__memset_far (void __far *dst, int c, unsigned n);
 //
 // Only a copy the compiler cannot expand inline ends up here; a constant sized
 // one has already been turned into loads and stores by the time this runs.

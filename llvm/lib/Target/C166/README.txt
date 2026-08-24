@@ -156,12 +156,44 @@ The C library's block moves take near pointers, so llvm.memcpy, llvm.memmove
 and llvm.memset reaching into the far address space call entry points of their
 own once they are too big or too dynamic to expand inline:
 
-    void *__memcpy_far (void __far *dst, const void __far *src, unsigned n);
-    void *__memmove_far(void __far *dst, const void __far *src, unsigned n);
-    void *__memset_far (void __far *dst, int c, unsigned n);
+    void __far *__memcpy_far (void __far *dst, const void __far *src, unsigned n);
+    void __far *__memmove_far(void __far *dst, const void __far *src, unsigned n);
+    void __far *__memset_far (void __far *dst, int c, unsigned n);
 
 Both pointers are far, so a near operand is widened on the way in under the
 same DPP assumption as an addrspacecast, and the size stays 16 bit.
+
+The three live in startup/mem.c beside the near ones, and are the same byte at
+a time loops with the pointer type changed.  That is deliberate: stepping a far
+pointer is a 32 bit add whose carry out of the offset lands in the segment, so
+the crossing is the compiler's arithmetic rather than something to open code,
+and writing them any other way would be reimplementing it by hand.
+
+Each one carries a no_builtin, without which it calls itself.  Loop idiom
+recognition turns a byte at a time copy or fill back into a memcpy or a memset,
+and declines to do so only inside a function actually named memcpy or memset -
+which is how the near versions escape it.  These are not named that, so the
+loop becomes a block move through far pointers, which is a call to the function
+it is the body of.  It builds and links; it is an infinite recursion at run
+time.  The attribute keeps that fixed wherever the file is compiled, which a
+flag in the script that builds it would not.
+
+Far pointer arithmetic across a segment boundary is what
+utils/C166Sim/differential/farptr.c is for.  It walks a pointer one byte at a
+time across one rather than sampling either side, checks the addresses it
+produces as values as well as using them, and runs the block moves above with
+both source and destination crossing.  The span it uses is chosen for the
+crossing and not for the part: it is plain memory in the simulator and nothing
+on a real XC164CM.  What is under test is the address arithmetic.
+
+Two things about that test are worth keeping if it is ever rewritten.  A block
+move only exercises the crossing if it is long enough to reach it - the first
+version's moves all sat on one side of the boundary and passed against a
+deliberately broken memcpy.  And whatever a move writes past the crossing has
+to land inside the range the checksums cover, or a move that went to the wrong
+segment corrupts only bytes nothing looks at and the test passes anyway.  Both
+of those were found by breaking the implementation on purpose and watching the
+test not notice.
 
 Far code
 ~~~~~~~~
@@ -812,6 +844,53 @@ executed instructions and 728 bytes before, 658 instructions and 354 bytes
 after: the routine drops out of the image entirely when nothing else needs
 it.  Over the differential programs the size is unchanged, because the signed
 division there keeps __udivsi3 linked in for its own use.
+
+Compares the flags already answer
+---------------------------------
+
+Nearly every arithmetic and logical instruction sets Z and N from the value it
+produced, so "and r6, #16" followed by "cmp r6, #0" asks a question the AND has
+already answered.  C166FoldCompare removes the compare.  Over the differential
+programs that is 83 of them, 166 bytes, and 83 instructions that no longer run.
+
+It is a pass rather than the usual optimizeCompareInstr() hook because of when
+the compare exists.  Until the post register allocation expansion a conditional
+branch is a single BRCC pseudo carrying both the comparison and the condition;
+the compare only becomes an instruction of its own when that pseudo is split,
+which is after the peephole optimiser has run and the hook would have been
+called.
+
+The condition has to read Z and N and nothing else.  A compare against zero
+also sets C and V, to zero both times, and the instruction that produced the
+value will generally have left something else there - a shift leaves the last
+bit shifted out in C, an add leaves its carry.  cc_SGT after a subtract is the
+case that rules out, and it occurs.
+
+The instruction that set the flags has to be the one immediately before the
+compare.  The obvious alternative - walk back while nothing writes PSW - is
+wrong here, and quietly.  MOV is deliberately not modelled as writing PSW,
+because it leaves C alone and that is what lets a carry survive the register
+shuffling around a wide addition; but it does clobber Z and N on the part.  So
+the machine description's account of what touches the flags is not the part's,
+and a gap that looks empty can hold a move that has already destroyed the
+answer.  That is not a theory: the version that walked back removed half as
+many compares again and turned two of the differential programs into infinite
+loops.
+
+Adjacency is not free.  It is 83 compares rather than 128, so about a third are
+out of reach.  Reaching them would need a list of what really preserves Z and
+N, which is a claim about the part, to be checked against the part rather than
+against a model that is already wrong on this point.
+
+Scheduling
+~~~~~~~~~~
+
+There is no scheduling model.  Adding one was considered and not done: what it
+would buy is measured in cycles, and nothing here counts cycles.  The simulator
+counts instructions, which is the wrong unit for a question about latency, and
+the part's timing is dominated by memory wait states that vary between members
+of the family.  A model written without something to check it against would be
+a set of numbers that look authoritative and are not.
 
 Counting leading zeroes
 -----------------------
