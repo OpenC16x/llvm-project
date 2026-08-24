@@ -101,9 +101,16 @@ static bool readsOnlyZN(C166CC::CondCode CC) {
 }
 
 /// Whether this instruction sets Z and N from the value it writes to its
-/// first operand.  Everything here goes through the same two flag writes in
-/// the manual's description; ADDC and SUBC are left out on purpose, see the
-/// note at the top of the file.
+/// first operand.
+///
+/// The list is taken from the simulator, which implements the flag behaviour
+/// instruction by instruction, rather than from the machine description, which
+/// does not model it - that is the same gap that makes walking back over an
+/// apparently empty gap unsound.  Two kinds of near miss are left out because
+/// checking found them: MOV16prd and MOVB8prd, the pre-decrement stores, set
+/// no flags at all, and ADDC and SUBC set Z only if it was already set, so
+/// that a wide value tests as zero exactly when every word of it did - which
+/// is the answer to a different question from the one "cmp Rw, #0" asks.
 static bool setsZNFromResult(const MachineInstr &MI) {
   switch (MI.getOpcode()) {
   case C166::ADD16rr:  case C166::ADD16ri:  case C166::ADD16ri3:
@@ -126,6 +133,24 @@ static bool setsZNFromResult(const MachineInstr &MI) {
   case C166::ASHR16rr: case C166::ASHR16ri:
   case C166::ROL16rr:  case C166::ROL16ri:
   case C166::ROR16rr:  case C166::ROR16ri:
+  // A move sets Z and N from the value it moved, which for the forms that
+  // write a register is the value that ends up in it - so a compare of that
+  // register against zero is answered too.  It leaves C and V alone, which is
+  // why the condition still has to be one that does not read them.
+  case C166::MOV16rr:   case C166::MOVB8rr:
+  case C166::MOV16ri:   case C166::MOV16ri4:
+  case C166::MOVB8ri:   case C166::MOVB8ri4:
+  case C166::MOV16ra:   case C166::MOVB8ra:
+  case C166::MOV16rp:   case C166::MOVB8rp:
+  case C166::MOV16rm:   case C166::MOVB8rm:
+  case C166::MOV16rpi:  case C166::MOVB8rpi:
+  case C166::MOV16regi: case C166::MOVB8regi:
+  case C166::MOV16rega: case C166::MOVB8rega:
+  // MOVBZ forces N to zero and MOVBS takes it from the byte's sign, which is
+  // the sign of the word each of them leaves behind, and both set Z from the
+  // byte - zero exactly when the widened word is.  So the flags describe the
+  // word that was written, which is what is being compared.
+  case C166::MOVBZ16r8: case C166::MOVBS16r8:
     return true;
   default:
     return false;

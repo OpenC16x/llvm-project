@@ -64,13 +64,16 @@ f:
   ret i16 0
 }
 
-; A load does not set the flags from what it loaded as far as the machine
-; description is concerned, so the compare after one stays.
+; A move sets Z and N from the value it moved, so a load followed by a test
+; against zero needs no compare either.  That is taken from the simulator,
+; which implements the flag behaviour, rather than from the machine
+; description, which does not model it at all for a move.
 
 define i16 @after_load(ptr %p) {
 ; CHECK-LABEL: after_load:
 ; CHECK:         mov r2, [r2]
-; CHECK-NEXT:    cmp r2, #0
+; CHECK-NEXT:    jmpr cc_EQ,
+; CHECK-NOT:     cmp
 entry:
   %v = load i16, ptr %p
   %c = icmp eq i16 %v, 0
@@ -79,4 +82,21 @@ t:
   ret i16 1
 f:
   ret i16 %v
+}
+
+; Reading MDL after a divide is a move as far as the encoding goes, but it is
+; not one of the forms the flags were checked for, so the compare stays.
+
+define i16 @after_divide(i16 %a, i16 %b) {
+; CHECK-LABEL: after_divide:
+; CHECK:         divu r3
+; CHECK:         cmp r2, #0
+entry:
+  %q = udiv i16 %a, %b
+  %c = icmp eq i16 %q, 0
+  br i1 %c, label %t, label %f
+t:
+  ret i16 1
+f:
+  ret i16 %q
 }

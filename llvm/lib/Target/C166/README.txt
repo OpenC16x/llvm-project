@@ -864,7 +864,7 @@ Compares the flags already answer
 Nearly every arithmetic and logical instruction sets Z and N from the value it
 produced, so "and r6, #16" followed by "cmp r6, #0" asks a question the AND has
 already answered.  C166FoldCompare removes the compare.  Over the differential
-programs that is 83 of them, 166 bytes, and 83 instructions that no longer run.
+programs that is 91 of them, 182 bytes, and 91 instructions that no longer run.
 
 It is a pass rather than the usual optimizeCompareInstr() hook because of when
 the compare exists.  Until the post register allocation expansion a conditional
@@ -890,10 +890,21 @@ answer.  That is not a theory: the version that walked back removed half as
 many compares again and turned two of the differential programs into infinite
 loops.
 
-Adjacency is not free.  It is 83 compares rather than 128, so about a third are
-out of reach.  Reaching them would need a list of what really preserves Z and
-N, which is a claim about the part, to be checked against the part rather than
-against a model that is already wrong on this point.
+Adjacency is not free, and what it costs was measured rather than guessed: of
+the compares it gives up, the gap is a move in every case but one.  A move is
+exactly what cannot be stepped over, so no rule about what preserves the flags
+reaches them - only reordering would, by lifting the move above the instruction
+that set the flags, and 46 compares is not enough to justify moving
+instructions around after register allocation.
+
+Looking at the moves did pay, though, in the other direction.  A move sets Z
+and N from the value it moved, so a move that writes the register being
+compared answers the question itself - and the list of which forms do that is
+taken from the simulator, which implements the flag behaviour, rather than from
+the machine description, which does not model it.  Two near misses came out of
+that check: the pre-decrement stores set no flags at all, and ADDC and SUBC set
+Z only if it was already set, so that a wide value tests as zero exactly when
+every word of it did.  Neither is in the list.
 
 Scheduling
 ~~~~~~~~~~
