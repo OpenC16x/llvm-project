@@ -26,6 +26,14 @@ static constexpr uint32_t SFR_STKOV = 0xFE14, SFR_STKUN = 0xFE16;
 static constexpr uint32_t SFR_MDC = 0xFF0E, SFR_PSW = 0xFF10;
 static constexpr uint32_t SFR_CPUCON1 = 0xFE18, SFR_VECSEG = 0xFF12;
 
+// The coprocessor's accumulator, reachable by address as well as through
+// CoSTORE.  An interrupt handler that uses the MAC unit saves and restores it
+// this way, so these have to be the accumulator itself and not storage that
+// happens to sit at the same addresses.  MRW is not here: nothing modelled
+// reads or writes it, so it behaves as the storage everything unmodelled does.
+static constexpr uint32_t SFR_MAL = 0xFE5C, SFR_MAH = 0xFE5E;
+static constexpr uint32_t SFR_MCW = 0xFFDC, SFR_MSW = 0xFFDE;
+
 // The clock, which is modelled only as far as startup code needs: PLLCON reads
 // back what was written, and SYSSTAT reports the PLL locked once the VCO is
 // running.  That is the one thing a peripheral register reading back its own
@@ -58,6 +66,10 @@ static bool isCPUSFR(uint32_t Phys) {
   case SFR_CSP:
   case SFR_MDH:
   case SFR_MDL:
+  case SFR_MAL:
+  case SFR_MAH:
+  case SFR_MCW:
+  case SFR_MSW:
   case SFR_CP:
   case SFR_SP:
   case SFR_STKOV:
@@ -92,6 +104,16 @@ uint16_t Machine::read16(uint32_t Phys) {
       return MDH;
     case SFR_MDL:
       return MDL;
+    case SFR_MAL:
+      return uint16_t(uint64_t(ACC) & 0xFFFF);
+    case SFR_MAH:
+      return uint16_t((uint64_t(ACC) >> 16) & 0xFFFF);
+    case SFR_MCW:
+      return MCW;
+    case SFR_MSW:
+      // The low byte is MAE, the accumulator's top eight bits; the rest is
+      // carried rather than generated.
+      return MSWFlags | uint16_t((uint64_t(ACC) >> 32) & 0xFF);
     case SFR_CP:
       return CP;
     case SFR_SP:
@@ -143,6 +165,22 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
       return;
     case SFR_MDL:
       MDL = V;
+      return;
+    case SFR_MAL:
+      setACC((ACC & ~INT64_C(0xFFFF)) | V);
+      return;
+    case SFR_MAH:
+      // Writing a word to MAH zeroes MAL and sign extends the extension byte,
+      // which is why a handler putting the accumulator back has to restore MAH
+      // first and MAL and MSW on top of what this cleared.
+      setACC(int64_t(int16_t(V)) << 16);
+      return;
+    case SFR_MCW:
+      MCW = V;
+      return;
+    case SFR_MSW:
+      MSWFlags = V & 0xFF00;
+      setACC((ACC & INT64_C(0xFFFFFFFF)) | (int64_t(V & 0xFF) << 32));
       return;
     case SFR_CP:
       CP = V;

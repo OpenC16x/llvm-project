@@ -37,8 +37,8 @@
 
 // A MAC instruction: four bytes, with the repeat control left at the plain
 // form and the two bits above the pointer control always zero.
-class CoInst<bits<8> op, bits<8> ext, dag ins, string asmstr>
-    : C166Inst<(outs), ins, 4, asmstr, []> {
+class CoInst<bits<8> op, bits<8> ext, dag ins, string asmstr, dag outs = (outs)>
+    : C166Inst<outs, ins, 4, asmstr, []> {
   let Inst{7-0} = op;
   let Inst{23-16} = ext;
   let Inst{28-27} = 0b00;
@@ -145,8 +145,14 @@ class CoStoreP<string asmstr>
 }
 
 // C3 nn wwww:w000 rrr0:0000 - the same into a register.
+//
+// The register is an output: this is the one CoXXX form that puts a value into
+// a general purpose register rather than taking one out of it.  Saying so is
+// what lets the machine verifier - and anything else reasoning about liveness
+// after the MAC pseudo has been expanded - see that the register's old value
+// ends here.
 class CoStoreR<string asmstr>
-    : CoInst<0xC3, 0, (ins GR16:$n, coreg:$w), asmstr> {
+    : CoInst<0xC3, 0, (ins coreg:$w), asmstr, (outs GR16:$n)> {
   bits<4> n;
   bits<5> w;
   let Inst{15-12} = n;

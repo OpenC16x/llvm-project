@@ -57,6 +57,17 @@ BitVector C166RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(C166::MDL);
   Reserved.set(C166::MDH);
   Reserved.set(C166::MDC);
+
+  // So are the coprocessor's, for the same reason: nothing allocates them, and
+  // what is in them is state the compiler places by hand rather than a value
+  // the allocator is free to move.
+  Reserved.set(C166::MAL);
+  Reserved.set(C166::MAH);
+  Reserved.set(C166::MAS);
+  Reserved.set(C166::MSW);
+  Reserved.set(C166::MCW);
+  Reserved.set(C166::MRW);
+
   Reserved.set(C166::SYSSP);
   Reserved.set(C166::CP);
 

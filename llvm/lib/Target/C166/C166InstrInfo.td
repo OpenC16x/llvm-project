@@ -791,13 +791,13 @@ def HasMAC : Predicate<"Subtarget->hasMAC()">;
 // the eighteen of a multiply, the two reads out of MDL and MDH, and the add
 // and add-with-carry.
 //
-// The accumulator never leaves the pseudo, which is what keeps this simple.
-// It is one piece of state shared with everything else on the part - like MDL
-// and MDH, and unlike them saved by nothing - so a MAC left live across a
-// call or an interrupt would have to be saved somewhere.  Holding it only
-// between the CoLOAD and the CoSTOREs of a single accumulate means it never
-// is.  Chaining them, which is what would take the loads and stores out of a
-// loop, is exactly the change that would make that question real.
+// The accumulator never leaves the pseudo, which is what keeps this simple:
+// it is one piece of state shared with everything else on the part, so holding
+// it only between the CoLOAD and the CoSTOREs of a single accumulate means
+// nothing has to know about it.  C166MACChain takes the loads and stores out
+// of a summing loop, where the total is worth keeping in the unit across the
+// whole of it; what is left here is every accumulate that pass does not
+// recognise.
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
 def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
                      (ins GR16:$acclo, GR16:$acchi, GR16:$a, GR16:$b),

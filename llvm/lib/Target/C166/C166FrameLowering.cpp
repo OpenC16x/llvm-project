@@ -90,6 +90,59 @@ static bool needsMulDivSave(const MachineFunction &MF) {
          MRI.isPhysRegModified(C166::MDC);
 }
 
+/// The MAC unit's accumulator is forty bits wide: the low byte of MSW is its
+/// extension, sitting above MAH and MAL.  None of that is on the record the
+/// hardware builds on entry to a handler, and the C166S V2 manual says what
+/// follows from it in as many words - "all dedicated MAC registers must be
+/// saved on the stack if the MAC unit is shared between different tasks and
+/// interrupts".  So a handler that touches the coprocessor has to put it back
+/// itself, exactly as it does the multiply/divide unit above.
+///
+/// The three accumulator registers go together whether or not each was written
+/// on its own, because putting a word into MAH zeroes MAL and sign extends the
+/// extension byte: restoring one of them restores all three, so all three have
+/// to have been saved.  That is also why MAH is pushed last and so popped
+/// first, with MAL and MSW landing on top of what its restoration cleared.
+static bool writesRegisterOutright(const MachineFunction &MF, MCRegister Reg,
+                                   const TargetRegisterInfo &TRI) {
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      for (const MachineOperand &MO : MI.operands())
+        if (MO.isReg() && MO.isDef() && MO.getReg() &&
+            TRI.regsOverlap(MO.getReg(), Reg))
+          return true;
+  return false;
+}
+
+static void getMACSaveList(const MachineFunction &MF,
+                           SmallVectorImpl<MCRegister> &Regs) {
+  if (!MF.getFunction().hasFnAttribute("interrupt"))
+    return;
+  if (!MF.getSubtarget<C166Subtarget>().hasMAC())
+    return;
+
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+
+  // MCW and MRW are the unit's configuration rather than its working state.
+  // Nothing generated here writes either, and a hand written routine that
+  // changes the unit's mode has to put it back for its own caller whether an
+  // interrupt is involved or not.  So these are saved where this handler
+  // really does write them and not merely because it makes a call, which is
+  // what asking about the registers themselves rather than what a call's
+  // register mask covers comes to.
+  for (MCRegister Reg : {C166::MRW, C166::MCW})
+    if (writesRegisterOutright(MF, Reg, TRI))
+      Regs.push_back(Reg);
+
+  // The accumulator is working state, and there a call is enough on its own:
+  // the callee is free to use the unit, and on a part that has one that is
+  // what it does whenever it multiplies.
+  if (MRI.isPhysRegModified(C166::MAL) || MRI.isPhysRegModified(C166::MAH) ||
+      MRI.isPhysRegModified(C166::MSW))
+    Regs.append({C166::MSW, C166::MAL, C166::MAH});
+}
+
 /// How this function was entered, which is what decides the shape of the record
 /// the hardware stack holds.
 static C166::EntryKind getEntryKind(const MachineFunction &MF) {
@@ -174,16 +227,29 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
   // Save the multiply/divide unit before anything else can disturb it.  MDC
   // goes first because reading MDL - which is what pushing it does - clears
   // MDC.MDRIU, the bit that says the unit is in use.
+  unsigned SavedWords = 0;
   if (needsMulDivSave(MF)) {
     for (MCRegister Reg : {C166::MDC, C166::MDL, C166::MDH})
       BuildMI(MBB, MBBI, DL, TII.get(C166::PUSH))
           .addReg(Reg)
           .setMIFlag(MachineInstr::FrameSetup);
-
-    // Those three went on the hardware stack, so everything the rules above
-    // measured from SP has moved down by six bytes.
-    emitUnwindRules(MBB, MBBI, DL, /*Depth=*/6, MachineInstr::FrameSetup);
+    SavedWords += 3;
   }
+
+  // Then the coprocessor, if this handler disturbs it.
+  SmallVector<MCRegister, 5> MACSaves;
+  getMACSaveList(MF, MACSaves);
+  for (MCRegister Reg : MACSaves)
+    BuildMI(MBB, MBBI, DL, TII.get(C166::PUSH))
+        .addReg(Reg)
+        .setMIFlag(MachineInstr::FrameSetup);
+  SavedWords += MACSaves.size();
+
+  // All of those went on the hardware stack, so everything the rules above
+  // measured from SP has moved down by two bytes apiece.
+  if (SavedWords)
+    emitUnwindRules(MBB, MBBI, DL, /*Depth=*/2 * SavedWords,
+                    MachineInstr::FrameSetup);
 
   // Allocate the frame before the callee saved registers are spilled: their
   // slots are addressed relative to the already adjusted stack pointer.
@@ -256,18 +322,25 @@ void C166FrameLowering::emitEpilogue(MachineFunction &MF,
         .setMIFlag(MachineInstr::FrameDestroy);
   }
 
-  // Undo the saves of the multiply/divide unit last, so that nothing between
-  // here and the RETI can touch it again.  Popping in the mirror order also
-  // puts MDC back after MDL and MDH, whose restoration would otherwise leave
-  // MDC.MDRIU set whether or not it was.
-  if (needsMulDivSave(MF)) {
+  // Undo the saves of the coprocessor and the multiply/divide unit last, so
+  // that nothing between here and the RETI can touch either again.  Popping in
+  // the mirror order puts MDC back after MDL and MDH, whose restoration would
+  // otherwise leave MDC.MDRIU set whether or not it was, and puts MAH back
+  // before MAL and MSW, which is the order the accumulator needs.
+  SmallVector<MCRegister, 5> MACSaves;
+  getMACSaveList(MF, MACSaves);
+  for (MCRegister Reg : reverse(MACSaves))
+    BuildMI(MBB, MBBI, DL, TII.get(C166::POP), Reg)
+        .setMIFlag(MachineInstr::FrameDestroy);
+
+  if (needsMulDivSave(MF))
     for (MCRegister Reg : {C166::MDH, C166::MDL, C166::MDC})
       BuildMI(MBB, MBBI, DL, TII.get(C166::POP), Reg)
           .setMIFlag(MachineInstr::FrameDestroy);
 
-    // And back up again, so that the rules are right for the RETI as well.
+  // And back up again, so that the rules are right for the RETI as well.
+  if (!MACSaves.empty() || needsMulDivSave(MF))
     emitUnwindRules(MBB, MBBI, DL, /*Depth=*/0, MachineInstr::FrameDestroy);
-  }
 }
 
 bool C166FrameLowering::spillCalleeSavedRegisters(
