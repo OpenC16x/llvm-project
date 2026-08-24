@@ -431,6 +431,10 @@ def SFR : RegisterClass<"C166", [i16], 16,
 // byte one, and the special function registers are reachable from either.
 // They exist only to widen that field past the general purpose registers, so
 // neither is an allocation class of its own.
+// The pointers the ALU's indirect forms can use.  Their field is two bits
+// wide, so only the first four general purpose registers fit in it.
+def GR16P : RegisterClass<"C166", [i16], 16, (add R0, R1, R2, R3)>;
+
 def GR16orSFR : RegisterClass<"C166", [i16], 16, (add GR16, SFR)> {
   let isAllocatable = 0;
   let CopyCost = -1;

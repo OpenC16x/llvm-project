@@ -55,7 +55,7 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setPrefFunctionAlignment(Align(2));
 
   // There are no atomic instructions beyond a plain load and store.
-  setMaxAtomicSizeInBitsSupported(0);
+  setMaxAtomicSizeInBitsSupported(16);
 
   // Extending loads of a byte always go through a real byte load followed by
   // MOVBZ/MOVBS.
@@ -88,7 +88,14 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::ROTR, VT, VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::BSWAP, VT, Expand);
     setOperationAction(ISD::CTTZ, VT, Expand);
+    // PRIOR counts how far the leftmost set bit is from the top, which is the
+    // count of leading zeroes and is what CTLZ_ZERO_POISON asks for.  It leaves
+    // zero behind for a source of zero, where CTLZ wants sixteen, so the full
+    // one stays expanded - the generic expansion is this instruction and a
+    // test for zero rather than the twenty five instruction bit smear it was.
     setOperationAction(ISD::CTLZ, VT, Expand);
+    setOperationAction(ISD::CTLZ_ZERO_POISON, VT,
+                       VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::CTPOP, VT, Expand);
     setOperationAction(ISD::SDIVREM, VT, Expand);
     setOperationAction(ISD::UDIVREM, VT, Expand);
@@ -97,9 +104,16 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
     // promoted to a word before it gets here.
     setOperationAction(ISD::SMUL_LOHI, VT, VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::UMUL_LOHI, VT, VT == MVT::i16 ? Legal : Expand);
-    setOperationAction(ISD::SHL_PARTS, VT, Expand);
-    setOperationAction(ISD::SRL_PARTS, VT, Expand);
-    setOperationAction(ISD::SRA_PARTS, VT, Expand);
+    // A word shift takes its count from a register, so a wide shift by a
+    // variable amount is a handful of instructions rather than a call to
+    // __ashlsi3 and friends.  That matters beyond the speed: code in PSRAM
+    // cannot reach the builtins, which live in flash, so a variable shift used
+    // to be something such code had to avoid.  Only the word form; a byte one
+    // is promoted before it gets here.
+    LegalizeAction ShiftParts = VT == MVT::i16 ? Custom : Expand;
+    setOperationAction(ISD::SHL_PARTS, VT, ShiftParts);
+    setOperationAction(ISD::SRL_PARTS, VT, ShiftParts);
+    setOperationAction(ISD::SRA_PARTS, VT, ShiftParts);
     // A word add or subtract leaves its carry in the PSW and ADDC/SUBC read
     // it back, so wider arithmetic is a carry chain rather than a sequence of
     // compares.  Only the word forms exist; a byte carry has nowhere to go
@@ -198,9 +212,88 @@ SDValue C166TargetLowering::LowerOperation(SDValue Op,
     return LowerSTORE(Op, DAG);
   case ISD::ADDRSPACECAST:
     return LowerADDRSPACECAST(Op, DAG);
+  case ISD::SHL_PARTS:
+  case ISD::SRL_PARTS:
+  case ISD::SRA_PARTS:
+    return LowerShiftParts(Op, DAG);
   default:
     llvm_unreachable("unimplemented operation lowering");
   }
+}
+
+/// A shift of a value two words wide by an amount only known at run time.
+///
+/// The machine shifts a word by a count in a register, so this is a handful of
+/// instructions rather than the call to __ashlsi3 it used to be.  Two things
+/// shape it.
+///
+/// The count register is read as its low four bits, so a shift by sixteen is a
+/// shift by nothing.  That is a trap in the obvious expansion, which wants to
+/// bring the bits that cross between the halves over with a shift by
+/// "16 - amount": at an amount of zero that is a shift by sixteen, and instead
+/// of contributing nothing it would contribute the whole word.  Shifting by
+/// "15 - amount" and then once more gets it right at zero without asking, and
+/// is the same everywhere else.
+///
+/// The masking is useful in the other direction, though.  When the amount is
+/// sixteen or more the result is one half shifted by "amount - 16", and since
+/// the hardware is already reading the count modulo sixteen, that is the same
+/// instruction as the one the small case needs.  So it is computed once and
+/// used twice.
+SDValue C166TargetLowering::LowerShiftParts(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Lo = Op.getOperand(0);
+  SDValue Hi = Op.getOperand(1);
+  SDValue Amt = Op.getOperand(2);
+  unsigned Opc = Op.getOpcode();
+  EVT VT = Lo.getValueType();
+
+  SDValue Fifteen = DAG.getConstant(15, DL, VT);
+  SDValue One = DAG.getConstant(1, DL, VT);
+  SDValue Zero = DAG.getConstant(0, DL, VT);
+
+  // Whether the shift moves a whole word across, which is bit 4 of the amount.
+  SDValue IsWide =
+      DAG.getSetCC(DL, getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(),
+                                          VT),
+                   DAG.getNode(ISD::AND, DL, VT, Amt,
+                               DAG.getConstant(16, DL, VT)),
+                   Zero, ISD::SETNE);
+
+  // The bits that leave one half and arrive in the other, shifted the long way
+  // round so that an amount of zero brings nothing over.
+  SDValue Lack = DAG.getNode(ISD::SUB, DL, VT, Fifteen, Amt);
+
+  SDValue OutLo, OutHi;
+  if (Opc == ISD::SHL_PARTS) {
+    SDValue ShLo = DAG.getNode(ISD::SHL, DL, VT, Lo, Amt);
+    SDValue Cross = DAG.getNode(ISD::SRL, DL, VT,
+                                DAG.getNode(ISD::SRL, DL, VT, Lo, Lack), One);
+    SDValue NearHi = DAG.getNode(ISD::OR, DL, VT,
+                                 DAG.getNode(ISD::SHL, DL, VT, Hi, Amt), Cross);
+    // Wide: everything left in the result came from the low half, and the low
+    // half itself is empty.
+    OutLo = DAG.getSelect(DL, VT, IsWide, Zero, ShLo);
+    OutHi = DAG.getSelect(DL, VT, IsWide, ShLo, NearHi);
+  } else {
+    bool Arithmetic = Opc == ISD::SRA_PARTS;
+    unsigned HiOpc = Arithmetic ? ISD::SRA : ISD::SRL;
+    SDValue ShHi = DAG.getNode(HiOpc, DL, VT, Hi, Amt);
+    SDValue Cross = DAG.getNode(ISD::SHL, DL, VT,
+                                DAG.getNode(ISD::SHL, DL, VT, Hi, Lack), One);
+    SDValue NearLo = DAG.getNode(ISD::OR, DL, VT,
+                                 DAG.getNode(ISD::SRL, DL, VT, Lo, Amt), Cross);
+    // Wide: the low half comes from the high one.  What is left above it is
+    // zero for a logical shift, and the sign for an arithmetic one, which is
+    // the high half shifted right by fifteen.
+    SDValue WideHi =
+        Arithmetic ? DAG.getNode(ISD::SRA, DL, VT, Hi, Fifteen) : Zero;
+    OutLo = DAG.getSelect(DL, VT, IsWide, ShHi, NearLo);
+    OutHi = DAG.getSelect(DL, VT, IsWide, WideHi, ShHi);
+  }
+
+  return DAG.getMergeValues({OutLo, OutHi}, DL);
 }
 
 /// A function placed in another segment has to be entered with CALLS and left
@@ -619,9 +712,165 @@ C166TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }
 
+/// A compare and exchange, held together by clearing PSW.IEN rather than by
+/// ATOMIC: it stores only when what it read matched, so it branches, and a
+/// branch is what an ATOMIC sequence cannot contain.
+///
+///     mov  save, psw          what IEN was, along with the flags
+///     bclr psw.11             interrupts off
+///     mov  old, [addr]
+///     cmp  old, cmp
+///     jmpr cc_NE, out
+///     mov  [addr], new
+///   out:
+///     mov  psw, save          exactly what it was, IEN included
+///
+/// Putting the whole word back rather than the one bit is a single
+/// instruction, and the flags it also restores are dead by then: the only
+/// reader was the branch above.
+/// Whether \p Ptr is a far pointer, which no atomic here can reach.
+///
+/// Every one of these sequences holds together because of what surrounds it,
+/// and a far access does not fit inside either kind of surround: reaching one
+/// needs an EXTend, and the hardware keeps a single instruction counter that
+/// an ATOMIC sequence is already using.  Saying so is better than the type
+/// legalizer falling over on the 32 bit pointer, and much better than code
+/// that looks atomic and is not.
+static bool diagnoseFarAtomic(const Instruction *I, const Value *Ptr,
+                              StringRef What) {
+  if (Ptr->getType()->getPointerAddressSpace() != C166AS::Far)
+    return false;
+  I->getContext().diagnose(DiagnosticInfoUnsupported(
+      *I->getFunction(),
+      "cannot make a far access atomic: " + What +
+          " on a far pointer needs an EXTend, which an ATOMIC sequence has no "
+          "instruction counter left for",
+      I->getDebugLoc()));
+  return true;
+}
+
+TargetLowering::AtomicExpansionKind
+C166TargetLowering::shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *CI) const {
+  if (diagnoseFarAtomic(CI, CI->getPointerOperand(), "a compare and exchange"))
+    return AtomicExpansionKind::NotAtomic;
+  return AtomicExpansionKind::None;
+}
+
+TargetLowering::AtomicExpansionKind
+C166TargetLowering::shouldExpandAtomicLoadInIR(LoadInst *LI) const {
+  if (diagnoseFarAtomic(LI, LI->getPointerOperand(), "a load"))
+    return AtomicExpansionKind::NotAtomic;
+  return AtomicExpansionKind::None;
+}
+
+TargetLowering::AtomicExpansionKind
+C166TargetLowering::shouldExpandAtomicStoreInIR(StoreInst *SI) const {
+  if (diagnoseFarAtomic(SI, SI->getPointerOperand(), "a store"))
+    return AtomicExpansionKind::NotAtomic;
+  return AtomicExpansionKind::None;
+}
+
+/// Which read-modify-writes the ATOMIC sequence can carry.
+///
+/// The sequence is a read, a copy, the change and a write back, and ATOMIC
+/// reaches four instructions, so an operation the machine does in one
+/// instruction fits and nothing else does.  NAND is an AND and a complement,
+/// and the minimum and maximum need a comparison and a choice; those go round
+/// a compare and exchange loop instead, which is one instruction longer per
+/// turn but has no count to overrun.
+TargetLowering::AtomicExpansionKind
+C166TargetLowering::shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const {
+  // Reported, then left as an ordinary read-modify-write so that code
+  // generation has something it can finish; the error stops the compile
+  // before any of it is written out.
+  if (diagnoseFarAtomic(AI, AI->getPointerOperand(), "a read-modify-write"))
+    return AtomicExpansionKind::NotAtomic;
+
+  switch (AI->getOperation()) {
+  case AtomicRMWInst::Add:
+  case AtomicRMWInst::Sub:
+  case AtomicRMWInst::And:
+  case AtomicRMWInst::Or:
+  case AtomicRMWInst::Xor:
+  case AtomicRMWInst::Xchg:
+    return AtomicExpansionKind::None;
+  default:
+    return AtomicExpansionKind::CmpXChg;
+  }
+}
+
+MachineBasicBlock *
+C166TargetLowering::emitCmpXchg(MachineInstr &MI, MachineBasicBlock *BB) const {
+  bool Byte = MI.getOpcode() == C166::CMPXCHG8;
+  const TargetSubtargetInfo &STI = BB->getParent()->getSubtarget();
+  const TargetInstrInfo &TII = *STI.getInstrInfo();
+  const TargetRegisterInfo &TRI = *STI.getRegisterInfo();
+  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
+  DebugLoc DL = MI.getDebugLoc();
+
+  Register Dst = MI.getOperand(0).getReg();
+  Register Addr = MI.getOperand(1).getReg();
+  Register Cmp = MI.getOperand(2).getReg();
+  Register New = MI.getOperand(3).getReg();
+
+  // PSW carries its own short address as its encoding.  For a bit addressable
+  // register that short address is its bitoff, and the address it is reached
+  // by as memory is derived from it - which is how a move to or from it is
+  // written, since there is no register to register form that can name an SFR.
+  unsigned PSWShort = TRI.getEncodingValue(C166::PSW);
+  unsigned PSWAddr = C166::getSFRAddressForShort(PSWShort);
+  const unsigned IEN = 11;
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineFunction *MF = BB->getParent();
+  MachineBasicBlock *StoreMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *OutMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MF->insert(It, StoreMBB);
+  MF->insert(It, OutMBB);
+
+  unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
+  StoreMBB->setCallFrameSize(CallFrameSize);
+  OutMBB->setCallFrameSize(CallFrameSize);
+
+  OutMBB->splice(OutMBB->begin(), BB,
+                 std::next(MachineBasicBlock::iterator(MI)), BB->end());
+  OutMBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  BB->addSuccessor(StoreMBB);
+  BB->addSuccessor(OutMBB);
+  StoreMBB->addSuccessor(OutMBB);
+
+  Register Save = MRI.createVirtualRegister(&C166::GR16RegClass);
+  BuildMI(BB, DL, TII.get(C166::MOV16ra), Save).addImm(PSWAddr);
+  BuildMI(BB, DL, TII.get(C166::BCLR)).addImm(PSWShort).addImm(IEN);
+  BuildMI(BB, DL, TII.get(Byte ? C166::MOVB8rp : C166::MOV16rp), Dst)
+      .addReg(Addr);
+  BuildMI(BB, DL, TII.get(Byte ? C166::CMPB8rr : C166::CMP16rr))
+      .addReg(Dst)
+      .addReg(Cmp);
+  BuildMI(BB, DL, TII.get(C166::JMPRcc))
+      .addMBB(OutMBB)
+      .addImm(C166CC::COND_NZ);
+
+  BuildMI(StoreMBB, DL, TII.get(Byte ? C166::MOVB8pr : C166::MOV16pr))
+      .addReg(Addr)
+      .addReg(New);
+
+  BuildMI(*OutMBB, OutMBB->begin(), DL, TII.get(C166::MOV16ar))
+      .addImm(PSWAddr)
+      .addReg(Save);
+
+  MI.eraseFromParent();
+  return OutMBB;
+}
+
 MachineBasicBlock *
 C166TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
+  if (MI.getOpcode() == C166::CMPXCHG16 || MI.getOpcode() == C166::CMPXCHG8)
+    return emitCmpXchg(MI, BB);
+
   // The comparison is a word or a byte one depending on what is being
   // compared, not on what is being selected, and its right hand side is
   // either a register or a constant.

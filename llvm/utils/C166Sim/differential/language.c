@@ -59,15 +59,19 @@ static u32 classify(int c) {
    It is also written under the constraint that comes with being there: a near
    call reaches only the segment it is made from, and the compiler-rt builtins
    are in the Flash, so code here must not need one.  A 32 bit multiply and a
-   shift by a constant are emitted inline and are fine; a shift by a variable
-   amount and a 32 bit division are calls to __ashlsi3 and __udivsi3 and are
-   not.  Getting that wrong used to link and then run away into the PSRAM; the
-   linker now refuses it, which is how this came to be written this way. */
+   shift are emitted inline and are fine; a 32 bit division is a call to
+   __udivsi3 and is not.  Getting that wrong used to link and then run away
+   into the PSRAM; the linker now refuses it, which is how this came to be
+   written this way.
+
+   The shift by a variable amount is here on purpose.  It used to be a call to
+   __ashlsi3 and so was one of the things this function could not do; it is
+   expanded inline now, and running it from here is what says so. */
 static PSRAMTEXT u32 ram_mix(u32 a, u32 b) {
   u32 t = a;
   for (int i = 0; i < 8; i++) {
     t = t * 33 + b + (t >> 7);
-    b = (b << 3) ^ (b >> 5) ^ t;
+    b = (b << (i & 7)) ^ (b >> 5) ^ t;
   }
   return t;
 }

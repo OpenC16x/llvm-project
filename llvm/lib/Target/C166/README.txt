@@ -205,6 +205,29 @@ not something to do further arithmetic on.
 Caveats the hardware imposes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Wide shifts
+-----------
+
+A shift of a value two words wide by an amount only known at run time is
+expanded inline rather than becoming a call to __ashlsi3 and its relatives.
+The shift instructions take their count from a register, so the pieces are
+there; what has to be worked around is that the count is read as its low four
+bits, which makes a shift by sixteen a shift by nothing.
+
+The obvious expansion brings the bits that cross between the halves over with
+a shift by "16 - amount", and that is wrong at an amount of zero: instead of
+contributing nothing it contributes the whole word.  Shifting by "15 - amount"
+and then once more is right there and the same everywhere else, and costs one
+instruction rather than a test and a branch.
+
+The same masking is useful in the other direction.  When the amount is sixteen
+or more the answer is one half shifted by "amount - 16", and the hardware is
+already reading the count modulo sixteen, so that is the same instruction the
+small case needs, computed once and used twice.
+
+Which half ends up where is then two selects on bit 4 of the amount.  A 32 bit
+division is still a call.
+
 EXTS does not exist on the SAB 8XC166(W) devices, and no subtarget feature
 guards that yet.  Inside a class A or class B trap handler the EXTend
 instructions do nothing while a class B trap flag is set, so a far access in
@@ -657,6 +680,23 @@ Known limitations / things to do
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
   win, being self-consistent across all 180.
+* The instruction forms nothing generates are assembled and disassembled but
+  their encodings are derived rather than read off the page.  Each ALU group's
+  columns were already fixed by the forms the compiler emits - x0 register, x2
+  memory source, x6 immediate, x8 short immediate - and the ones added since
+  are the opcodes those columns left free: x4 for the memory destination and
+  the top half of x8 for the indirect source.  The derivation was checked the
+  one way it can be from inside this tree, and it held: the set of opcodes the
+  disassembler could not decode beforehand was exactly the set predicted, with
+  none left over on either side.
+
+  That is strong agreement and it is not the manual, so anyone holding V2.0
+  should read llvm/test/MC/C166/rest-of-set.s first; it lists every one of
+  them with its bytes.  llvm/test/tools/c166-sim/rest-of-set.s runs them, so
+  what they do is checked even though what they encode to is inferred, and
+  llvm/utils/C166Sim/tools/coverage.sh reports anything missing - it covers
+  137 of 137 forms today.
+
 * The branch prediction bit of JMPA and CALLA is always left at 0, which the
   C166SV2 manual defines as "assumed taken".  The prefetch hint bit of JMPA is
   always 0 too; it is meant to be set for a backward branch of 32 bytes or
@@ -694,3 +734,84 @@ Known limitations / things to do
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
   same as a part agreeing with both.
+
+Memory destination arithmetic
+-----------------------------
+
+A load, an operation and a store back are one instruction when all three name
+the same place, so "g |= x" on a global is four bytes rather than ten.  Add,
+subtract, and, or and exclusive or are selected this way, in both widths.
+
+ADDC and SUBC are deliberately not.  Their carry out is a result the rest of a
+wide chain reads, and folding one into a store would leave that result with
+nothing to say where the chain continues, so a wide add through memory stays a
+pair of register operations with a store each.
+
+The fold only applies when nothing else wants what was loaded or computed: a
+result used again afterwards has to exist in a register, and a load from one
+place feeding a store to another is two accesses rather than one.  A volatile
+word is folded, on the same reasoning as the bit instructions - the instruction
+still reads it and writes it back, in that order, and what it loses is the gap.
+
+The indirect source form was tried and dropped.  "add Rw, [Rw]" folds the load
+too, but its pointer field is two bits, so selecting it asks the register
+allocator to keep every folded pointer in R0 to R3.  Measured over the
+differential programs it cost 8 bytes more than it saved, so the instruction is
+assembled and not selected.  Anything that revisits this should measure the
+same way rather than reasoning about it.
+
+Counting leading zeroes
+-----------------------
+
+PRIOR reports how far the leftmost set bit is from the top, which is what
+CTLZ_ZERO_POISON asks for, so that is the instruction on its own.  PRIOR leaves
+zero behind for a source of zero where CTLZ wants sixteen, so the full one is
+that instruction and a test for zero - still most of the twenty five
+instruction bit smear and population count it used to be.
+
+Atomics
+-------
+
+Atomics up to a word are instructions rather than library calls.  A byte, or a
+word at an even address, crosses the bus in one cycle, so an atomic load or
+store of one is already indivisible and is the ordinary MOV; the ordering asked
+for needs nothing either, because this is one core with no store buffer and no
+cache, so what an interrupt handler sees is whatever the last instruction to
+retire left behind.
+
+Changing a word is not indivisible, and ATOMIC is what makes it so: it holds
+interrupts and PEC transfers off for the next 1 to 4 instructions, which is
+exactly long enough to read a word, copy it so the old value survives, change
+it, and write it back.  Add, subtract, and, or, xor and exchange fit; an
+exchange needs no copy and no arithmetic, so it is two instructions rather than
+four.  NAND is an AND and a complement, and the minimum and maximum need a
+comparison and a choice, so those go round a compare and exchange loop instead,
+which is longer per turn but has no count to overrun.
+
+The sequences stay one instruction until after register allocation.  ATOMIC
+counts instructions rather than marking a region, so a spill dropped into the
+middle would not merely lengthen the sequence, it would push the write out from
+under the count and leave it interruptible with nothing to say so.
+
+A compare and exchange stores only when what it read matched, so it branches,
+and a branch is one of the two things a sequence must not contain.  That one
+clears PSW.IEN instead and puts the whole word back afterwards, which restores
+the bit along with flags that are dead by then - the only reader was the branch
+above.  Having no counter is also why that one is built before register
+allocation: a spill landing inside only makes the window longer.
+
+Caveats the hardware imposes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The single instruction counter is shared with the EXTend instructions, and it
+keeps counting whatever runs next.  So a sequence must contain nothing that
+changes the flow - the rest of the count goes with it, protecting instructions
+nobody meant to protect and leaving the ones that needed it uncovered - and
+nothing that extends again, which overwrites the count still in use.
+
+That is a rule the compiler has to remember, so it is held to it: the simulator
+stops with an error if a sequence ever reaches either kind of instruction, and
+every program the differential suite runs goes through that check.
+
+An atomic on a far pointer is refused with a diagnostic.  Reaching one needs an
+EXTend, and an ATOMIC sequence has no counter left to give it.

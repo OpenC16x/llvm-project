@@ -95,7 +95,24 @@ enum class Op {
                                                                               X(EINIT) X(           \
                                                                                   SRVWDT) X(SRST)   \
                                                                                   X(IDLE)           \
-                                                                                      X(PWRDN)
+                                                                                      X(PWRDN) \
+  /* The rest of the instruction set: forms nothing here generates, added so  */\
+  /* that what can be written by hand can also be run.                       */\
+  X(ADD16regm) X(ADDB8regm) X(SUB16regm) X(SUBB8regm) X(ADDC16regm)              \
+  X(ADDCB8regm) X(SUBC16regm) X(SUBCB8regm) X(AND16regm) X(ANDB8regm)            \
+  X(OR16regm) X(ORB8regm) X(XOR16regm) X(XORB8regm) X(CMP16regm) X(CMPB8regm)    \
+  X(ADDCB8rr) X(ADDCB8ri3) X(ADDCB8regi) X(ADDCB8rega)                           \
+  X(SUBCB8rr) X(SUBCB8ri3) X(SUBCB8regi) X(SUBCB8rega)                           \
+  X(ADD16rp) X(ADD16rppi) X(SUB16rp) X(SUB16rppi) X(AND16rp) X(AND16rppi)        \
+  X(OR16rp) X(OR16rppi) X(XOR16rp) X(XOR16rppi) X(ADDC16rp) X(ADDC16rppi)        \
+  X(SUBC16rp) X(SUBC16rppi) X(CMP16rp) X(CMP16rppi) X(CMPB8rp) X(CMPB8rppi)      \
+  X(CMP16rega) X(CMPB8rega) X(MOV16prd) X(MOVB8prd)                              \
+  X(DIVLr) X(DIVLUr) X(PRIORrr)                                                  \
+  X(CMPI116ri4) X(CMPI116regi) X(CMPI116rega)                                    \
+  X(CMPI216ri4) X(CMPI216regi) X(CMPI216rega)                                    \
+  X(CMPD116ri4) X(CMPD116regi) X(CMPD116rega)                                    \
+  X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
+  X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -482,10 +499,68 @@ uint32_t reg8Address(Machine &M, const MCRegisterInfo &MRI, MCRegister R) {
   return M.regFieldAddress(MRI.getEncodingValue(R));
 }
 
+/// The two things a sequence covered by ATOMIC or an EXTend must not contain.
+///
+/// The hardware keeps one instruction counter and it keeps counting whatever
+/// runs next.  An instruction that changes the flow carries the rest of the
+/// count off to wherever it goes, so the protection lands on instructions
+/// nobody meant to protect and stops covering the ones that needed it; a
+/// second extend overwrites the count the first one was still using.  The
+/// manual says not to do either.  This says so out loud when it happens,
+/// which turns a rule the compiler has to remember into one it is held to.
+static bool breaksExtendSequence(Op O) {
+  switch (O) {
+  case Op::JMPA:
+  case Op::JMPAcc:
+  case Op::JMPR:
+  case Op::JMPRcc:
+  case Op::JMPI:
+  case Op::JMPS:
+  case Op::JB:
+  case Op::JNB:
+  case Op::JBC:
+  case Op::JNBS:
+  case Op::CALLA:
+  case Op::CALLI:
+  case Op::CALLS:
+  case Op::CALLR:
+  case Op::PCALL:
+  case Op::RETP:
+  case Op::TRAP:
+  case Op::RET:
+  case Op::RETI:
+  case Op::RETS:
+  case Op::EXTSi:
+  case Op::EXTSr:
+  case Op::EXTSRi:
+  case Op::EXTSRr:
+  case Op::EXTPi:
+  case Op::EXTPr:
+  case Op::EXTPRi:
+  case Op::EXTPRr:
+  case Op::EXTR:
+  case Op::ATOMIC:
+    return true;
+  default:
+    return false;
+  }
+}
+
 void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   Decoder &D = decoder();
   const MCRegisterInfo &MRI = *D.MRI;
   Executor E(M);
+
+  // A non-zero count means this instruction is one an ATOMIC or an EXTend is
+  // covering, and there are two kinds it must not be.
+  if (M.ExtendCount > 0 && breaksExtendSequence(O)) {
+    M.Stop = StopReason::BadSequence;
+    M.StopDetail =
+        (Twine("an ATOMIC or EXTend sequence reaches the instruction at ") +
+         addrStr(PC) + ", which changes the flow or extends again")
+            .str();
+    return;
+  }
 
   auto NumOps = MI.getNumOperands();
   auto Reg = [&](unsigned I) { return MI.getOperand(I).getReg(); };
@@ -1160,6 +1235,273 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.CSP = M.pop();
     M.PSW = M.pop();
     break;
+  // -- the rest of the instruction set -----------------------------------
+  // Forms nothing here generates, so that what can be written by hand can
+  // also be run.
+
+  // The memory destination ALU forms: the address is first and the register
+  // second, which is the operand order they are written in.
+  case Op::ADD16regm:
+    Store16At(Imm(0), E.doAdd(Load16At(Imm(0)), R8(1), false, false));
+    break;
+  case Op::ADDC16regm:
+    Store16At(Imm(0), E.doAdd(Load16At(Imm(0)), R8(1), false, true));
+    break;
+  case Op::SUB16regm:
+    Store16At(Imm(0), E.doSub(Load16At(Imm(0)), R8(1), false, false));
+    break;
+  case Op::SUBC16regm:
+    Store16At(Imm(0), E.doSub(Load16At(Imm(0)), R8(1), false, true));
+    break;
+  case Op::AND16regm:
+    Store16At(Imm(0), E.doLogic(Load16At(Imm(0)), R8(1), false, '&'));
+    break;
+  case Op::OR16regm:
+    Store16At(Imm(0), E.doLogic(Load16At(Imm(0)), R8(1), false, '|'));
+    break;
+  case Op::XOR16regm:
+    Store16At(Imm(0), E.doLogic(Load16At(Imm(0)), R8(1), false, '^'));
+    break;
+  case Op::CMP16regm:
+    E.doSub(Load16At(Imm(0)), R8(1), false, false);
+    break;
+  case Op::ADDB8regm:
+    Store8At(Imm(0), E.doAdd(Load8At(Imm(0)), RB8(1), true, false));
+    break;
+  case Op::ADDCB8regm:
+    Store8At(Imm(0), E.doAdd(Load8At(Imm(0)), RB8(1), true, true));
+    break;
+  case Op::SUBB8regm:
+    Store8At(Imm(0), E.doSub(Load8At(Imm(0)), RB8(1), true, false));
+    break;
+  case Op::SUBCB8regm:
+    Store8At(Imm(0), E.doSub(Load8At(Imm(0)), RB8(1), true, true));
+    break;
+  case Op::ANDB8regm:
+    Store8At(Imm(0), E.doLogic(Load8At(Imm(0)), RB8(1), true, '&'));
+    break;
+  case Op::ORB8regm:
+    Store8At(Imm(0), E.doLogic(Load8At(Imm(0)), RB8(1), true, '|'));
+    break;
+  case Op::XORB8regm:
+    Store8At(Imm(0), E.doLogic(Load8At(Imm(0)), RB8(1), true, '^'));
+    break;
+  case Op::CMPB8regm:
+    E.doSub(Load8At(Imm(0)), RB8(1), true, false);
+    break;
+
+  // The byte add and subtract with carry.
+  case Op::ADDCB8rr:
+    SetB(0, E.doAdd(B(0), LastB(), true, true));
+    break;
+  case Op::ADDCB8ri3:
+    SetB(0, E.doAdd(B(0), LastImm(), true, true));
+    break;
+  case Op::ADDCB8regi:
+    WB8(0, E.doAdd(RB8(0), Imm(1), true, true));
+    break;
+  case Op::ADDCB8rega:
+    WB8(0, E.doAdd(RB8(0), Load8At(Imm(1)), true, true));
+    break;
+  case Op::SUBCB8rr:
+    SetB(0, E.doSub(B(0), LastB(), true, true));
+    break;
+  case Op::SUBCB8ri3:
+    SetB(0, E.doSub(B(0), LastImm(), true, true));
+    break;
+  case Op::SUBCB8regi:
+    WB8(0, E.doSub(RB8(0), Imm(1), true, true));
+    break;
+  case Op::SUBCB8rega:
+    WB8(0, E.doSub(RB8(0), Load8At(Imm(1)), true, true));
+    break;
+  case Op::CMP16rega:
+    E.doSub(R8(0), Load16At(Imm(1)), false, false);
+    break;
+  case Op::CMPB8rega:
+    E.doSub(RB8(0), Load8At(Imm(1)), true, false);
+    break;
+
+  // The indirect source forms.  The pointer is the last operand, and the "pi"
+  // ones step it past the word they read.
+  case Op::ADD16rp:
+  case Op::ADD16rppi:
+    SetW(0, E.doAdd(W(0), Load16At(W(2)), false, false));
+    if (O == Op::ADD16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::ADDC16rp:
+  case Op::ADDC16rppi:
+    SetW(0, E.doAdd(W(0), Load16At(W(2)), false, true));
+    if (O == Op::ADDC16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::SUB16rp:
+  case Op::SUB16rppi:
+    SetW(0, E.doSub(W(0), Load16At(W(2)), false, false));
+    if (O == Op::SUB16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::SUBC16rp:
+  case Op::SUBC16rppi:
+    SetW(0, E.doSub(W(0), Load16At(W(2)), false, true));
+    if (O == Op::SUBC16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::AND16rp:
+  case Op::AND16rppi:
+    SetW(0, E.doLogic(W(0), Load16At(W(2)), false, '&'));
+    if (O == Op::AND16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::OR16rp:
+  case Op::OR16rppi:
+    SetW(0, E.doLogic(W(0), Load16At(W(2)), false, '|'));
+    if (O == Op::OR16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::XOR16rp:
+  case Op::XOR16rppi:
+    SetW(0, E.doLogic(W(0), Load16At(W(2)), false, '^'));
+    if (O == Op::XOR16rppi)
+      SetW(2, uint16_t(W(2) + 2));
+    break;
+  case Op::CMP16rp:
+  case Op::CMP16rppi:
+    E.doSub(W(0), Load16At(W(1)), false, false);
+    if (O == Op::CMP16rppi)
+      SetW(1, uint16_t(W(1) + 2));
+    break;
+  case Op::CMPB8rp:
+  case Op::CMPB8rppi:
+    E.doSub(B(0), Load8At(W(1)), true, false);
+    if (O == Op::CMPB8rppi)
+      SetW(1, uint16_t(W(1) + 1));
+    break;
+
+  // The pre-decrementing store steps the pointer back before writing, which
+  // is the other way round from the post-incrementing load.
+  case Op::MOV16prd: {
+    uint16_t A = uint16_t(W(1) - 2);
+    Store16At(A, W(2));
+    SetW(0, A);
+    break;
+  }
+  case Op::MOVB8prd: {
+    uint16_t A = uint16_t(W(1) - 1);
+    Store8At(A, B(2));
+    SetW(0, A);
+    break;
+  }
+
+  // The 32 by 16 divide, which takes MDH:MDL rather than MDL alone.  A
+  // quotient that does not fit in sixteen bits overflows, which the hardware
+  // reports in V rather than trapping.
+  case Op::DIVLr:
+  case Op::DIVLUr: {
+    uint16_t D = W(0);
+    if (D == 0) {
+      M.setFlag(PSW_V, true);
+      break;
+    }
+    uint32_t N = (uint32_t(M.MDH) << 16) | M.MDL;
+    uint32_t Q, R;
+    if (O == Op::DIVLUr) {
+      Q = N / D;
+      R = N % D;
+      M.setFlag(PSW_V, Q > 0xFFFF);
+    } else {
+      int32_t SN = int32_t(N);
+      int16_t SD = int16_t(D);
+      int32_t SQ = SN / SD;
+      Q = uint32_t(SQ);
+      R = uint32_t(SN % SD);
+      M.setFlag(PSW_V, SQ > 32767 || SQ < -32768);
+    }
+    M.MDL = uint16_t(Q);
+    M.MDH = uint16_t(R);
+    break;
+  }
+
+  // PRIOR counts how far the leftmost set bit is from the top, which is the
+  // count of leading zeroes.  A source of zero leaves zero behind.
+  case Op::PRIORrr: {
+    uint16_t V = W(1);
+    unsigned N = 0;
+    if (V != 0)
+      while (((V << N) & 0x8000) == 0)
+        ++N;
+    SetW(0, uint16_t(N));
+    E.doLogic(V, 0, false, '|');
+    break;
+  }
+
+  // Compare and step, which is a loop's test and its increment in one.  The
+  // comparison sees the value as it was.
+  case Op::CMPI116ri4:
+  case Op::CMPI216ri4:
+  case Op::CMPD116ri4:
+  case Op::CMPD216ri4: {
+    uint16_t V = W(0);
+    E.doSub(V, Imm(1), false, false);
+    int Step = (O == Op::CMPI116ri4)   ? 1
+               : (O == Op::CMPI216ri4) ? 2
+               : (O == Op::CMPD116ri4) ? -1
+                                       : -2;
+    SetW(0, uint16_t(V + Step));
+    break;
+  }
+  case Op::CMPI116regi:
+  case Op::CMPI216regi:
+  case Op::CMPD116regi:
+  case Op::CMPD216regi:
+  case Op::CMPI116rega:
+  case Op::CMPI216rega:
+  case Op::CMPD116rega:
+  case Op::CMPD216rega: {
+    bool FromMem = O == Op::CMPI116rega || O == Op::CMPI216rega ||
+                   O == Op::CMPD116rega || O == Op::CMPD216rega;
+    uint16_t V = R8(0);
+    E.doSub(V, FromMem ? Load16At(Imm(1)) : Imm(1), false, false);
+    int Step = (O == Op::CMPI116regi || O == Op::CMPI116rega)   ? 1
+               : (O == Op::CMPI216regi || O == Op::CMPI216rega) ? 2
+               : (O == Op::CMPD116regi || O == Op::CMPD116rega) ? -1
+                                                                : -2;
+    W8(0, uint16_t(V + Step));
+    break;
+  }
+
+  // SCXT saves what a register holds and puts something else there, which is
+  // how a register bank or a data page pointer is switched and restored.
+  case Op::SCXTregi:
+    M.push(R8(0));
+    W8(0, Imm(1));
+    break;
+  case Op::SCXTrega:
+    M.push(R8(0));
+    W8(0, Load16At(Imm(1)));
+    break;
+
+  // The remaining call and return forms.  PCALL pushes a register before the
+  // return address, so RETP takes them back in the other order.
+  case Op::CALLR: {
+    int8_t Rel = int8_t(Imm(0));
+    M.push(M.IP);
+    M.IP = uint16_t(M.IP + 2 * Rel);
+    break;
+  }
+  case Op::PCALL:
+    M.push(R8(0));
+    M.push(M.IP);
+    M.IP = uint16_t(Imm(1));
+    break;
+  case Op::RETP: {
+    uint16_t Ret = M.pop();
+    W8(0, M.pop());
+    M.IP = Ret;
+    break;
+  }
+
   case Op::PUSH:
     M.push(M.read16(reg8Address(M, MRI, Reg(0))));
     break;

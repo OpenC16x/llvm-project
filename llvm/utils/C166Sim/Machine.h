@@ -68,6 +68,7 @@ enum class StopReason {
   Unsupported, ///< an instruction this simulator does not implement
   BadAccess,   ///< a fetch or access that cannot be satisfied
   StackFault,  ///< the system stack left the STKOV/STKUN window
+  BadSequence, ///< an ATOMIC or EXTend sequence contained what it must not
   StepLimit,   ///< ran longer than --max-steps
   Halted,      ///< SRST, or PWRDN/IDLE with nothing to wake it
 };

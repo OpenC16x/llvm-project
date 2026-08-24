@@ -104,6 +104,24 @@ def MemRAsmOperand : AsmOperandClass {
   let RenderMethod = "addMemROperands";
 }
 
+def MemRPAsmOperand : AsmOperandClass {
+  let Name = "MemRP";
+  let RenderMethod = "addMemROperands";
+  let DiagnosticString = "expected [Rw] on R0 to R3";
+}
+
+def MemRPPostIncAsmOperand : AsmOperandClass {
+  let Name = "MemRPPostInc";
+  let RenderMethod = "addMemROperands";
+  let DiagnosticString = "expected [Rw+] on R0 to R3";
+}
+
+def MemRPreDecAsmOperand : AsmOperandClass {
+  let Name = "MemRPreDec";
+  let RenderMethod = "addMemROperands";
+  let DiagnosticString = "expected [-Rw]";
+}
+
 def MemRPostIncAsmOperand : AsmOperandClass {
   let Name = "MemRPostInc";
   let RenderMethod = "addMemROperands";
@@ -302,6 +320,33 @@ def memrpi : Operand<i16> {
   let MIOperandInfo = (ops GR16);
   let DecoderMethod = "decodeMemROperand";
   let ParserMatchClass = MemRPostIncAsmOperand;
+}
+
+// [-Rw], which steps the pointer back by the width of the access before
+// writing through it.  There is no post-incrementing store and no
+// pre-decrementing load; the machine has one of each pair, not both.
+def memrpd : Operand<i16> {
+  let PrintMethod = "printMemRPreDecOperand";
+  let MIOperandInfo = (ops GR16);
+  let DecoderMethod = "decodeMemROperand";
+  let ParserMatchClass = MemRPreDecAsmOperand;
+}
+
+// [Rwi] and [Rwi+] as the ALU's indirect source.  The pointer field is two
+// bits, so it reaches R0 to R3 and no further - which is what separates these
+// from memr and memrpi above, whose field is four bits wide.
+def memrp : Operand<i16> {
+  let PrintMethod = "printMemROperand";
+  let MIOperandInfo = (ops GR16P);
+  let DecoderMethod = "decodeMemRPOperand";
+  let ParserMatchClass = MemRPAsmOperand;
+}
+
+def memrppi : Operand<i16> {
+  let PrintMethod = "printMemRPostIncOperand";
+  let MIOperandInfo = (ops GR16P);
+  let DecoderMethod = "decodeMemRPOperand";
+  let ParserMatchClass = MemRPPostIncAsmOperand;
 }
 
 // A plain 16 bit data address ("mem" in the manual).
@@ -1031,9 +1076,22 @@ multiclass ArithB<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA,
 // result in an SFR.  The GPR-only forms above keep the patterns and are marked
 // codegen-only, which takes them out of the matcher and the decoder, so
 // "add r2, #1234" assembles as one of these and those bytes come back as it.
-multiclass ArithWReg<string mnemonic, bits<8> opRI, bits<8> opRA,
+//
+// The memory destination form is the same layout as the memory source one -
+// the "reg" field in the second byte and the address in the second word - and
+// differs only in the opcode, exactly as MOV reg, mem and MOV mem, reg do:
+// "mov r6, psw" is F2 F6 10 FF and "mov psw, r6" is F6 F6 10 FF.
+multiclass ArithWReg<string mnemonic, bits<8> opRI, bits<8> opRA, bits<8> opMR,
                      list<Register> uses = []> {
   let Defs = [PSW], Uses = uses in {
+    let mayLoad = 1, mayStore = 1 in
+    def 16regm : InstL<opMR, (outs), (ins addr16:$dst, reg8:$src),
+                       !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<16> dst;
+      bits<8> src;
+      let Inst{15-8} = src;
+      let Inst{31-16} = dst;
+    }
     def 16regi : InstL<opRI, (outs), (ins reg8:$dst, data16:$src),
                        !strconcat(mnemonic, "\t$dst, $src"), []> {
       bits<8> dst;
@@ -1087,8 +1145,17 @@ def MOV16rega : InstL<0xF2, (outs), (ins reg8:$dst, addr16:$src),
 
 // The byte instructions the same way.  They need their own operand because
 // F0H + n names a byte register here.
-multiclass ArithBReg<string mnemonic, bits<8> opRI, bits<8> opRA> {
+multiclass ArithBReg<string mnemonic, bits<8> opRI, bits<8> opRA,
+                     bits<8> opMR> {
   let Defs = [PSW] in {
+    let mayLoad = 1, mayStore = 1 in
+    def 8regm : InstL<opMR, (outs), (ins addr16:$dst, reg8b:$src),
+                      !strconcat(mnemonic, "\t$dst, $src"), []> {
+      bits<16> dst;
+      bits<8> src;
+      let Inst{15-8} = src;
+      let Inst{31-16} = dst;
+    }
     def 8regi : InstL<opRI, (outs), (ins reg8b:$dst, data8:$src),
                       !strconcat(mnemonic, "\t$dst, $src"), []> {
       bits<8> dst;
@@ -1108,11 +1175,43 @@ multiclass ArithBReg<string mnemonic, bits<8> opRI, bits<8> opRA> {
   }
 }
 
-defm ADDB : ArithBReg<"addb", 0x07, 0x03>;
-defm SUBB : ArithBReg<"subb", 0x27, 0x23>;
-defm ANDB : ArithBReg<"andb", 0x67, 0x63>;
-defm ORB  : ArithBReg<"orb",  0x77, 0x73>;
-defm XORB : ArithBReg<"xorb", 0x57, 0x53>;
+defm ADDB : ArithBReg<"addb", 0x07, 0x03, 0x05>;
+defm SUBB : ArithBReg<"subb", 0x27, 0x23, 0x25>;
+defm ANDB : ArithBReg<"andb", 0x67, 0x63, 0x65>;
+defm ORB  : ArithBReg<"orb",  0x77, 0x73, 0x75>;
+defm XORB : ArithBReg<"xorb", 0x57, 0x53, 0x55>;
+// The byte add and subtract with carry.  Nothing wider is built out of bytes -
+// a byte carry has nowhere to go - so no pattern wants these and they carry
+// none; they are here for what can be written by hand.  The register and
+// #data3 forms are spelled out rather than taken from ArithB, which exists to
+// carry patterns.
+multiclass ArithBCarry<string mnemonic, bits<8> opRR> {
+  let Defs = [PSW], Uses = [PSW] in {
+    def 8rr : InstS<opRR, (outs GR8:$dst), (ins GR8:$src1, GR8:$src2),
+                    !strconcat(mnemonic, "\t$dst, $src2"), []> {
+      bits<4> dst;
+      bits<4> src2;
+      let Constraints = "$src1 = $dst";
+      let Inst{15-12} = dst;
+      let Inst{11-8} = src2;
+    }
+    def 8ri3 : InstS<!add(opRR, 8), (outs GR8:$dst),
+                     (ins GR8:$src1, imm3b:$src2),
+                     !strconcat(mnemonic, "\t$dst, $src2"), []> {
+      bits<4> dst;
+      bits<3> src2;
+      let Constraints = "$src1 = $dst";
+      let Inst{15-12} = dst;
+      let Inst{11} = 0;
+      let Inst{10-8} = src2;
+    }
+  }
+}
+
+defm ADDCB : ArithBCarry<"addcb", 0x11>;
+defm SUBCB : ArithBCarry<"subcb", 0x31>;
+defm ADDCB : ArithBReg<"addcb", 0x17, 0x13, 0x15>;
+defm SUBCB : ArithBReg<"subcb", 0x37, 0x33, 0x35>;
 
 def CMPB8regi : InstL<0x47, (outs), (ins reg8b:$src1, data8:$src2),
                       "cmpb\t$src1, $src2", []> {
@@ -1144,13 +1243,13 @@ def MOVB8rega : InstL<0xF3, (outs), (ins reg8b:$dst, addr16:$src),
   let Inst{31-16} = src;
 }
 
-defm ADD  : ArithWReg<"add",  0x06, 0x02>;
-defm SUB  : ArithWReg<"sub",  0x26, 0x22>;
-defm AND  : ArithWReg<"and",  0x66, 0x62>;
-defm OR   : ArithWReg<"or",   0x76, 0x72>;
-defm XOR  : ArithWReg<"xor",  0x56, 0x52>;
-defm ADDC : ArithWReg<"addc", 0x16, 0x12, [PSW]>;
-defm SUBC : ArithWReg<"subc", 0x36, 0x32, [PSW]>;
+defm ADD  : ArithWReg<"add",  0x06, 0x02, 0x04>;
+defm SUB  : ArithWReg<"sub",  0x26, 0x22, 0x24>;
+defm AND  : ArithWReg<"and",  0x66, 0x62, 0x64>;
+defm OR   : ArithWReg<"or",   0x76, 0x72, 0x74>;
+defm XOR  : ArithWReg<"xor",  0x56, 0x52, 0x54>;
+defm ADDC : ArithWReg<"addc", 0x16, 0x12, 0x14, [PSW]>;
+defm SUBC : ArithWReg<"subc", 0x36, 0x32, 0x34, [PSW]>;
 
 defm ADD  : ArithW<"add",  0x00, 0x06, 0x02, add, 1>;
 defm SUB  : ArithW<"sub",  0x20, 0x26, 0x22, sub, 0>;
@@ -1952,3 +2051,432 @@ def : Pat<(store (i16 (C166Wrapper tglobaladdr:$src)), addrri:$dst),
           (MOV16mr addrri:$dst, (MOV16ri tglobaladdr:$src))>;
 def : Pat<(store (i16 (C166Wrapper tglobaladdr:$src)), addrabs:$dst),
           (MOV16ar addrabs:$dst, (MOV16ri tglobaladdr:$src))>;
+
+//===----------------------------------------------------------------------===//
+// Atomic Load and Store
+//===----------------------------------------------------------------------===//
+//
+// A byte, or a word at an even address, crosses the bus in one cycle, so
+// nothing can catch one half written and an atomic load or store of one is the
+// ordinary instruction.  The ordering asked for needs nothing either: this is
+// one core with no store buffer and no cache, so what an interrupt handler
+// sees is whatever the last instruction to retire left behind.
+
+// [Rw] on its own is two bytes where [Rw + #0] is four, so it is preferred
+// here for the same reason the ordinary load and store prefer it.
+let AddedComplexity = 10 in {
+def : Pat<(i16 (atomic_load_16 addrr:$src)), (MOV16rp addrr:$src)>;
+def : Pat<(i8 (atomic_load_8 addrr:$src)),   (MOVB8rp addrr:$src)>;
+def : Pat<(atomic_store_16 GR16:$src, addrr:$dst), (MOV16pr addrr:$dst, GR16:$src)>;
+def : Pat<(atomic_store_8 GR8:$src, addrr:$dst),   (MOVB8pr addrr:$dst, GR8:$src)>;
+}
+
+def : Pat<(i16 (atomic_load_16 addrri:$src)),  (MOV16rm addrri:$src)>;
+def : Pat<(i16 (atomic_load_16 addrabs:$src)), (MOV16ra addrabs:$src)>;
+def : Pat<(i8 (atomic_load_8 addrri:$src)),  (MOVB8rm addrri:$src)>;
+def : Pat<(i8 (atomic_load_8 addrabs:$src)), (MOVB8ra addrabs:$src)>;
+
+def : Pat<(atomic_store_16 GR16:$src, addrri:$dst),  (MOV16mr addrri:$dst, GR16:$src)>;
+def : Pat<(atomic_store_16 GR16:$src, addrabs:$dst), (MOV16ar addrabs:$dst, GR16:$src)>;
+def : Pat<(atomic_store_8 GR8:$src, addrri:$dst),  (MOVB8mr addrri:$dst, GR8:$src)>;
+def : Pat<(atomic_store_8 GR8:$src, addrabs:$dst), (MOVB8ar addrabs:$dst, GR8:$src)>;
+
+//===----------------------------------------------------------------------===//
+// Atomic Read-Modify-Write
+//===----------------------------------------------------------------------===//
+//
+// ATOMIC #n holds off interrupts and PEC transfers for the next 1 to 4
+// instructions, which is exactly long enough to read a word, change it and
+// write it back.  Nothing else on this part gives that: without it a
+// read-modify-write is a window an interrupt can land in, and the handler's
+// change is lost.
+//
+// These stay one instruction until after register allocation so that nothing
+// can be scheduled into the middle of the sequence, and so that the scratch
+// the sequence needs is a register the allocator handed out rather than one
+// picked here.  What they expand into is in expandPostRAPseudo().
+//
+// Two rules the sequence has to obey, both from the single instruction counter
+// the hardware keeps: nothing inside it may change the program flow, and
+// nothing inside it may be an EXTend.  The second is why a far pointer is
+// turned away in C166TargetLowering rather than handled here - reaching one
+// needs the EXTend that would take the counter over.
+// The scratch is a second result rather than a fixed register, so the
+// allocator hands one out; that is also why these carry no pattern and are
+// selected by hand in C166ISelDAGToDAG.cpp - a tablegen pattern has to account
+// for every result, and this one has a result the DAG node does not.
+let mayLoad = 1, mayStore = 1, Defs = [PSW],
+    Constraints = "@earlyclobber $dst,@earlyclobber $tmp" in {
+class AtomicRMW16
+    : Pseudo<(outs GR16:$dst, GR16:$tmp), (ins GR16:$addr, GR16:$val),
+             "#atomic-rmw", []>;
+
+class AtomicRMW8
+    : Pseudo<(outs GR8:$dst, GR8:$tmp), (ins GR16:$addr, GR8:$val),
+             "#atomic-rmw", []>;
+}
+
+def ATOMADD16 : AtomicRMW16;
+def ATOMSUB16 : AtomicRMW16;
+def ATOMAND16 : AtomicRMW16;
+def ATOMOR16  : AtomicRMW16;
+def ATOMXOR16 : AtomicRMW16;
+
+def ATOMADD8 : AtomicRMW8;
+def ATOMSUB8 : AtomicRMW8;
+def ATOMAND8 : AtomicRMW8;
+def ATOMOR8  : AtomicRMW8;
+def ATOMXOR8 : AtomicRMW8;
+
+// An exchange needs no scratch and no arithmetic: read the word, write the new
+// one over it.  Two instructions rather than four.
+let mayLoad = 1, mayStore = 1, Constraints = "@earlyclobber $dst" in {
+def ATOMSWAP16 : Pseudo<(outs GR16:$dst), (ins GR16:$addr, GR16:$val),
+                        "#atomic-swap", []>;
+def ATOMSWAP8 : Pseudo<(outs GR8:$dst), (ins GR16:$addr, GR8:$val),
+                       "#atomic-swap", []>;
+}
+
+//===----------------------------------------------------------------------===//
+// Atomic Compare and Exchange
+//===----------------------------------------------------------------------===//
+//
+// A compare and exchange stores only when what it read matches, so it needs a
+// branch, and a branch is one of the two things an ATOMIC sequence cannot
+// contain: the instruction counter keeps running across it and the count no
+// longer describes the code it covers.
+//
+// So this one holds interrupts off the documented way instead, by clearing
+// PSW.IEN and putting back what was there afterwards.  There is no counter
+// involved, which is also why this one can be built before register
+// allocation: a spill landing inside only makes the window longer, where in an
+// ATOMIC sequence it would push the write out from under the count.
+let usesCustomInserter = 1, mayLoad = 1, mayStore = 1, Defs = [PSW] in {
+def CMPXCHG16 : Pseudo<(outs GR16:$dst),
+                       (ins GR16:$addr, GR16:$cmp, GR16:$new),
+                       "#cmpxchg",
+                       [(set GR16:$dst, (atomic_cmp_swap_i16 GR16:$addr,
+                                                             GR16:$cmp,
+                                                             GR16:$new))]>;
+def CMPXCHG8 : Pseudo<(outs GR8:$dst),
+                      (ins GR16:$addr, GR8:$cmp, GR8:$new),
+                      "#cmpxchg",
+                      [(set GR8:$dst, (atomic_cmp_swap_i8 GR16:$addr,
+                                                          GR8:$cmp,
+                                                          GR8:$new))]>;
+}
+
+//===----------------------------------------------------------------------===//
+// The Rest of the Instruction Set
+//===----------------------------------------------------------------------===//
+//
+// Instructions the machine has that nothing here generates.  They are here so
+// that inline assembly can name them, and so that a disassembly of code built
+// by another toolchain does not stop at the first one.
+//
+// Their encodings are derived from the structure of the opcode map rather than
+// read off the page.  Each group's columns are fixed by the forms above - x0
+// register, x2 memory source, x4 memory destination, x6 immediate, x8 short
+// immediate - and every opcode here is the one its column leaves free.  The
+// derivation was checked the one way it can be from inside this tree: the set
+// of opcodes the disassembler could not decode was exactly the set predicted,
+// with none left over on either side.  That is strong agreement rather than
+// proof, so anyone holding V2.0 of the manual should check this section first.
+// llvm/utils/C166Sim/tools/coverage.sh reports what is still missing.
+
+// The 32 by 16 divide, which takes MDH:MDL rather than MDL alone.  It repeats
+// the register number in both nibbles the way DIV and DIVU do.
+let Defs = [MDL, MDH, MDC, PSW], Uses = [MDL, MDH] in {
+def DIVLr  : InstS<0x6B, (outs), (ins GR16:$src), "divl\t$src", []> {
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = src;
+}
+def DIVLUr : InstS<0x7B, (outs), (ins GR16:$src), "divlu\t$src", []> {
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = src;
+}
+}
+
+// PRIOR finds the leftmost set bit, which is the count of leading zeroes this
+// target otherwise expands.
+let Defs = [PSW] in
+def PRIORrr : InstS<0x2B, (outs GR16:$dst), (ins GR16:$src), "prior\t$dst, $src",
+                    [(set GR16:$dst, (ctlz_zero_poison GR16:$src))]> {
+  bits<4> dst;
+  bits<4> src;
+  let Inst{15-12} = dst;
+  let Inst{11-8} = src;
+}
+
+// The memory forms of CMP, which is defined apart from the other ALU
+// operations because it has no destination.
+let Defs = [PSW], mayLoad = 1 in {
+def CMP16rega : InstL<0x42, (outs), (ins reg8:$src1, addr16:$src2),
+                      "cmp\t$src1, $src2", []> {
+  bits<8> src1;
+  bits<16> src2;
+  let Inst{15-8} = src1;
+  let Inst{31-16} = src2;
+}
+def CMP16regm : InstL<0x44, (outs), (ins addr16:$src1, reg8:$src2),
+                      "cmp\t$src1, $src2", []> {
+  bits<16> src1;
+  bits<8> src2;
+  let Inst{15-8} = src2;
+  let Inst{31-16} = src1;
+}
+def CMPB8rega : InstL<0x43, (outs), (ins reg8b:$src1, addr16:$src2),
+                      "cmpb\t$src1, $src2", []> {
+  bits<8> src1;
+  bits<16> src2;
+  let Inst{15-8} = src1;
+  let Inst{31-16} = src2;
+}
+def CMPB8regm : InstL<0x45, (outs), (ins addr16:$src1, reg8b:$src2),
+                      "cmpb\t$src1, $src2", []> {
+  bits<16> src1;
+  bits<8> src2;
+  let Inst{15-8} = src2;
+  let Inst{31-16} = src1;
+}
+}
+
+// Compare and increment or decrement, which is a loop's test and step in one
+// instruction.  The immediate form's nibble order is the one thing here with
+// no counterpart above to check it against: the destination is put in the high
+// nibble, as the register/register forms of every group do, rather than in the
+// low one as a shift count's register is.
+multiclass CmpStep<string mnemonic, bits<8> opRR, bits<8> opRI, bits<8> opRA> {
+  let Defs = [PSW] in {
+    def 16ri4 : InstS<opRR, (outs), (ins GR16:$src1, imm4:$src2),
+                      !strconcat(mnemonic, "\t$src1, $src2"), []> {
+      bits<4> src1;
+      bits<4> src2;
+      let Inst{15-12} = src1;
+      let Inst{11-8} = src2;
+    }
+    def 16regi : InstL<opRI, (outs), (ins reg8:$src1, data16:$src2),
+                       !strconcat(mnemonic, "\t$src1, $src2"), []> {
+      bits<8> src1;
+      bits<16> src2;
+      let Inst{15-8} = src1;
+      let Inst{31-16} = src2;
+    }
+    let mayLoad = 1 in
+    def 16rega : InstL<opRA, (outs), (ins reg8:$src1, addr16:$src2),
+                       !strconcat(mnemonic, "\t$src1, $src2"), []> {
+      bits<8> src1;
+      bits<16> src2;
+      let Inst{15-8} = src1;
+      let Inst{31-16} = src2;
+    }
+  }
+}
+
+defm CMPI1 : CmpStep<"cmpi1", 0x80, 0x86, 0x82>;
+defm CMPI2 : CmpStep<"cmpi2", 0x90, 0x96, 0x92>;
+defm CMPD1 : CmpStep<"cmpd1", 0xA0, 0xA6, 0xA2>;
+defm CMPD2 : CmpStep<"cmpd2", 0xB0, 0xB6, 0xB2>;
+
+// SCXT saves what a register holds and puts something else there in one go,
+// which is how a register bank or a DPP is switched and restored.
+let Defs = [PSW] in {
+def SCXTregi : InstL<0xC6, (outs), (ins reg8:$dst, data16:$src),
+                     "scxt\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+let mayLoad = 1 in
+def SCXTrega : InstL<0xD6, (outs), (ins reg8:$dst, addr16:$src),
+                     "scxt\t$dst, $src", []> {
+  bits<8> dst;
+  bits<16> src;
+  let Inst{15-8} = dst;
+  let Inst{31-16} = src;
+}
+}
+
+// The remaining call and return forms.  CALLR is the relative call, the
+// counterpart of JMPR; PCALL pushes a register before calling; RETP pops one
+// on the way back.
+let isCall = 1, Defs = [SYSSP], Uses = [SYSSP] in {
+def CALLR : InstS<0xBB, (outs), (ins reltarget8:$dst), "callr\t$dst", []> {
+  bits<8> dst;
+  let Inst{15-8} = dst;
+}
+let mayStore = 1 in
+def PCALL : InstL<0xE2, (outs), (ins reg8:$src, calltarget:$dst),
+                  "pcall\t$src, $dst", []> {
+  bits<8> src;
+  bits<16> dst;
+  let Inst{15-8} = src;
+  let Inst{31-16} = dst;
+}
+}
+
+let isReturn = 1, isTerminator = 1, isBarrier = 1, mayLoad = 1,
+    Defs = [SYSSP], Uses = [SYSSP] in
+def RETP : InstS<0xEB, (outs), (ins reg8:$dst), "retp\t$dst", []> {
+  bits<8> dst;
+  let Inst{15-8} = dst;
+}
+
+// The pre-decrementing store, which steps the pointer back before writing
+// through it.  Its layout is the post-incrementing load's, mirrored the way
+// MOV [Rw], Rw mirrors MOV Rw, [Rw]: the source register in the high nibble
+// and the pointer in the low one.
+let mayStore = 1, Constraints = "$base = $base_wb" in {
+def MOV16prd : InstS<0x88, (outs GR16:$base_wb), (ins memrpd:$base,
+                                                      GR16:$src),
+                     "mov\t$base, $src", []> {
+  bits<4> base;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = base;
+}
+def MOVB8prd : InstS<0x89, (outs GR16:$base_wb), (ins memrpd:$base,
+                                                      GR8:$src),
+                     "movb\t$base, $src", []> {
+  bits<4> base;
+  bits<4> src;
+  let Inst{15-12} = src;
+  let Inst{11-8} = base;
+}
+}
+
+// The ALU's indirect source forms, which share the x8 column with the #data3
+// form.  Bit 11 of the second byte chooses between them - 0 for the immediate,
+// which is what the short arithmetic forms already set - and bit 10 chooses
+// whether the pointer steps past what was read.
+multiclass ArithIndirect<string mnemonic, bits<8> opRR,
+                         list<Register> uses = []> {
+  let Defs = [PSW], Uses = uses, mayLoad = 1,
+      Constraints = "$src1 = $dst" in {
+    def "" : InstS<!add(opRR, 8), (outs GR16:$dst),
+                   (ins GR16:$src1, memrp:$src2),
+                   !strconcat(mnemonic, "\t$dst, $src2"), []> {
+      bits<4> dst;
+      bits<2> src2;
+      let Inst{15-12} = dst;
+      let Inst{11} = 1;
+      let Inst{10} = 0;
+      let Inst{9-8} = src2;
+    }
+    def pi : InstS<!add(opRR, 8), (outs GR16:$dst),
+                   (ins GR16:$src1, memrppi:$src2),
+                   !strconcat(mnemonic, "\t$dst, $src2"), []> {
+      bits<4> dst;
+      bits<2> src2;
+      let Inst{15-12} = dst;
+      let Inst{11} = 1;
+      let Inst{10} = 1;
+      let Inst{9-8} = src2;
+    }
+  }
+}
+
+defm ADD16rp  : ArithIndirect<"add",  0x00>;
+defm SUB16rp  : ArithIndirect<"sub",  0x20>;
+defm AND16rp  : ArithIndirect<"and",  0x60>;
+defm OR16rp   : ArithIndirect<"or",   0x70>;
+defm XOR16rp  : ArithIndirect<"xor",  0x50>;
+defm ADDC16rp : ArithIndirect<"addc", 0x10, [PSW]>;
+defm SUBC16rp : ArithIndirect<"subc", 0x30, [PSW]>;
+
+// CMP's indirect forms, spelled out because it has no destination and so does
+// not fit the multiclass above.
+let Defs = [PSW], mayLoad = 1 in {
+def CMP16rp   : InstS<0x48, (outs), (ins GR16:$src1, memrp:$src2),
+                      "cmp\t$src1, $src2", []> {
+  bits<4> src1;
+  bits<2> src2;
+  let Inst{15-12} = src1;
+  let Inst{11} = 1;
+  let Inst{10} = 0;
+  let Inst{9-8} = src2;
+}
+def CMP16rppi : InstS<0x48, (outs), (ins GR16:$src1, memrppi:$src2),
+                      "cmp\t$src1, $src2", []> {
+  bits<4> src1;
+  bits<2> src2;
+  let Inst{15-12} = src1;
+  let Inst{11} = 1;
+  let Inst{10} = 1;
+  let Inst{9-8} = src2;
+}
+def CMPB8rp   : InstS<0x49, (outs), (ins GR8:$src1, memrp:$src2),
+                      "cmpb\t$src1, $src2", []> {
+  bits<4> src1;
+  bits<2> src2;
+  let Inst{15-12} = src1;
+  let Inst{11} = 1;
+  let Inst{10} = 0;
+  let Inst{9-8} = src2;
+}
+def CMPB8rppi : InstS<0x49, (outs), (ins GR8:$src1, memrppi:$src2),
+                      "cmpb\t$src1, $src2", []> {
+  bits<4> src1;
+  bits<2> src2;
+  let Inst{15-12} = src1;
+  let Inst{11} = 1;
+  let Inst{10} = 1;
+  let Inst{9-8} = src2;
+}
+}
+
+//===----------------------------------------------------------------------===//
+// Memory Destination Arithmetic
+//===----------------------------------------------------------------------===//
+//
+// A load, an operation and a store back, in one instruction.  The address has
+// to appear twice in the pattern and be the same both times, which is what
+// makes this a read-modify-write rather than two unrelated accesses.
+//
+// The source is a GPR rather than the "reg" field the assembler facing form
+// takes, for the reason given there: that field's class holds special function
+// registers as well and is not allocatable.
+//
+// ADDC and SUBC are deliberately not here.  Their carry out is a result the
+// rest of a wide chain reads, and folding one into a store would leave that
+// result behind with nothing to say where the chain continues.
+let Defs = [PSW], isCodeGenOnly = 1, mayLoad = 1, mayStore = 1 in {
+class ArithMemDstW<bits<8> op, string mnemonic, SDNode opnode>
+    : InstL<op, (outs), (ins addr16:$dst, GR16:$src),
+            !strconcat(mnemonic, "\t$dst, $src"),
+            [(store (opnode (load addrabs:$dst), GR16:$src), addrabs:$dst)]> {
+  bits<16> dst;
+  bits<4> src;
+  let Inst{15-12} = 0b1111;
+  let Inst{11-8} = src;
+  let Inst{31-16} = dst;
+}
+
+class ArithMemDstB<bits<8> op, string mnemonic, SDNode opnode>
+    : InstL<op, (outs), (ins addr16:$dst, GR8:$src),
+            !strconcat(mnemonic, "\t$dst, $src"),
+            [(store (opnode (i8 (load addrabs:$dst)), GR8:$src),
+                    addrabs:$dst)]> {
+  bits<16> dst;
+  bits<4> src;
+  let Inst{15-12} = 0b1111;
+  let Inst{11-8} = src;
+  let Inst{31-16} = dst;
+}
+}
+
+def ADD16am : ArithMemDstW<0x04, "add", add>;
+def SUB16am : ArithMemDstW<0x24, "sub", sub>;
+def AND16am : ArithMemDstW<0x64, "and", and>;
+def OR16am  : ArithMemDstW<0x74, "or",  or>;
+def XOR16am : ArithMemDstW<0x54, "xor", xor>;
+
+def ADDB8am : ArithMemDstB<0x05, "addb", add>;
+def SUBB8am : ArithMemDstB<0x25, "subb", sub>;
+def ANDB8am : ArithMemDstB<0x65, "andb", and>;
+def ORB8am  : ArithMemDstB<0x75, "orb",  or>;
+def XORB8am : ArithMemDstB<0x55, "xorb", xor>;
+

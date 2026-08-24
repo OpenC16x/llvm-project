@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
     case StopReason::Unsupported:
     case StopReason::BadAccess:
     case StopReason::StackFault:
+    case StopReason::BadSequence:
     case StopReason::Halted:
       return Fail(M.StopDetail);
     case StopReason::StepLimit:
