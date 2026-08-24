@@ -847,10 +847,21 @@ earlyclobber.  Without that the allocator is free to hand it the divisor's
 register - which it does, the second divide then dividing by the first one's
 quotient.
 
-Signed 32 bit division is left as a call.  The decomposition above is an
-unsigned argument; the signed form would be magnitudes and sign fixups around
-the same two divides, which is a good deal of inline code for something whose
-call is four bytes.  Nothing has measured it either way.
+Signed 32 bit division by a word goes through the same two divides, on
+magnitudes, with the signs put back afterwards - each one negated by an
+exclusive or with its sign mask and a subtract of it, so there is no branch.
+Both magnitudes are representable, which is what to check before believing it
+works at the edges: the dividend's is at most 2^31, a 32 bit value, and the
+divisor's at most 32768, a 16 bit one.
+
+It is not done when the function is being compiled for size.  The sign handling
+is about twenty instructions on top of the seven the division takes, against
+four bytes for a call, and that trade goes both ways depending on what is being
+measured.  On a program doing nothing but these divisions it is 13130 executed
+instructions and 808 bytes before, 1064 and 412 after - faster and smaller,
+because the routine leaves the image once nothing needs it.  Over the
+differential programs, where one call site is not enough to unlink anything, it
+is 62 bytes more at -O2 and unchanged at -Os.
 
 On a program doing nothing but 32 bit divisions by a word the change is 19170
 executed instructions and 728 bytes before, 658 instructions and 354 bytes

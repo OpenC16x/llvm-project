@@ -56,13 +56,48 @@ define i32 @udiv32general(i32 %a, i32 %b) {
   ret i32 %r
 }
 
-; Signed division by a word is not done this way: the two step decomposition
-; is an unsigned argument, so the call stays.
+; Signed division by a word goes through the same two divides on magnitudes,
+; with the signs put back afterwards.  Both magnitudes are representable: the
+; dividend's is at most 2^31 and the divisor's at most 32768.
 
 define i32 @sdiv32by16(i32 %a, i16 %b) {
 ; CHECK-LABEL: sdiv32by16:
+; CHECK-NOT:     __divsi3
+; CHECK:         ashr
+; CHECK:         divu r4
+; CHECK:         divlu r4
+  %z = sext i16 %b to i32
+  %r = sdiv i32 %a, %z
+  ret i32 %r
+}
+
+define i32 @srem32by16(i32 %a, i16 %b) {
+; CHECK-LABEL: srem32by16:
+; CHECK-NOT:     __modsi3
+; CHECK:         divlu r4
+; CHECK:         mov r2, mdh
+  %z = sext i16 %b to i32
+  %r = srem i32 %a, %z
+  ret i32 %r
+}
+
+; The sign handling is around twenty instructions on top of the seven the
+; division takes, so a function being compiled for size keeps the call.
+
+define i32 @sdiv32by16_optsize(i32 %a, i16 %b) optsize {
+; CHECK-LABEL: sdiv32by16_optsize:
 ; CHECK:         calla cc_UC, __divsi3
   %z = sext i16 %b to i32
   %r = sdiv i32 %a, %z
+  ret i32 %r
+}
+
+; A divisor that is genuinely 32 bits keeps the call either way: the two step
+; decomposition needs a divisor that fits in a word.
+
+define i32 @sdiv32general(i32 %a, i32 %b) {
+; CHECK-LABEL: sdiv32general:
+; CHECK:         calla cc_UC, __divsi3
+  %r = sdiv i32 %a, %b
   ret i32 %r
 }

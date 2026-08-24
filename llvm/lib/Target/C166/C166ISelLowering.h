@@ -54,6 +54,8 @@ public:
 
   void ReplaceDivBy16Results(SDNode *N, SmallVectorImpl<SDValue> &Results,
                              SelectionDAG &DAG) const;
+  void ReplaceSignedDivBy16Results(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                                   SelectionDAG &DAG) const;
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
 
