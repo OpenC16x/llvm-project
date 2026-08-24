@@ -132,8 +132,19 @@ that they are, the condition flags, the multiply/divide unit, the system stack
 with its STKOV and STKUN bounds, the DPP window and the EXTP/EXTS overrides
 that replace it, and bit addressing.
 
+Four of the MAC unit's instructions run: CoLOAD, CoMUL, CoMAC and CoSTORE,
+which is what a multiply-accumulate needs and no more.  The accumulator is
+held as a 40 bit signed value, MAL and MAH being its low two words.  MCW
+resets to zero, so the product shift and the saturation are both off and this
+is plain signed integer multiply-accumulate; a program that wants either has
+to ask, and nothing here asks.  The other 176 forms stop the simulator by
+name, as any unimplemented instruction does - including the rounding variants
+of the four above, which are separate opcodes that add 00 0000 8000H and clear
+MAL, and would otherwise be a quiet wrong answer rather than a loud one.
+
 Not modelled: interrupts and traps, the peripherals, and the extended
-SFR space that EXTR selects.  A peripheral register reads back what was
+SFR space that EXTR selects.  Of the MAC unit, MSW's flags and guard bits, the
+repeat prefix, the limiter and the shifter are not modelled either.  A peripheral register reads back what was
 written to it, which is enough to run code that configures a peripheral it
 then never waits on.  ATOMIC and EXTR are accepted and counted so that the
 length of an EXTend sequence stays right, but they lock nothing, because there
@@ -175,7 +186,25 @@ simulator is measured against the document rather than against itself.
 Where the semantics come from
 -----------------------------
 
-The C166 Family Instruction Set Manual, V2.0, 2001-03.  Three things in it are
+The MAC unit's are the C166S V2 User's Manual's, from the detailed description
+of each instruction:
+
+  CoLOAD Rwn, Rwm   ACC <- sign extended (Rwm || Rwn), Rwn being the low word
+  CoMUL  Rwn, Rwm   ACC <- the signed 32 bit product, sign extended to 40
+  CoMAC  Rwn, Rwm   ACC <- ACC + that product
+  CoSTORE Rwn, creg the named MAC register into Rwn
+
+with the product one-bit left shifted first when MCW.MP is set, which it is
+not at reset.  MCW.MP is bit 10 and MCW.MS, the saturation control, is bit 9;
+the register resets to 0000H.
+
+Reading that rather than assuming it is what stopped CoMAC being implemented
+as the rounding form: the manual gives them separate opcodes and separate
+descriptions, and the rounding one adds 00 0000 8000H to the accumulator and
+clears MAL afterwards.  Selecting that for an integer dot product would have
+added 32768 to every term.
+
+The rest are the C166 Family Instruction Set Manual, V2.0, 2001-03.  Three things in it are
 not what a reader used to other machines would assume, and all three are
 commented at the point they are implemented:
 

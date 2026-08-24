@@ -112,7 +112,8 @@ enum class Op {
   X(CMPI216ri4) X(CMPI216regi) X(CMPI216rega)                                    \
   X(CMPD116ri4) X(CMPD116regi) X(CMPD116rega)                                    \
   X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
-  X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)
+  X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
+  X(CoLOAD_rr) X(CoMAC_rr) X(CoMUL_rr) X(CoSTORE_sr)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -1117,6 +1118,53 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.MDL = Q;
     M.MDH = R;
     E.setZN(Q, false);
+    break;
+  }
+  // -- the MAC unit ------------------------------------------------------
+  //
+  // Only what a multiply-accumulate needs.  The semantics are the C166S V2
+  // User's Manual's, from the detailed description of each instruction:
+  //
+  //   CoLOAD Rwn, Rwm   ACC <- sign extended (Rwm || Rwn), Rwn the low word
+  //   CoMUL  Rwn, Rwm   ACC <- the signed 32 bit product, sign extended
+  //   CoMAC  Rwn, Rwm   ACC <- ACC + that product
+  //   CoSTORE Rwn, creg the named MAC register into Rwn
+  //
+  // Each of the three arithmetic ones one-bit left shifts the product first
+  // when MCW.MP is set.  MCW resets to zero, so that does not happen unless a
+  // program asks for it, and nothing here asks.  The rounding forms are a
+  // different opcode - they add 00 0000 8000H and clear MAL - and are not
+  // implemented, so a program using one stops rather than quietly rounding.
+  case Op::CoLOAD_rr: {
+    int64_t V = int64_t(int32_t((uint32_t(W(1)) << 16) | W(0)));
+    M.setACC(V);
+    break;
+  }
+  case Op::CoMUL_rr:
+  case Op::CoMAC_rr: {
+    int64_t P = int64_t(int32_t(int16_t(W(0))) * int32_t(int16_t(W(1))));
+    if ((M.MCW >> 10) & 1)
+      P <<= 1;
+    M.setACC(O == Op::CoMUL_rr ? P : M.ACC + P);
+    break;
+  }
+  case Op::CoSTORE_sr: {
+    // The second operand names a MAC register; MAL and MAH are the two words
+    // of the accumulator.
+    StringRef Name = decoder().MRI->getName(Reg(1));
+    uint16_t V;
+    if (Name.equals_insensitive("mal"))
+      V = uint16_t(uint64_t(M.ACC) & 0xFFFF);
+    else if (Name.equals_insensitive("mah"))
+      V = uint16_t((uint64_t(M.ACC) >> 16) & 0xFFFF);
+    else if (Name.equals_insensitive("mcw"))
+      V = M.MCW;
+    else {
+      M.Stop = StopReason::Unsupported;
+      M.StopDetail = "costore from a MAC register that is not modelled";
+      return;
+    }
+    SetW(0, V);
     break;
   }
   case Op::MOVfromMDL:

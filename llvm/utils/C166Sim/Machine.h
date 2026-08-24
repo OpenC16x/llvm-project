@@ -117,6 +117,13 @@ public:
   /// it.
   uint32_t regFieldAddress(unsigned Reg) const;
 
+  /// Keep the accumulator sign correct in forty bits after an update.
+  void setACC(int64_t V) {
+    ACC = (V & 0xFFFFFFFFFFll);
+    if (ACC & 0x8000000000ll)
+      ACC -= 0x10000000000ll;
+  }
+
   bool flag(PSWBit B) const { return (PSW >> B) & 1; }
   void setFlag(PSWBit B, bool V) {
     PSW = (PSW & ~(uint16_t(1) << B)) | (uint16_t(V) << B);
@@ -168,6 +175,21 @@ public:
   uint16_t STKOV = ResetSTKOV;
   uint16_t STKUN = ResetSTKUN;
   uint16_t MDH = 0, MDL = 0, MDC = 0;
+
+  /// The MAC unit's 40 bit signed accumulator, and its control word.
+  ///
+  /// ACC is held as a 64 bit signed value kept sign correct in its low 40
+  /// bits; MAL is bits 15 to 0 and MAH bits 31 to 16, which is what a program
+  /// reads back with CoSTORE.  MCW resets to 0000H, so the unit starts with
+  /// the product shift and the saturation both off - which is plain integer
+  /// multiply-accumulate, and is why nothing has to configure it first.
+  ///
+  /// Only the handful of MAC instructions a multiply-accumulate needs are
+  /// modelled.  MSW's flags and guard bits are not, and neither is the
+  /// repeat prefix, the limiter or the shifter; anything using them stops the
+  /// simulator by name, as any unimplemented instruction does.
+  int64_t ACC = 0;
+  uint16_t MCW = 0;
   uint16_t DPP[4] = {0, 1, 2, 3};
   uint16_t CSP = 0;
   uint16_t IP = 0;
