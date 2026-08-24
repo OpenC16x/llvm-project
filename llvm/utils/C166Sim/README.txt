@@ -132,17 +132,91 @@ that they are, the condition flags, the multiply/divide unit, the system stack
 with its STKOV and STKUN bounds, the DPP window and the EXTP/EXTS overrides
 that replace it, and bit addressing.
 
-Not modelled: interrupts and traps, the peripherals, timing, and the extended
-SFR space that EXTR selects.  A peripheral register reads back what was
+Four of the MAC unit's instructions run: CoLOAD, CoMUL, CoMAC and CoSTORE,
+which is what a multiply-accumulate needs and no more.  The accumulator is
+held as a 40 bit signed value, MAL and MAH being its low two words.  MCW
+resets to zero, so the product shift and the saturation are both off and this
+is plain signed integer multiply-accumulate; a program that wants either has
+to ask, and nothing here asks.  The other 176 forms stop the simulator by
+name, as any unimplemented instruction does - including the rounding variants
+of the four above, which are separate opcodes that add 00 0000 8000H and clear
+MAL, and would otherwise be a quiet wrong answer rather than a loud one.
+
+Not modelled: interrupts and traps, the peripherals, and the extended
+SFR space that EXTR selects.  Of the MAC unit, MSW's flags and guard bits, the
+repeat prefix, the limiter and the shifter are not modelled either.  A peripheral register reads back what was
 written to it, which is enough to run code that configures a peripheral it
 then never waits on.  ATOMIC and EXTR are accepted and counted so that the
 length of an EXTend sequence stays right, but they lock nothing, because there
 is nothing to lock.
 
+Counting time
+-------------
+
+--count-states prints how long the program took, in states.  One state is one
+CPU clock period, which is the unit the instruction set manual counts in, and
+the figures are its own: Table 11 for what each instruction costs and section
+7.3 for what gets added.  Most instructions are two states, a multiply is ten
+and a divide twenty, the branches are four when they branch and two when they
+do not, and six states are added once for filling the pipeline.
+
+It counts a program executing from the internal program memory, which is where
+the linker script here puts .text.  Running from RAM or through the external
+bus controller costs more, by an amount the manual gives in ALE cycle times -
+which depend on the bus mode and the programmed waitstates, and so are a fact
+about a board rather than about a program.  That is why none of it is here.
+
+Two of the additions in section 7.3 are charged: a conditional branch pays a
+state when the instruction before it wrote PSW, and reading PSW as an operand
+pays two.  The rest are not, each for a reason written down in Execute.cpp
+next to the ones that are.  So a state count is a lower bound - exact for
+straight line code in Flash, and optimistic by a state here and there
+elsewhere.
+
+It is worth having because instruction counts mislead in the direction that
+flatters.  Inlining a 32 bit division by a word is 29 times fewer instructions
+than the library call and 16 times fewer states, because what replaced the
+call is two divides at twenty states each while the loop it replaced was
+almost all two state instructions.
+
+test/tools/c166-sim/states.s is the check on all of this: a short program
+whose count is worked out by hand from Table 11 in the comments, so that the
+simulator is measured against the document rather than against itself.
+
 Where the semantics come from
 -----------------------------
 
-The C166 Family Instruction Set Manual, V2.0, 2001-03.  Three things in it are
+The MAC unit's are the C166S V2 User's Manual's, from the detailed description
+of each instruction:
+
+  CoLOAD Rwn, Rwm   ACC <- sign extended (Rwm || Rwn), Rwn being the low word
+  CoMUL  Rwn, Rwm   ACC <- the signed 32 bit product, sign extended to 40
+  CoMAC  Rwn, Rwm   ACC <- ACC + that product
+  CoSTORE Rwn, creg the named MAC register into Rwn
+
+What that is worth, measured rather than assumed: a sixteen element dot
+product written both ways is 488 states through MUL and 236 through CoMAC, a
+little over twice as fast.  The win is per multiply-accumulate rather than per
+loop - MUL alone is ten states and CoMAC is two, so even one "acc += a * b"
+with the accumulator loaded and stored around it is eight states against
+eighteen.  Nothing selects any of this yet; the point of the number is that
+it says what selecting it would be worth.
+
+with the product one-bit left shifted first when MCW.MP is set, which it is
+not at reset.  Their state times come from the same handbook's instruction set
+summary, which counts cycles: each of the four is one cycle and the rounding
+forms are two.  One cycle is two states - that summary gives "MOV mem, reg" as
+4 bytes and 1 cycle where Table 11 gives it two states - so a MAC instruction
+costs what an ordinary instruction does.  MCW.MP is bit 10 and MCW.MS, the saturation control, is bit 9;
+the register resets to 0000H.
+
+Reading that rather than assuming it is what stopped CoMAC being implemented
+as the rounding form: the manual gives them separate opcodes and separate
+descriptions, and the rounding one adds 00 0000 8000H to the accumulator and
+clears MAL afterwards.  Selecting that for an integer dot product would have
+added 32768 to every term.
+
+The rest are the C166 Family Instruction Set Manual, V2.0, 2001-03.  Three things in it are
 not what a reader used to other machines would assume, and all three are
 commented at the point they are implemented:
 

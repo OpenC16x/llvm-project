@@ -112,7 +112,8 @@ enum class Op {
   X(CMPI216ri4) X(CMPI216regi) X(CMPI216rega)                                    \
   X(CMPD116ri4) X(CMPD116regi) X(CMPD116rega)                                    \
   X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
-  X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)
+  X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
+  X(CoLOAD_rr) X(CoMAC_rr) X(CoMUL_rr) X(CoSTORE_sr)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -389,6 +390,114 @@ std::string addrStr(uint32_t A) {
 }
 } // namespace
 
+/// What an instruction costs in states, executing from the internal program
+/// memory.
+///
+/// The figures are the C166 Family Instruction Set Manual's, chapter 7
+/// ("Instruction State Times"), version 2.0 of March 2001.  One state is one
+/// CPU clock period.  Table 11 gives the minimum times below; everything not
+/// named there takes two states, which is most of the instruction set.
+///
+/// The branches carry two figures, "4 or 2".  The larger is the cost of
+/// actually branching, because the instruction stream is broken and the
+/// pipeline has to refill; the smaller is what an untaken conditional costs.
+/// \p Taken says which happened.
+static unsigned baseStateTime(Op O, bool Taken) {
+  switch (O) {
+  // MUL, MULU.
+  case Op::MULrr:
+  case Op::MULUrr:
+    return 10;
+  // DIV, DIVL, DIVU, DIVLU - the slowest instructions on the part.
+  case Op::DIVr:
+  case Op::DIVUr:
+  case Op::DIVLr:
+  case Op::DIVLUr:
+    return 20;
+  // CALLS, CALLR, PCALL, JMPS, TRAP: always four, no untaken form.
+  case Op::CALLS:
+  case Op::CALLR:
+  case Op::PCALL:
+  case Op::JMPS:
+  case Op::TRAP:
+    return 4;
+  // RET, RETI, RETP, RETS.
+  case Op::RET:
+  case Op::RETI:
+  case Op::RETP:
+  case Op::RETS:
+    return 4;
+  // CALLI, CALLA, JMPA, JMPI, JMPR: four when taken, two when not.
+  case Op::CALLI:
+  case Op::CALLA:
+  case Op::JMPA:
+  case Op::JMPAcc:
+  case Op::JMPI:
+  case Op::JMPR:
+  case Op::JMPRcc:
+    return Taken ? 4 : 2;
+  // JB, JBC, JNB, JNBS, the bit branches, likewise.
+  case Op::JB:
+  case Op::JBC:
+  case Op::JNB:
+  case Op::JNBS:
+    return Taken ? 4 : 2;
+  // MOV[B] Rn, [Rm + #data16], the one move that is not two states.
+  case Op::MOV16rm:
+  case Op::MOVB8rm:
+    return 4;
+  // The MAC unit.  Table 11 is the original C166's and says nothing about a
+  // coprocessor that core does not have, so these come from the C166S V2
+  // Architecture Overview Handbook's instruction set summary, which counts in
+  // cycles rather than states: CoLOAD, CoMUL, CoMAC and CoSTORE are one cycle
+  // each, and the rounding forms two.  One cycle is two states - the same
+  // table gives "MOV mem, reg" as 4 bytes and 1 cycle, and Table 11 gives it
+  // two states - so a plain MAC instruction costs what any ordinary
+  // instruction does.  That it agrees with the default below is worth saying
+  // out loud rather than leaving to chance: the figure is read, not assumed.
+  case Op::CoLOAD_rr:
+  case Op::CoMUL_rr:
+  case Op::CoMAC_rr:
+  case Op::CoSTORE_sr:
+    return 2;
+  default:
+    return 2;
+  }
+}
+
+/// Whether \p O reads PSW as an operand rather than as condition flags, which
+/// is what section 7.3 charges two states for when the flags were just
+/// written.  The bit instructions reach PSW through its bit addresses.
+static bool readsPSWAsOperand(Op O) {
+  switch (O) {
+  case Op::BAND:
+  case Op::BOR:
+  case Op::BXOR:
+  case Op::BMOV:
+  case Op::BCMP:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// Whether \p O is a conditional branch, which pays a state when the
+/// instruction before it wrote PSW (section 7.3, "Testing Branch Conditions").
+static bool isConditionalBranch(Op O) {
+  switch (O) {
+  case Op::JMPAcc:
+  case Op::JMPR:
+  case Op::JMPRcc:
+  case Op::JB:
+  case Op::JBC:
+  case Op::JNB:
+  case Op::JNBS:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool Machine::step() {
   if (Stop != StopReason::Running)
     return false;
@@ -459,7 +568,53 @@ bool Machine::step() {
 
   ++Steps;
   IP = uint16_t(IP + Size);
+
+  // What the flags and the SFR space looked like going in, so that the
+  // penalties section 7.3 charges against the *following* instruction can be
+  // charged to this one.
+  bool WasPSWWrite = PrevWrotePSW;
+  uint16_t FallThroughIP = IP, CSPBefore = CSP;
+  // Whether PSW is *written*, which is what section 7.3 charges for - not
+  // whether its value changed.  "sub r1, #1" on 4 leaves every flag as it
+  // found it and still costs the branch after it a state.  setFlag() is the
+  // one place a flag is written, so asking there cannot drift from what the
+  // simulator actually models.
+  WrotePSW = false;
+
   executeOne(*this, MI, O, PC);
+
+  // A branch was taken if control did not fall through to the next
+  // instruction.  That is what separates the two figures Table 11 gives for
+  // the branches, and it is the same test for every one of them.
+  bool Taken = IP != FallThroughIP || CSP != CSPBefore;
+  unsigned Cost = baseStateTime(O, Taken);
+
+  // Section 7.3 adds to that in a handful of cases.  Two of them are charged
+  // here, both about PSW, because they are the ones this can decide exactly:
+  // a conditional branch pays a state when the instruction before it wrote
+  // PSW, and reading PSW as an operand pays two.
+  //
+  // The rest are not modelled, and each for a reason rather than an
+  // oversight.  Operand reads from the internal program memory, and every
+  // figure quoted in ALE cycle times, describe running from RAM or through
+  // the external bus controller: they depend on the bus mode and the
+  // programmed waitstates, which are a fact about a board and not about a
+  // program.  The indirect-IRAM-read-after-an-auto-increment penalty needs
+  // the addressing mode of the previous instruction rather than its effect,
+  // and the two SFR ones need to know that this instruction's operand is an
+  // SFR rather than that it touched one - the register bank is memory here,
+  // so a GPR access looks the same from underneath.
+  //
+  // So this is a lower bound on the time, exact for straight-line code in
+  // Flash and optimistic by a state here and there elsewhere.
+  if (WasPSWWrite && isConditionalBranch(O))
+    Cost += 1;
+  if (WasPSWWrite && readsPSWAsOperand(O))
+    Cost += 2;
+  States += Cost;
+
+  PrevWrotePSW = WrotePSW;
+
   retireExtend();
   return Stop == StopReason::Running;
 }
@@ -977,6 +1132,53 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.MDL = Q;
     M.MDH = R;
     E.setZN(Q, false);
+    break;
+  }
+  // -- the MAC unit ------------------------------------------------------
+  //
+  // Only what a multiply-accumulate needs.  The semantics are the C166S V2
+  // User's Manual's, from the detailed description of each instruction:
+  //
+  //   CoLOAD Rwn, Rwm   ACC <- sign extended (Rwm || Rwn), Rwn the low word
+  //   CoMUL  Rwn, Rwm   ACC <- the signed 32 bit product, sign extended
+  //   CoMAC  Rwn, Rwm   ACC <- ACC + that product
+  //   CoSTORE Rwn, creg the named MAC register into Rwn
+  //
+  // Each of the three arithmetic ones one-bit left shifts the product first
+  // when MCW.MP is set.  MCW resets to zero, so that does not happen unless a
+  // program asks for it, and nothing here asks.  The rounding forms are a
+  // different opcode - they add 00 0000 8000H and clear MAL - and are not
+  // implemented, so a program using one stops rather than quietly rounding.
+  case Op::CoLOAD_rr: {
+    int64_t V = int64_t(int32_t((uint32_t(W(1)) << 16) | W(0)));
+    M.setACC(V);
+    break;
+  }
+  case Op::CoMUL_rr:
+  case Op::CoMAC_rr: {
+    int64_t P = int64_t(int32_t(int16_t(W(0))) * int32_t(int16_t(W(1))));
+    if ((M.MCW >> 10) & 1)
+      P <<= 1;
+    M.setACC(O == Op::CoMUL_rr ? P : M.ACC + P);
+    break;
+  }
+  case Op::CoSTORE_sr: {
+    // The second operand names a MAC register; MAL and MAH are the two words
+    // of the accumulator.
+    StringRef Name = decoder().MRI->getName(Reg(1));
+    uint16_t V;
+    if (Name.equals_insensitive("mal"))
+      V = uint16_t(uint64_t(M.ACC) & 0xFFFF);
+    else if (Name.equals_insensitive("mah"))
+      V = uint16_t((uint64_t(M.ACC) >> 16) & 0xFFFF);
+    else if (Name.equals_insensitive("mcw"))
+      V = M.MCW;
+    else {
+      M.Stop = StopReason::Unsupported;
+      M.StopDetail = "costore from a MAC register that is not modelled";
+      return;
+    }
+    SetW(0, V);
     break;
   }
   case Op::MOVfromMDL:

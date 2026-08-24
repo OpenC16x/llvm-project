@@ -707,8 +707,9 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* The MAC unit assembles and disassembles but nothing selects it.  All 180
-  forms are there, in C166InstrMAC.td, which is generated from the Format lines
+* Four of the MAC unit's instructions are selected and the other 176 are
+  assembled and disassembled only.  All 180 forms are there, in
+  C166InstrMAC.td, which is generated from the Format lines
   the C166S V2 manual gives each instruction rather than written out by hand -
   the same table read from the opcode list agrees with those lines on every row
   the two share.  Each one assembles to the bytes the manual specifies and
@@ -717,9 +718,9 @@ Known limitations / things to do
   Two things it does not do.  The repeat prefix, which the manual writes
   "- USR0 CoXXX", is not accepted: it puts two tokens in front of the mnemonic
   and the matcher keys on the mnemonic being first.  rrr is therefore always
-  000, the plain form.  And the simulator does not model the unit, so it stops
-  and names the instruction rather than executing it, which is what it does
-  with anything it does not know.
+  000, the plain form.  And the simulator models only the four instructions
+  that are selected, stopping and naming any of the others rather than
+  executing it, which is what it does with anything it does not know.
 
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
@@ -857,17 +858,63 @@ divisor's at most 32768, a 16 bit one.
 It is not done when the function is being compiled for size.  The sign handling
 is about twenty instructions on top of the seven the division takes, against
 four bytes for a call, and that trade goes both ways depending on what is being
-measured.  On a program doing nothing but these divisions it is 13130 executed
-instructions and 808 bytes before, 1064 and 412 after - faster and smaller,
+measured.  On a program doing nothing but these divisions it is 28970 states
+and 808 bytes before, 3510 states and 412 bytes after - faster and smaller,
 because the routine leaves the image once nothing needs it.  Over the
 differential programs, where one call site is not enough to unlink anything, it
 is 62 bytes more at -O2 and unchanged at -Os.
 
-On a program doing nothing but 32 bit divisions by a word the change is 19170
-executed instructions and 728 bytes before, 658 instructions and 354 bytes
-after: the routine drops out of the image entirely when nothing else needs
-it.  Over the differential programs the size is unchanged, because the signed
-division there keeps __udivsi3 linked in for its own use.
+On a program doing nothing but 32 bit divisions by a word the change is 41530
+states and 728 bytes before, 2536 states and 354 bytes after: the routine drops
+out of the image entirely when nothing else needs it.  Over the differential
+programs the size is unchanged, because the signed division there keeps
+__udivsi3 linked in for its own use.
+
+That is 16 times faster, not the 29 times the instruction counts say.  The
+inline sequence is two divides, twenty states each, against a loop of two state
+instructions - which is exactly the sort of thing counting instructions gets
+wrong, and why the simulator counts states.
+
+Multiply-accumulate
+-------------------
+
+"acc += a * b", with a and b signed words and acc 32 bits, is CoMAC on a part
+that has the coprocessor.  MUL is ten states and CoMAC is two, so this wins
+even with the accumulator loaded and stored around each one: eight states
+against the eighteen of a multiply, the two reads out of MDL and MDH, and the
+add and the add with carry.
+
+The accumulator never leaves the pseudo, and that is what keeps this simple.
+It is one piece of state shared with everything else on the part - like MDL
+and MDH, and unlike them saved by nothing - so a MAC left live across a call
+or an interrupt would have to be saved somewhere.  Holding it only between the
+CoLOAD and the CoSTOREs of a single accumulate means it never is.
+
+By the time the combine runs the widening multiply is an SMUL_LOHI and the 32
+bit add is the ADDC and ADDE pair that carries between the words, so what is
+matched is the ADDE.  Three things have to hold: the carry comes from the ADDC
+of the other half, both halves are the two results of the same multiply, and
+that multiply feeds nothing else - a product wanted twice would have to be
+computed twice.  An ADDE whose own carry is used is part of something wider
+than 32 bits and is left alone, because the MAC produces no carry to continue
+with.
+
+Measured on a dot product of 32 elements run eight times: 9584 states without
+and 7024 with, which is 1.36 times.  The difference is exactly ten states per
+multiply-accumulate, 256 of them.  Written by hand with the accumulator kept
+in the unit across the loop the same shape is a little over twice as fast, so
+what the loads and stores cost is real: chaining consecutive MACs, and taking
+the CoLOAD and CoSTOREs out of the loop, is where the rest of it is.  That is
+also the change that would make the accumulator live across instructions and
+so make saving it somebody's problem.
+
+One shape it does not catch: an unrolled loop whose adds have been
+reassociated no longer has a multiply feeding the accumulator, so nothing
+matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
+what the unit's CoMUL is for, and is not done.
+
+Only the XC16x has the unit.  -mcpu=xc16x is what turns it on, and defines
+__C166_MAC__ so that code can ask.
 
 Compares the flags already answer
 ---------------------------------
@@ -920,12 +967,13 @@ every word of it did.  Neither is in the list.
 Scheduling
 ~~~~~~~~~~
 
-There is no scheduling model.  Adding one was considered and not done: what it
-would buy is measured in cycles, and nothing here counts cycles.  The simulator
-counts instructions, which is the wrong unit for a question about latency, and
-the part's timing is dominated by memory wait states that vary between members
-of the family.  A model written without something to check it against would be
-a set of numbers that look authoritative and are not.
+There is still no scheduling model, but the reason has changed.  It used to be
+that nothing here counted anything but instructions, which is the wrong unit
+for a question about latency; the simulator now counts states, so the question
+can be asked.  What is missing is the second half: a scheduling model describes
+which instructions can issue together and where the stalls are, and the state
+counts below are a per-instruction cost, not a pipeline.  Writing one would
+still be writing numbers with nothing to check them against.
 
 Counting leading zeroes
 -----------------------

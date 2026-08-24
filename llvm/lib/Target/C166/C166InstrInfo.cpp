@@ -394,6 +394,24 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       Emit(C166::MOVfromMDH).addDef(Rem);
     break;
   }
+  case C166::MAC32rr: {
+    // The accumulator goes into the unit, the product is accumulated onto it,
+    // and the two words come back out.  It does not stay: nothing saves the
+    // MAC accumulator across a call or an interrupt, so it is only ever live
+    // between these four instructions.
+    Register Lo = MI.getOperand(0).getReg();
+    Register Hi = MI.getOperand(1).getReg();
+    Register AccLo = MI.getOperand(2).getReg();
+    Register AccHi = MI.getOperand(3).getReg();
+    Register A = MI.getOperand(4).getReg();
+    Register B = MI.getOperand(5).getReg();
+
+    Emit(C166::CoLOAD_rr).addReg(AccLo).addReg(AccHi);
+    Emit(C166::CoMAC_rr).addReg(A).addReg(B);
+    Emit(C166::CoSTORE_sr).addDef(Lo).addReg(C166::MAL);
+    Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
+    break;
+  }
   case C166::UDIVREM32by16: {
     // Two divides.  The first takes the high word alone, which is what DIVU
     // does, and the second takes its remainder together with the low word,

@@ -64,6 +64,12 @@ public:
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 
+private:
+  std::string CPU = "generic";
+  bool HasMAC = false;
+
+public:
+
   llvm::SmallVector<Builtin::InfosShard> getTargetBuiltins() const override {
     return {};
   }
@@ -71,7 +77,51 @@ public:
   bool allowsLargerPreferedTypeAlignment() const override { return false; }
 
   bool hasFeature(StringRef Feature) const override {
-    return Feature == "c166";
+    return Feature == "c166" || (Feature == "mac" && HasMAC);
+  }
+
+  /// The processors the backend knows, which is what -mcpu names.
+  bool isValidCPUName(StringRef Name) const override {
+    return llvm::StringSwitch<bool>(Name)
+        .Cases({"generic", "c166", "c167", "st10", "xc16x"}, true)
+        .Default(false);
+  }
+
+  void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override {
+    Values.append({"generic", "c166", "c167", "st10", "xc16x"});
+  }
+
+  bool setCPU(StringRef Name) override {
+    if (!isValidCPUName(Name))
+      return false;
+    CPU = Name.str();
+    return true;
+  }
+
+  /// Which features each processor has.  Only the XC16x has the
+  /// multiply-accumulate coprocessor; the rest of the family does not, so
+  /// nothing may be selected for it unless the CPU says it is there.
+  bool initFeatureMap(llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags,
+                      StringRef CPUName,
+                      const std::vector<std::string> &FeatureVec) const override {
+    if (CPUName == "xc16x") {
+      Features["mac"] = true;
+      Features["ext-instr"] = true;
+    } else if (CPUName == "c167" || CPUName == "st10") {
+      Features["ext-instr"] = true;
+    }
+    return TargetInfo::initFeatureMap(Features, Diags, CPUName, FeatureVec);
+  }
+
+  bool handleTargetFeatures(std::vector<std::string> &Features,
+                            DiagnosticsEngine &Diags) override {
+    for (StringRef F : Features) {
+      if (F == "+mac")
+        HasMAC = true;
+      else if (F == "-mac")
+        HasMAC = false;
+    }
+    return true;
   }
 
   /// Address space 1 holds far pointers, which are a linear 24 bit address

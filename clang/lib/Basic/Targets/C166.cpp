@@ -34,6 +34,10 @@ void C166TargetInfo::getTargetDefines(const LangOptions &Opts,
   Builder.defineMacro("C166");
   Builder.defineMacro("__C166__");
   Builder.defineMacro("__c166__");
+  // So that code can ask whether the multiply-accumulate coprocessor is there
+  // rather than guessing from the part number.
+  if (HasMAC)
+    Builder.defineMacro("__C166_MAC__");
 
   // Far data lives in address space 1.  Spell it the way the vendor
   // toolchains do; the name is in the reserved identifier space, so it cannot

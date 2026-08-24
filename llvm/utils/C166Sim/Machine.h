@@ -28,6 +28,10 @@ namespace c166sim {
 static constexpr uint32_t AddressSpaceSize = 1u << 24;
 static constexpr uint32_t AddressMask = AddressSpaceSize - 1;
 
+/// Filling the pipeline, which the manual counts once for a whole program
+/// rather than against any instruction (Instruction Set Manual, section 7.1).
+static constexpr uint64_t PipelineFillStates = 6;
+
 /// The special function registers are memory mapped at the top of segment 0.
 static constexpr uint32_t SFRBase = 0x00FE00;
 static constexpr uint32_t SFREnd = 0x010000;
@@ -113,9 +117,17 @@ public:
   /// it.
   uint32_t regFieldAddress(unsigned Reg) const;
 
+  /// Keep the accumulator sign correct in forty bits after an update.
+  void setACC(int64_t V) {
+    ACC = (V & 0xFFFFFFFFFFll);
+    if (ACC & 0x8000000000ll)
+      ACC -= 0x10000000000ll;
+  }
+
   bool flag(PSWBit B) const { return (PSW >> B) & 1; }
   void setFlag(PSWBit B, bool V) {
     PSW = (PSW & ~(uint16_t(1) << B)) | (uint16_t(V) << B);
+    WrotePSW = true;
   }
 
   // -- the system stack --------------------------------------------------
@@ -163,6 +175,21 @@ public:
   uint16_t STKOV = ResetSTKOV;
   uint16_t STKUN = ResetSTKUN;
   uint16_t MDH = 0, MDL = 0, MDC = 0;
+
+  /// The MAC unit's 40 bit signed accumulator, and its control word.
+  ///
+  /// ACC is held as a 64 bit signed value kept sign correct in its low 40
+  /// bits; MAL is bits 15 to 0 and MAH bits 31 to 16, which is what a program
+  /// reads back with CoSTORE.  MCW resets to 0000H, so the unit starts with
+  /// the product shift and the saturation both off - which is plain integer
+  /// multiply-accumulate, and is why nothing has to configure it first.
+  ///
+  /// Only the handful of MAC instructions a multiply-accumulate needs are
+  /// modelled.  MSW's flags and guard bits are not, and neither is the
+  /// repeat prefix, the limiter or the shifter; anything using them stops the
+  /// simulator by name, as any unimplemented instruction does.
+  int64_t ACC = 0;
+  uint16_t MCW = 0;
   uint16_t DPP[4] = {0, 1, 2, 3};
   uint16_t CSP = 0;
   uint16_t IP = 0;
@@ -179,6 +206,24 @@ public:
 
   uint64_t Steps = 0;
   uint64_t MaxSteps = 0; ///< 0 means no limit
+
+  /// Execution time in states, where one state is one CPU clock period.
+  ///
+  /// This is what the Instruction Set Manual's chapter 7 calls Ttot: the sum
+  /// of each instruction's time plus six states for the solitary filling of
+  /// the pipeline.  It counts a program executing from the internal program
+  /// memory, which is where the linker script here puts .text; running from
+  /// RAM or through the external bus controller costs more, and by an amount
+  /// that depends on the bus mode and the programmed waitstates rather than
+  /// on the program, so none of that is modelled.  See stateTime() for what
+  /// is and is not counted.
+  uint64_t States = PipelineFillStates;
+
+  /// Whether the instruction just retired wrote PSW, which a conditional
+  /// branch immediately after it pays a state for.
+  bool PrevWrotePSW = false;
+  /// Set by setFlag() while the current instruction runs.
+  bool WrotePSW = false;
 
   bool Trace = false;
   llvm::raw_ostream *TraceOS = nullptr;
