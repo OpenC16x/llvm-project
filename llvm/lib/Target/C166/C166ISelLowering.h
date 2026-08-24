@@ -52,6 +52,9 @@ public:
 
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
+  /// The subtarget, for the patterns only some of the family has.
+  const C166Subtarget &Subtarget;
+
   void ReplaceDivBy16Results(SDNode *N, SmallVectorImpl<SDValue> &Results,
                              SelectionDAG &DAG) const;
   void ReplaceSignedDivBy16Results(SDNode *N, SmallVectorImpl<SDValue> &Results,

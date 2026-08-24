@@ -32,8 +32,14 @@ for SRC in "$HERE"/*.c; do
   ${CC:-cc} -O2 -w -o "$TMP/$NAME.host" "$SRC"
   "$TMP/$NAME.host" > "$TMP/$NAME.expected"
 
+  # A program that needs something only some of the family has says so in a
+  # line of its own, so that the flag travels with the program rather than
+  # with this script.  The host build never sees it: the point of the host
+  # side is to be the reference, and it is not this part.
+  EXTRA=$(sed -n 's,^/\* c166-flags: \(.*\) \*/$,\1,p' "$SRC")
+
   for OPT in $LEVELS; do
-    if ! "$BIN/clang" -target c166 "$OPT" --sysroot="$SYSROOT" -T "$SCRIPT" \
+    if ! "$BIN/clang" -target c166 $EXTRA "$OPT" --sysroot="$SYSROOT" -T "$SCRIPT" \
         "$SRC" -o "$TMP/$NAME.elf" 2> "$TMP/$NAME.build"; then
       # Running out of the 48 KByte a near address can reach is a fact about
       # the part and not a wrong answer, so it is reported and passed over

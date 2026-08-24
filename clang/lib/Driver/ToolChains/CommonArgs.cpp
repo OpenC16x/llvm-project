@@ -819,6 +819,15 @@ std::string tools::getCPUName(const Driver &D, const ArgList &Args,
           llvm::PPC::getNormalizedPPCTargetCPU(T, A->getValue()));
     return std::string(llvm::PPC::getNormalizedPPCTargetCPU(T));
 
+  case llvm::Triple::c166:
+    // The family members differ in what they have rather than in what they
+    // are: the XC16x has the multiply-accumulate coprocessor and the extended
+    // addressing instructions, the older parts have neither.  Naming one is
+    // what turns those on.
+    if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
+      return A->getValue();
+    return "";
+
   case llvm::Triple::csky:
     if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
       return A->getValue();

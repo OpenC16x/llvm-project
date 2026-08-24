@@ -40,7 +40,7 @@ using namespace llvm;
 
 C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
                                        const C166Subtarget &STI)
-    : TargetLowering(TM, STI) {
+    : TargetLowering(TM, STI), Subtarget(STI) {
   addRegisterClass(MVT::i8, &C166::GR8RegClass);
   addRegisterClass(MVT::i16, &C166::GR16RegClass);
 
@@ -174,7 +174,7 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setIndexedLoadAction(ISD::POST_INC, MVT::i16, Legal);
 
   setTargetDAGCombine(ISD::ADD);
-  setTargetDAGCombine({ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM});
+  setTargetDAGCombine({ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM, ISD::ADDE});
 
   // A far pointer is an i32, which is not a legal type, so an access through
   // one is caught while the type legalizer is expanding the pointer operand.
@@ -637,6 +637,62 @@ static SDValue combineDivRem(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
   return Pair.getValue(IsDiv ? 0 : 1);
 }
 
+/// "acc += a * b" with a and b signed words, onto the MAC unit.
+///
+/// By the time this runs the widening multiply is an SMUL_LOHI and the 32 bit
+/// add is the ADDC and ADDE pair that carries between the two words, so what
+/// is matched is the ADDE: its carry has to come from the ADDC of the other
+/// half, and both halves have to be the two results of the same multiply.
+///
+/// The multiply has to feed nothing else.  If either half is used again the
+/// MAC would compute the product a second time to hand it over, which costs
+/// more than it saves and is why the uses are counted rather than assumed.
+static SDValue combineMAC(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
+                          const C166Subtarget &ST) {
+  if (!ST.hasMAC() || N->getValueType(0) != MVT::i16)
+    return SDValue();
+
+  SDValue AccHi = N->getOperand(0), MulHi = N->getOperand(1);
+  if (MulHi.getOpcode() != ISD::SMUL_LOHI)
+    std::swap(AccHi, MulHi);
+  if (MulHi.getOpcode() != ISD::SMUL_LOHI || MulHi.getResNo() != 1)
+    return SDValue();
+
+  SDNode *AddC = N->getOperand(2).getNode();
+  if (AddC->getOpcode() != ISD::ADDC)
+    return SDValue();
+  SDValue AccLo = AddC->getOperand(0), MulLo = AddC->getOperand(1);
+  if (MulLo.getNode() != MulHi.getNode())
+    std::swap(AccLo, MulLo);
+  if (MulLo.getNode() != MulHi.getNode() || MulLo.getResNo() != 0)
+    return SDValue();
+
+  SDNode *Mul = MulHi.getNode();
+  if (!Mul->hasNUsesOfValue(1, 0) || !Mul->hasNUsesOfValue(1, 1))
+    return SDValue();
+  // The low sum goes to whatever wanted it and the carry to this node; if the
+  // ADDC is feeding anything else its carry is being read twice over.
+  if (!AddC->hasNUsesOfValue(1, 1))
+    return SDValue();
+
+  // A carry out of the high word means this is part of something wider than
+  // 32 bits, and the MAC produces no carry to continue it with.
+  if (N->hasAnyUseOfValue(1))
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
+  SDValue MAC =
+      DAG.getNode(C166ISD::MAC, DL, DAG.getVTList(MVT::i16, MVT::i16), AccLo,
+                  AccHi, Mul->getOperand(0), Mul->getOperand(1));
+  // Both words are replaced by hand.  Returning one of them would not do:
+  // these two nodes each carry a glue result besides their sum, and the
+  // combiner's own replacement is for a node with a single value.
+  DAG.ReplaceAllUsesOfValueWith(SDValue(AddC, 0), MAC.getValue(0));
+  DAG.ReplaceAllUsesOfValueWith(SDValue(N, 0), MAC.getValue(1));
+  return SDValue(N, 0);
+}
+
 /// A constant added to the address of a far object is part of that address
 /// rather than arithmetic on it: the relocations carry an addend, so the
 /// linker can do the adding.  Without this the offset survives to become a
@@ -650,6 +706,8 @@ SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::SREM:
   case ISD::UREM:
     return combineDivRem(N, DCI);
+  case ISD::ADDE:
+    return combineMAC(N, DCI, Subtarget);
   default:
     break;
   }
