@@ -52,8 +52,10 @@ BitVector C166RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(C166::RL0);
   Reserved.set(C166::RH0);
 
-  // The special function registers are never allocatable.
-  Reserved.set(C166::PSW);
+  // The special function registers are never allocatable.  Reserving PSW
+  // covers the five condition flags, which are its sub-registers.
+  for (MCPhysReg Sub : subregs_inclusive(C166::PSW))
+    Reserved.set(Sub);
   Reserved.set(C166::MDL);
   Reserved.set(C166::MDH);
   Reserved.set(C166::MDC);

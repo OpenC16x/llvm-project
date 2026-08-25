@@ -810,6 +810,37 @@ def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
 // Move Instructions
 //===----------------------------------------------------------------------===//
 
+// Every move writes three of the five condition flags.  The manual's table for
+// MOV is "E Z V C N = * * - - *": the zero and negative flags come from what
+// was moved, the end-of-table flag from whether it was the lowest negative
+// number, and the carry and overflow are left alone.  MOVBZ and MOVBS differ
+// only in clearing flags these set, which is still writing them, and PUSH,
+// POP, PCALL and RETP are moves too and have the same row.
+//
+// Leaving the carry alone is what lets it survive the register shuffling
+// between the ADD and the ADDC of a wide addition, and is why these cannot
+// simply declare PSW.  Writing the zero and negative flags is why they cannot
+// declare nothing, which is what they did before: a move between a compare and
+// the branch that reads it destroys the answer, and a machine description that
+// does not say so is one a pass is entitled to believe.
+defvar FlagsEZN = [PSW_E, PSW_Z, PSW_N];
+
+// What a condition can test.  The end-of-table flag is not among them: no
+// condition code reads it, and nothing in this backend does either, so saying
+// a jump reads the whole word would tie every jump to every move ahead of it
+// for a flag neither of them cares about.
+defvar FlagsTested = [PSW_Z, PSW_V, PSW_C, PSW_N];
+
+// What a carry-propagating add or subtract reads.  Its table row is
+// "* S * * *": the carry it continues, and the zero flag, which is sticky
+// there so that a wide value tests as zero exactly when every word of it did.
+// It does not read the negative, overflow or end-of-table flags, and claiming
+// it did would put a false dependence between it and every move in the
+// register shuffling around it.
+defvar FlagsCarryIn = [PSW_Z, PSW_C];
+
+let Defs = FlagsEZN in {
+
 let isMoveReg = 1, isAsCheapAsAMove = 1, hasSideEffects = 0 in {
 // MOV Rwn, Rwm  /  MOVB Rbn, Rbm
 def MOV16rr : InstS<0xF0, (outs GR16:$dst), (ins GR16:$src),
@@ -828,7 +859,35 @@ def MOVB8rr : InstS<0xF1, (outs GR8:$dst), (ins GR8:$src),
 }
 }
 
-let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
+// Putting a constant in a register writes the same three flags as any other
+// move, and these four are the one place that is not said.  Saying it costs
+// rematerialization: LLVM will not rematerialize an instruction that defines a
+// physical register at all - isReMaterializableImpl rejects it outright,
+// without asking whether the definition is dead - and a constant that cannot
+// be rebuilt where it is wanted has to be kept live in a callee saved register
+// instead, which on a function that sets up several calls means a frame, the
+// spills to fill it and the reloads to empty it.  Over the differential
+// programs that was between 0.3% and 13% more states, and nothing gained.
+//
+// X86 has the same problem with XOR-to-zero and escapes it by rematerializing
+// as a plain MOV, which does not touch the flags.  There is no such encoding
+// here: every way of getting a constant into a register on this part is a MOV,
+// and every MOV writes E, Z and N.  The decision would have to be made where
+// the value is being rematerialized to, and LiveRangeEdit::canRematerializeAt
+// has that point but hands the target only the instruction.
+//
+// So this is a deliberate and bounded gap: four opcodes, whose flags nothing
+// generated here reads.  What could read them is rematerialization dropping
+// one of these into a live flag range, and the only flag range that exists
+// between instructions is the carry an ADDC or SUBC continues - which a move
+// does not touch, its table row being "* * - - *".  The zero flag it does
+// touch, and ADDC's is sticky, but nothing branches on an ADDC's zero flag:
+// C166FoldCompare will not fold a compare into one for that same reason, so a
+// compare is always emitted.  Over the corpus there are 236 carry-propagating
+// instructions, 25 with a constant move inside the range, and none whose zero
+// flag is read.
+let Defs = []<Register>, isMoveImm = 1, isReMaterializable = 1,
+    isAsCheapAsAMove = 1 in {
 // MOV Rwn, #data4 / MOVB Rbn, #data4, two bytes with the constant in the high
 // nibble ahead of the register.  A short constant is zero extended, so these
 // cover 0 to 15.
@@ -1039,6 +1098,8 @@ def MOVBS16r8 : InstS<0xD0, (outs GR16:$dst), (ins GR8:$src),
   let Inst{11-8} = dst;
 }
 
+} // Defs = FlagsEZN
+
 //===----------------------------------------------------------------------===//
 // Arithmetic and Logical Instructions
 //===----------------------------------------------------------------------===//
@@ -1207,7 +1268,7 @@ def MOV16regi : InstL<0xE6, (outs), (ins reg8:$dst, data16:$src),
                       "mov\t$dst, $src", []> {
   bits<8> dst;
   bits<16> src;
-  let Defs = [PSW];
+  let Defs = FlagsEZN;
   let Inst{15-8} = dst;
   let Inst{31-16} = src;
 }
@@ -1217,7 +1278,7 @@ def MOV16rega : InstL<0xF2, (outs), (ins reg8:$dst, addr16:$src),
                       "mov\t$dst, $src", []> {
   bits<8> dst;
   bits<16> src;
-  let Defs = [PSW];
+  let Defs = FlagsEZN;
   let Inst{15-8} = dst;
   let Inst{31-16} = src;
 }
@@ -1306,7 +1367,7 @@ def MOVB8regi : InstL<0xE7, (outs), (ins reg8b:$dst, data8:$src),
                       "movb\t$dst, $src", []> {
   bits<8> dst;
   bits<8> src;
-  let Defs = [PSW];
+  let Defs = FlagsEZN;
   let Inst{15-8} = dst;
   let Inst{23-16} = src;
   let Inst{31-24} = 0;
@@ -1317,7 +1378,7 @@ def MOVB8rega : InstL<0xF3, (outs), (ins reg8b:$dst, addr16:$src),
                       "movb\t$dst, $src", []> {
   bits<8> dst;
   bits<16> src;
-  let Defs = [PSW];
+  let Defs = FlagsEZN;
   let Inst{15-8} = dst;
   let Inst{31-16} = src;
 }
@@ -1327,8 +1388,8 @@ defm SUB  : ArithWReg<"sub",  0x26, 0x22, 0x24>;
 defm AND  : ArithWReg<"and",  0x66, 0x62, 0x64>;
 defm OR   : ArithWReg<"or",   0x76, 0x72, 0x74>;
 defm XOR  : ArithWReg<"xor",  0x56, 0x52, 0x54>;
-defm ADDC : ArithWReg<"addc", 0x16, 0x12, 0x14, [PSW]>;
-defm SUBC : ArithWReg<"subc", 0x36, 0x32, 0x34, [PSW]>;
+defm ADDC : ArithWReg<"addc", 0x16, 0x12, 0x14, FlagsCarryIn>;
+defm SUBC : ArithWReg<"subc", 0x36, 0x32, 0x34, FlagsCarryIn>;
 
 defm ADD  : ArithW<"add",  0x00, 0x06, 0x02, add, 1>;
 defm SUB  : ArithW<"sub",  0x20, 0x26, 0x22, sub, 0>;
@@ -1346,8 +1407,8 @@ defm XORB : ArithB<"xorb", 0x51, 0x57, 0x53, xor, 1>;
 // and they are what carries a wider addition or subtraction from one word to
 // the next: the carry lives in the PSW, which is why these read it as well as
 // write it.
-defm ADDC : ArithW<"addc", 0x10, 0x16, 0x12, adde, 1, [PSW]>;
-defm SUBC : ArithW<"subc", 0x30, 0x36, 0x32, sube, 0, [PSW]>;
+defm ADDC : ArithW<"addc", 0x10, 0x16, 0x12, adde, 1, FlagsCarryIn>;
+defm SUBC : ArithW<"subc", 0x30, 0x36, 0x32, sube, 0, FlagsCarryIn>;
 
 // Unary operations, encoded as "n0".
 class UnaryInst<bits<8> opcode, string mnemonic, RegisterClass RC,
@@ -1520,13 +1581,13 @@ class MoveFromSFR<bits<16> addr, string name>
 
 // MDH sits at FE0CH and MDL at FE0EH (short register addresses 06H and 07H);
 // see the C166 User's Manual register table.
-let Defs = [MDL, MDC] in
+let Defs = !listconcat([MDL, MDC], FlagsEZN) in
 def MOVtoMDL : MoveToSFR<0xFE0E, "mdl">;
-let Defs = [MDH, MDC] in
+let Defs = !listconcat([MDH, MDC], FlagsEZN) in
 def MOVtoMDH : MoveToSFR<0xFE0C, "mdh">;
-let Uses = [MDL] in
+let Defs = FlagsEZN, Uses = [MDL] in
 def MOVfromMDL : MoveFromSFR<0xFE0E, "mdl">;
-let Uses = [MDH] in
+let Defs = FlagsEZN, Uses = [MDH] in
 def MOVfromMDH : MoveFromSFR<0xFE0C, "mdh">;
 
 //===----------------------------------------------------------------------===//
@@ -1568,7 +1629,7 @@ let isBranch = 1, isTerminator = 1 in {
 
   // Only produced by expanding the fused pseudos below and by the branch
   // rewriting done in C166InstrInfo.
-  let Uses = [PSW] in
+  let Uses = FlagsTested in
   def JMPAcc : InstL<0xEA, (outs), (ins brtarget:$dst, cc:$cond),
                      "jmpa\t$cond, $dst", []> {
     bits<16> dst;
@@ -1591,7 +1652,7 @@ let isBranch = 1, isTerminator = 1 in {
     let Inst{7-4} = 0b0000;   // cc_UC
   }
 
-  let Uses = [PSW] in
+  let Uses = FlagsTested in
   def JMPRcc : JumpRel<(ins reltarget8:$dst, cc:$cond), "jmpr\t$cond, $dst"> {
     bits<4> cond;
     let Inst{7-4} = cond;
@@ -1666,7 +1727,7 @@ def CALLI : InstS<0xAB, (outs), (ins cc:$cond, GR16:$src),
 // Miscellaneous Instructions
 //===----------------------------------------------------------------------===//
 
-let Defs = [SYSSP], Uses = [SYSSP] in {
+let Defs = !listconcat([SYSSP], FlagsEZN), Uses = [SYSSP] in {
 def PUSH : InstS<0xEC, (outs), (ins reg8:$src), "push\t$src", []> {
   bits<8> src;
   let Inst{15-8} = src;
@@ -2387,7 +2448,7 @@ def CALLR : InstS<0xBB, (outs), (ins reltarget8:$dst), "callr\t$dst", []> {
   bits<8> dst;
   let Inst{15-8} = dst;
 }
-let mayStore = 1 in
+let mayStore = 1, Defs = !listconcat([SYSSP], FlagsEZN) in
 def PCALL : InstL<0xE2, (outs), (ins reg8:$src, calltarget:$dst),
                   "pcall\t$src, $dst", []> {
   bits<8> src;
@@ -2398,7 +2459,7 @@ def PCALL : InstL<0xE2, (outs), (ins reg8:$src, calltarget:$dst),
 }
 
 let isReturn = 1, isTerminator = 1, isBarrier = 1, mayLoad = 1,
-    Defs = [SYSSP], Uses = [SYSSP] in
+    Defs = !listconcat([SYSSP], FlagsEZN), Uses = [SYSSP] in
 def RETP : InstS<0xEB, (outs), (ins reg8:$dst), "retp\t$dst", []> {
   bits<8> dst;
   let Inst{15-8} = dst;
@@ -2408,7 +2469,10 @@ def RETP : InstS<0xEB, (outs), (ins reg8:$dst), "retp\t$dst", []> {
 // through it.  Its layout is the post-incrementing load's, mirrored the way
 // MOV [Rw], Rw mirrors MOV Rw, [Rw]: the source register in the high nibble
 // and the pointer in the low one.
-let mayStore = 1, Constraints = "$base = $base_wb" in {
+// The flags are the moved value's, not the pointer's, which is why these are
+// not among the instructions a following compare can be folded into - but they
+// are written all the same.
+let mayStore = 1, Defs = FlagsEZN, Constraints = "$base = $base_wb" in {
 def MOV16prd : InstS<0x88, (outs GR16:$base_wb), (ins memrpd:$base,
                                                       GR16:$src),
                      "mov\t$base, $src", []> {
@@ -2463,8 +2527,8 @@ defm SUB16rp  : ArithIndirect<"sub",  0x20>;
 defm AND16rp  : ArithIndirect<"and",  0x60>;
 defm OR16rp   : ArithIndirect<"or",   0x70>;
 defm XOR16rp  : ArithIndirect<"xor",  0x50>;
-defm ADDC16rp : ArithIndirect<"addc", 0x10, [PSW]>;
-defm SUBC16rp : ArithIndirect<"subc", 0x30, [PSW]>;
+defm ADDC16rp : ArithIndirect<"addc", 0x10, FlagsCarryIn>;
+defm SUBC16rp : ArithIndirect<"subc", 0x30, FlagsCarryIn>;
 
 // CMP's indirect forms, spelled out because it has no destination and so does
 // not fit the multiclass above.

@@ -8,6 +8,9 @@
   define void @cv_condition() { ret void }
   define void @no_flags_at_all() { ret void }
   define void @move_sets_flags() { ret void }
+  define void @steps_over_transparent() { ret void }
+  define void @stops_at_a_move() { ret void }
+  define void @stops_at_a_constant_move() { ret void }
 ...
 ---
 # Condition 6 is cc_N, which reads N alone - and AND set N from the value it
@@ -18,7 +21,7 @@ body:             |
     successors: %bb.1
     $r2 = AND16ri3 $r2, 4, implicit-def $psw
     CMP16ri3 $r2, 0, implicit-def $psw
-    JMPRcc %bb.1, 6, implicit $psw
+    JMPRcc %bb.1, 6, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
   bb.1:
     RET implicit $r2, implicit $syssp, implicit-def $syssp
 ...
@@ -35,7 +38,7 @@ body:             |
     successors: %bb.1
     $r2 = AND16ri3 $r2, 4, implicit-def $psw
     CMP16ri3 $r2, 0, implicit-def $psw
-    JMPRcc %bb.1, 12, implicit $psw
+    JMPRcc %bb.1, 12, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
   bb.1:
     RET implicit $r2, implicit $syssp, implicit-def $syssp
 ...
@@ -43,16 +46,16 @@ body:             |
 # CHECK:      AND16ri3
 # CHECK-NEXT: CMP16ri3
 ---
-# The pre-decrement store sets no flags at all - it is one of the two near
-# misses in the list, checked against the simulator rather than assumed - so it
-# can never stand in for the compare.
+# The pre-decrement store does write Z and N, but from the value it moved
+# rather than the pointer it leaves behind, so it can never stand in for a
+# compare of that pointer.  It is one of the two near misses in the list.
 name:            no_flags_at_all
 body:             |
   bb.0:
     successors: %bb.1
-    $r2 = MOV16prd $r2, $r3
+    $r2 = MOV16prd $r2, $r3, implicit-def $psw_e, implicit-def $psw_z, implicit-def $psw_n
     CMP16ri3 $r2, 0, implicit-def $psw
-    JMPRcc %bb.1, 6, implicit $psw
+    JMPRcc %bb.1, 6, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
   bb.1:
     RET implicit $r2, implicit $syssp, implicit-def $syssp
 ...
@@ -66,12 +69,68 @@ name:            move_sets_flags
 body:             |
   bb.0:
     successors: %bb.1
-    $r2 = MOV16rr $r3
+    $r2 = MOV16rr $r3, implicit-def $psw_e, implicit-def $psw_z, implicit-def $psw_n
     CMP16ri3 $r2, 0, implicit-def $psw
-    JMPRcc %bb.1, 6, implicit $psw
+    JMPRcc %bb.1, 6, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
   bb.1:
     RET implicit $r2, implicit $syssp, implicit-def $syssp
 ...
 # CHECK-LABEL: name: move_sets_flags
 # CHECK:      MOV16rr
 # CHECK-NEXT: JMPRcc
+---
+# The walk reaches past an instruction that leaves the flags alone.  EXTS is
+# one of the few: its row in the manual's table is "E Z V C N = - - - - -".
+name:            steps_over_transparent
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = AND16ri3 $r2, 4, implicit-def $psw
+    EXTSi 3, 1
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 6, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: steps_over_transparent
+# CHECK:      AND16ri3
+# CHECK-NEXT: EXTSi
+# CHECK-NEXT: JMPRcc
+---
+# But it stops at a move, which writes Z and N from what it moved and so has
+# destroyed the answer the AND left behind.
+name:            stops_at_a_move
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = AND16ri3 $r2, 4, implicit-def $psw
+    $r5 = MOV16rr $r6, implicit-def $psw_e, implicit-def $psw_z, implicit-def $psw_n
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 6, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: stops_at_a_move
+# CHECK:      AND16ri3
+# CHECK-NEXT: MOV16rr
+# CHECK-NEXT: CMP16ri3
+---
+# And it stops at a move of a constant, whose flags the machine description
+# does not declare so that LLVM can still rematerialize it.  The pass knows
+# those four opcodes by name; if it did not, this compare would be dropped and
+# the branch would test what went into r5.
+name:            stops_at_a_constant_move
+body:             |
+  bb.0:
+    successors: %bb.1
+    $r2 = AND16ri3 $r2, 4, implicit-def $psw
+    $r5 = MOV16ri4 0
+    CMP16ri3 $r2, 0, implicit-def $psw
+    JMPRcc %bb.1, 6, implicit $psw_z, implicit $psw_v, implicit $psw_c, implicit $psw_n
+  bb.1:
+    RET implicit $r2, implicit $syssp, implicit-def $syssp
+...
+# CHECK-LABEL: name: stops_at_a_constant_move
+# CHECK:      AND16ri3
+# CHECK-NEXT: MOV16ri4
+# CHECK-NEXT: CMP16ri3

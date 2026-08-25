@@ -155,8 +155,39 @@ def VECSEG   : C166Reg<0x89, "vecseg">; // FF12H
 // instruction can write.
 def PC       : C166Reg<0x00, "">, DwarfRegNum<[45]>;
 
+// The five ALU condition flags, which are the low bits of the program status
+// word.  They are registers of their own because the instruction set touches
+// them separately and a single register cannot say so: the tables in the
+// manual give MOV as "E Z V C N = * * - - *", writing the zero and negative
+// flags from what it moved and leaving the carry and overflow alone.  That is
+// what lets a carry survive the register shuffling in a wide addition, and it
+// is also why a move destroys the answer a compare was about to reuse.
+//
+// Only "not affected" leaves a flag alone.  A flag the tables show as set,
+// cleared, sticky, or taken from a bit is written, so it is a def here.
+//
+// They have no assembly names, for the reason PC has none: every register name
+// is a word the assembler reserves, and a C object called "psw_n" would then
+// stop assembling.
+let Namespace = "C166" in {
+  def subreg_n : SubRegIndex<1, 0>;
+  def subreg_c : SubRegIndex<1, 1>;
+  def subreg_v : SubRegIndex<1, 2>;
+  def subreg_z : SubRegIndex<1, 3>;
+  def subreg_e : SubRegIndex<1, 4>;
+}
+
+def PSW_N : C166Reg<0x00, "">;
+def PSW_C : C166Reg<0x00, "">;
+def PSW_V : C166Reg<0x00, "">;
+def PSW_Z : C166Reg<0x00, "">;
+def PSW_E : C166Reg<0x00, "">;
+
 // Program status word, and the two constant registers.
-def PSW      : C166Reg<0x88, "psw">, DwarfRegNum<[32]>; // FF10H
+let SubRegIndices = [subreg_n, subreg_c, subreg_v, subreg_z, subreg_e] in
+def PSW      : C166RegWithSubregs<0x88, "psw",
+                                  [PSW_N, PSW_C, PSW_V, PSW_Z, PSW_E]>,
+               DwarfRegNum<[32]>; // FF10H
 def MDC      : C166Reg<0x87, "mdc">, DwarfRegNum<[35]>; // FF0EH
 def ZEROS    : C166Reg<0x8E, "zeros">; // FF1CH
 def ONES     : C166Reg<0x8F, "ones">; // FF1EH
