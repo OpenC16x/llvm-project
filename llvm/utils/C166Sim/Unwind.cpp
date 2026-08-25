@@ -302,6 +302,19 @@ std::vector<Frame> c166sim::backtrace(Machine &M,
   else
     consumeError(FOrErr.takeError());
 
+  // A program built without debug information has no .debug_frame, but one
+  // built with exceptions has .eh_frame, which carries the same rules.  Taking
+  // it means the call frame information an exception would actually be thrown
+  // through is walked here too, rather than only the copy that debuggers read.
+  // The two are emitted from the same rules and there is nowhere else that
+  // notices if they stop agreeing.
+  if (!Frames || Frames->entries().empty()) {
+    if (Expected<const DWARFDebugFrame *> FOrErr = DICtx->getEHFrame())
+      Frames = *FOrErr;
+    else
+      consumeError(FOrErr.takeError());
+  }
+
   // Frame zero is the machine as it stands.
   FrameState F;
   for (unsigned I = 0; I != 16; ++I)

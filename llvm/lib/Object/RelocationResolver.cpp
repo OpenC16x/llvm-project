@@ -382,12 +382,20 @@ static uint64_t resolveAVR(uint64_t Type, uint64_t Offset, uint64_t S,
   }
 }
 
-// The absolute relocations a C166 object can carry in a section that is data
-// rather than instructions, which is what this is asked about: the plain widths
-// and the four that take a field out of a 24 bit address.  The PC relative ones
-// are branch displacements, measured from the instruction after the one being
-// relocated, so they appear only in executable sections and there is nothing
-// here for them to mean.
+// The relocations a C166 object can carry in a section that is data rather than
+// instructions, which is what this is asked about: the plain widths, the four
+// that take a field out of a 24 bit address, and the plain PC relative ones.
+//
+// The PC relative ones are here because .eh_frame puts one in a data section:
+// a frame description entry locates the code it describes with a displacement
+// from the entry itself, which on this target is R_C166_PCREL32.  Without it
+// the call frame information an exception unwinds through cannot be read at
+// all - llvm-dwarfdump gives up on the section - and it is the same
+// information a backtrace walks.
+//
+// R_C166_PCREL8W is not one of them.  It is the branch encoding, whose field
+// counts words from the instruction after the branch rather than bytes from
+// the place being relocated, and it appears only in executable sections.
 static bool supportsC166(uint64_t Type) {
   switch (Type) {
   case ELF::R_C166_ABS8:
@@ -398,6 +406,9 @@ static bool supportsC166(uint64_t Type) {
   case ELF::R_C166_SOF16:
   case ELF::R_C166_PAG10:
   case ELF::R_C166_POF14:
+  case ELF::R_C166_PCREL8:
+  case ELF::R_C166_PCREL16:
+  case ELF::R_C166_PCREL32:
     return true;
   default:
     return false;
@@ -425,6 +436,14 @@ static uint64_t resolveC166(uint64_t Type, uint64_t Offset, uint64_t S,
     return (V >> 14) & 0x3FF;
   case ELF::R_C166_POF14:
     return V & 0x3FFF;
+  // Measured from the place being relocated, which is what lld resolves these
+  // to as well: getRelExpr gives them R_PC and nothing adjusts them further.
+  case ELF::R_C166_PCREL8:
+    return (V - Offset) & 0xFF;
+  case ELF::R_C166_PCREL16:
+    return (V - Offset) & 0xFFFF;
+  case ELF::R_C166_PCREL32:
+    return (V - Offset) & 0xFFFFFFFF;
   default:
     llvm_unreachable("Invalid relocation type");
   }
