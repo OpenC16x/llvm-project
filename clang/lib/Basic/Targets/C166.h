@@ -81,6 +81,11 @@ public:
   }
 
   /// The processors the backend knows, which is what -mcpu names.
+  /// _BitInt of any width.  The backend legalises an odd width the way it
+  /// legalises anything else that is not sixteen bits, so there is nothing
+  /// here that has to be true for the target and is not.
+  bool hasBitIntType() const override { return true; }
+
   bool isValidCPUName(StringRef Name) const override {
     return llvm::StringSwitch<bool>(Name)
         .Cases({"generic", "c166", "c167", "st10", "xc16x"}, true)

@@ -53,6 +53,10 @@ Naming a part that does not exist says so, and lists the ones that do:
   clang -target c166 -mmcu=xc164 -c hello.c
   error: unknown part 'xc164' for '-mmcu='; known parts are: xc164cm-8f, ...
 
+The corpus in llvm/utils/C166Sim/corpus builds drivers over LLVM's own libc
+and checks them against the host the same way, which is what reaches the shapes
+a hand written program does not.
+
 Every part in the table is built and run by
 
   llvm/utils/C166Sim/differential/parts.sh <build-bin> <sysroot> c166.ld
