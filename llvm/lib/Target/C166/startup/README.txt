@@ -37,7 +37,36 @@ same thing.
 
 Then a whole program is one command:
 
-  clang -target c166 -O2 --sysroot=sysroot -T c166.ld hello.c -o hello.elf
+  clang -target c166 -mmcu=xc164cm-8f -O2 --sysroot=sysroot -T c166.ld \
+      hello.c -o hello.elf
+
+-mmcu= names the part, and that is what supplies the memory map: the linker
+script below asks for the sizes rather than having them written into it, so
+moving to another derivative is a different name rather than an edited script.
+It also selects the core, so the multiply-accumulate unit comes on by itself
+where the part has one, and defines __XC164CM_8F__ and the sizes as macros so
+that code can ask.  Leaving it out links for an XC164CM-8F, which is what the
+defaults in the script are.
+
+Naming a part that does not exist says so, and lists the ones that do:
+
+  clang -target c166 -mmcu=xc164 -c hello.c
+  error: unknown part 'xc164' for '-mmcu='; known parts are: xc164cm-8f, ...
+
+Every part in the table is built and run by
+
+  llvm/utils/C166Sim/differential/parts.sh <build-bin> <sysroot> c166.ld
+
+which is what checks the maps rather than only the driver: run.sh links
+everything for the default part, so a derivative whose map is wrong would not
+show up there.
+
+The table is llvm/include/llvm/TargetParser/C166TargetParser.def, and every
+row in it cites the derivative table it came from.  Adding a part means
+finding that table, not working the memory out from the part number: the
+letters in the middle of an XC164 name say which peripherals it has and
+nothing about its memory, and the suffix says the memory and nothing about the
+peripherals.
 
 The driver puts crt0.o first, asks for -lc, and adds the compiler-rt builtins;
 -nostartfiles, -nolibc and -nodefaultlibs turn those off one at a time.  There
@@ -47,10 +76,20 @@ is not optional.
 What to change for a particular part
 ------------------------------------
 
-The linker script is written for an XC164CM with nothing outside the chip: the
-64 KByte of program Flash at C0'0000H, the 2 KByte of DSRAM at 00'C000H and the
-2 KByte of DPRAM at 00'F600H.  The MEMORY block at the top of c166.ld is where
-a board's own memory goes.
+The linker script covers a part with nothing outside the chip.  Which part is
+-mmcu='s business now; what is left to change here is memory the chip does not
+have - external Flash or RAM on a board - which goes in the MEMORY block at the
+top of c166.ld alongside the regions the part supplies.
+
+Two derivatives in the table show what the script has to cope with, and both
+are handled without an edit.  The XC164xx-4F has no data SRAM at all, so its
+static data goes at the bottom of the dual-port RAM with the ABI stack coming
+down from the top of the same memory towards it.  The XC164CS-16F has 128
+KByte of program memory, which is two segments, and a far access carries one
+segment while a near branch cannot leave one - so the second segment is a
+region of its own, and code goes there with
+
+  __attribute__((far, section(".fartext2")))
 
 Only 48 KByte of that Flash is in the rom region, and the reason is the thing
 to understand before changing any of this.  A 16 bit address does not name a

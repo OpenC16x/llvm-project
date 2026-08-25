@@ -13,13 +13,23 @@
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Options/Options.h"
 #include "llvm/Option/ArgList.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Path.h"
+#include "llvm/TargetParser/C166TargetParser.h"
 
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
 using namespace clang::driver::tools;
 using namespace clang;
 using namespace llvm::opt;
+
+/// The part -mmcu= names, or nullptr when it was not given or is not one.
+/// Saying so is the constructor's job, below, so that it is said once however
+/// many jobs the driver goes on to build.
+static const llvm::C166::Part *getPart(const ArgList &Args) {
+  const Arg *A = Args.getLastArg(options::OPT_mmcu_EQ);
+  return A ? llvm::C166::getPart(A->getValue()) : nullptr;
+}
 
 C166ToolChain::C166ToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
@@ -29,6 +39,23 @@ C166ToolChain::C166ToolChain(const Driver &D, const llvm::Triple &Triple,
   SmallString<128> Dir(computeSysRoot());
   llvm::sys::path::append(Dir, "c166-elf", "lib");
   getFilePaths().push_back(std::string(Dir));
+
+  // A part that does not exist is an error rather than one with no memory: the
+  // point of naming a part is not to have to know its memory map, so getting
+  // the name wrong has to say so rather than build something that will not
+  // run.  Here rather than in the jobs, because a compile and a link would
+  // otherwise each say it.
+  const Arg *A = Args.getLastArg(options::OPT_mmcu_EQ);
+  if (!A || llvm::C166::getPart(A->getValue()))
+    return;
+
+  std::string Names;
+  for (const llvm::C166::Part &P : llvm::C166::getAllParts()) {
+    if (!Names.empty())
+      Names += ", ";
+    Names += P.Name.str();
+  }
+  D.Diag(diag::err_drv_c166_unknown_mcu) << A->getValue() << Names;
 }
 
 std::string C166ToolChain::computeSysRoot() const {
@@ -58,10 +85,72 @@ void C166ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
   // part.  Only what this toolchain adds above, plus clang's own headers, is
   // meaningful here.
   CC1Args.push_back("-nostdsysteminc");
+
+  // Naming a part is also how a program says which one it is being built for,
+  // so that code can ask.  Doing this here rather than only when linking is
+  // what makes a misspelled part a diagnostic on the compile as well.
+  const llvm::C166::Part *P = getPart(DriverArgs);
+  if (!P)
+    return;
+
+  auto define = [&](const Twine &Text) {
+    CC1Args.push_back("-D");
+    CC1Args.push_back(DriverArgs.MakeArgString(Text));
+  };
+
+  // The part's own name, upper cased with what is not a letter or a digit
+  // turned into an underscore, which is what makes it usable in an #ifdef:
+  // xc164cm-8f becomes __XC164CM_8F__.
+  std::string Macro = "__";
+  for (char C : P->Name)
+    Macro += llvm::isAlnum(C) ? llvm::toUpper(C) : '_';
+  Macro += "__";
+  define(Macro);
+
+  define("__C166_PROGRAM_SIZE__=" + Twine(P->ProgramSize));
+  define("__C166_DSRAM_SIZE__=" + Twine(P->DSRAMSize));
+  define("__C166_DPRAM_SIZE__=" + Twine(P->DPRAMSize));
+  define("__C166_PSRAM_SIZE__=" + Twine(P->PSRAMSize));
+  if (P->IsROM)
+    define("__C166_PROGRAM_IS_ROM__");
 }
 
 Tool *C166ToolChain::buildLinker() const {
   return new tools::c166::Linker(*this);
+}
+
+/// Hand the part's memory map to the linker script, which reads these rather
+/// than having the sizes written into it.  A script that is not written to
+/// expect them - somebody's own, for a board with memory outside the chip -
+/// simply does not refer to them and is unaffected.
+static void addPartMemoryMap(const llvm::C166::Part &P, ArgStringList &CmdArgs,
+                             const ArgList &Args) {
+  auto def = [&](StringRef Name, unsigned long Value) {
+    CmdArgs.push_back(
+        Args.MakeArgString("--defsym=" + Name + "=" + Twine(Value)));
+  };
+
+  // Only the first 48 KByte of the program memory is under a data page
+  // pointer, so that is as much of it as a near address can reach; the rest is
+  // where code and far data go.  A part with less than that has no second
+  // region at all, and a zero length one would be a region a section could be
+  // placed in by accident.
+  unsigned long Near = P.ProgramSize < 48 * 1024 ? P.ProgramSize : 48 * 1024;
+  def("__c166_rom_length", Near);
+
+  // What is left of the first segment, and then the second.  A far access
+  // carries one segment and a near branch cannot leave one, so the boundary
+  // has to be a boundary between regions rather than something a section can
+  // sit across.
+  unsigned long Rest = P.ProgramSize - Near;
+  unsigned long FirstSegment = 64 * 1024 - Near;
+  unsigned long Far = Rest < FirstSegment ? Rest : FirstSegment;
+  def("__c166_farrom_length", Far);
+  def("__c166_farrom2_length", Rest - Far);
+
+  def("__c166_dsram_length", P.DSRAMSize);
+  def("__c166_dpram_length", P.DPRAMSize);
+  def("__c166_psram_length", P.PSRAMSize);
 }
 
 void c166::Linker::ConstructJob(Compilation &C, const JobAction &JA,
@@ -102,7 +191,12 @@ void c166::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(Output.getFilename());
 
   // The memory map is a property of the board, so there is no default script
-  // to fall back on; llvm/lib/Target/C166/startup has one to start from.
+  // to fall back on; llvm/lib/Target/C166/startup has one to start from.  What
+  // -mmcu= supplies is the sizes that script asks for, so that a part is a
+  // name rather than a map somebody has edited.
+  if (const llvm::C166::Part *P = getPart(Args))
+    addPartMemoryMap(*P, CmdArgs, Args);
+
   Args.AddAllArgs(CmdArgs, options::OPT_T);
 
   C.addCommand(std::make_unique<Command>(
