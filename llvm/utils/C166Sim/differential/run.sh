@@ -26,10 +26,14 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 STATUS=0
 
-for SRC in "$HERE"/*.c; do
-  NAME=$(basename "$SRC" .c)
+for SRC in "$HERE"/*.c "$HERE"/*.cpp; do
+  [ -e "$SRC" ] || continue
+  case "$SRC" in
+    *.cpp) NAME=$(basename "$SRC" .cpp); HOSTCC=${CXX:-c++}; TARGETCC=clang++ ;;
+    *)     NAME=$(basename "$SRC" .c);   HOSTCC=${CC:-cc};   TARGETCC=clang ;;
+  esac
 
-  ${CC:-cc} -O2 -w -o "$TMP/$NAME.host" "$SRC"
+  "$HOSTCC" -O2 -w -o "$TMP/$NAME.host" "$SRC"
   "$TMP/$NAME.host" > "$TMP/$NAME.expected"
 
   # A program that needs something only some of the family has says so in a
@@ -39,7 +43,7 @@ for SRC in "$HERE"/*.c; do
   EXTRA=$(sed -n 's,^/\* c166-flags: \(.*\) \*/$,\1,p' "$SRC")
 
   for OPT in $LEVELS; do
-    if ! "$BIN/clang" -target c166 $EXTRA "$OPT" --sysroot="$SYSROOT" -T "$SCRIPT" \
+    if ! "$BIN/$TARGETCC" -target c166 $EXTRA "$OPT" --sysroot="$SYSROOT" -T "$SCRIPT" \
         "$SRC" -o "$TMP/$NAME.elf" 2> "$TMP/$NAME.build"; then
       # Running out of the 48 KByte a near address can reach is a fact about
       # the part and not a wrong answer, so it is reported and passed over

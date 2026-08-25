@@ -19,6 +19,7 @@ add_llvm_component_library(LLVMTargetParser
   ARMTargetParserCommon.cpp
   ARMTargetParser.cpp
   AVRTargetParser.cpp
+  C166TargetParser.cpp
   CSKYTargetParser.cpp
   Host.cpp
   LoongArchTargetParser.cpp

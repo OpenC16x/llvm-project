@@ -1465,8 +1465,11 @@ void ItaniumCXXABI::emitRethrow(CodeGenFunction &CGF, bool isNoReturn) {
 static llvm::FunctionCallee getAllocateExceptionFn(CodeGenModule &CGM) {
   // void *__cxa_allocate_exception(size_t thrown_size);
 
+  // LangSizeTy and not SizeTy: the parameter is the language's size_t, which
+  // is what emitThrow passes, and the two differ on a target whose widest
+  // pointer is not the width of its size_t.
   llvm::FunctionType *FTy =
-    llvm::FunctionType::get(CGM.Int8PtrTy, CGM.SizeTy, /*isVarArg=*/false);
+    llvm::FunctionType::get(CGM.Int8PtrTy, CGM.LangSizeTy, /*isVarArg=*/false);
 
   return CGM.CreateRuntimeFunction(FTy, "__cxa_allocate_exception");
 }
@@ -2550,7 +2553,10 @@ void ARMCXXABI::EmitReturnFromThunk(CodeGenFunction &CGF,
 CharUnits ItaniumCXXABI::getArrayCookieSizeImpl(QualType elementType) {
   // The array cookie is a size_t; pad that up to the element alignment.
   // The cookie is actually right-justified in that space.
-  return std::max(CharUnits::fromQuantity(CGM.SizeSizeInBytes),
+  //
+  // The language's size_t, not CGM.SizeSizeInBytes: that is built from the
+  // target's widest pointer, and the ABI says this slot holds a size_t.
+  return std::max(CharUnits::fromQuantity(CGM.LangSizeSizeInBytes),
                   CGM.getContext().getPreferredTypeAlignInChars(elementType));
 }
 
@@ -2564,7 +2570,7 @@ Address ItaniumCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
   unsigned AS = NewPtr.getAddressSpace();
 
   ASTContext &Ctx = getContext();
-  CharUnits SizeSize = CGF.getSizeSize();
+  CharUnits SizeSize = CGF.getLangSizeSize();
 
   // The size of the cookie.
   CharUnits CookieSize =
@@ -2578,7 +2584,7 @@ Address ItaniumCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
     CookiePtr = CGF.Builder.CreateConstInBoundsByteGEP(CookiePtr, CookieOffset);
 
   // Write the number of elements into the appropriate slot.
-  Address NumElementsPtr = CookiePtr.withElementType(CGF.SizeTy);
+  Address NumElementsPtr = CookiePtr.withElementType(CGF.LangSizeTy);
   llvm::Instruction *SI = CGF.Builder.CreateStore(NumElements, NumElementsPtr);
 
   // Handle the array cookie specially in ASan.
@@ -2604,13 +2610,13 @@ llvm::Value *ItaniumCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
                                                 CharUnits cookieSize) {
   // The element size is right-justified in the cookie.
   Address numElementsPtr = allocPtr;
-  CharUnits numElementsOffset = cookieSize - CGF.getSizeSize();
+  CharUnits numElementsOffset = cookieSize - CGF.getLangSizeSize();
   if (!numElementsOffset.isZero())
     numElementsPtr =
       CGF.Builder.CreateConstInBoundsByteGEP(numElementsPtr, numElementsOffset);
 
   unsigned AS = allocPtr.getAddressSpace();
-  numElementsPtr = numElementsPtr.withElementType(CGF.SizeTy);
+  numElementsPtr = numElementsPtr.withElementType(CGF.LangSizeTy);
   if (!CGM.getLangOpts().Sanitize.has(SanitizerKind::Address) || AS != 0)
     return CGF.Builder.CreateLoad(numElementsPtr);
   // In asan mode emit a function call instead of a regular load and let the
@@ -2619,7 +2625,7 @@ llvm::Value *ItaniumCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
   // We can't simply ignore this load using nosanitize metadata because
   // the metadata may be lost.
   llvm::FunctionType *FTy =
-      llvm::FunctionType::get(CGF.SizeTy, CGF.DefaultPtrTy, false);
+      llvm::FunctionType::get(CGF.LangSizeTy, CGF.DefaultPtrTy, false);
   llvm::FunctionCallee F =
       CGM.CreateRuntimeFunction(FTy, "__asan_load_cxx_array_cookie");
   return CGF.Builder.CreateCall(F, numElementsPtr.emitRawPointer(CGF));
@@ -2634,7 +2640,7 @@ CharUnits ARMCXXABI::getArrayCookieSizeImpl(QualType elementType) {
   // But the base ABI doesn't give anything an alignment greater than
   // 8, so we can dismiss this as typical ABI-author blindness to
   // actual language complexity and round up to the element alignment.
-  return std::max(CharUnits::fromQuantity(2 * CGM.SizeSizeInBytes),
+  return std::max(CharUnits::fromQuantity(2 * CGM.LangSizeSizeInBytes),
                   CGM.getContext().getTypeAlignInChars(elementType));
 }
 
@@ -2649,8 +2655,8 @@ Address ARMCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
   Address cookie = newPtr;
 
   // The first element is the element size.
-  cookie = cookie.withElementType(CGF.SizeTy);
-  llvm::Value *elementSize = llvm::ConstantInt::get(CGF.SizeTy,
+  cookie = cookie.withElementType(CGF.LangSizeTy);
+  llvm::Value *elementSize = llvm::ConstantInt::get(CGF.LangSizeTy,
                  getContext().getTypeSizeInChars(elementType).getQuantity());
   CGF.Builder.CreateStore(elementSize, cookie);
 
@@ -2670,9 +2676,9 @@ llvm::Value *ARMCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
   // The number of elements is at offset sizeof(size_t) relative to
   // the allocated pointer.
   Address numElementsPtr
-    = CGF.Builder.CreateConstInBoundsByteGEP(allocPtr, CGF.getSizeSize());
+    = CGF.Builder.CreateConstInBoundsByteGEP(allocPtr, CGF.getLangSizeSize());
 
-  numElementsPtr = numElementsPtr.withElementType(CGF.SizeTy);
+  numElementsPtr = numElementsPtr.withElementType(CGF.LangSizeTy);
   return CGF.Builder.CreateLoad(numElementsPtr);
 }
 

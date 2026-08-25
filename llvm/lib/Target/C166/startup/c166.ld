@@ -105,36 +105,77 @@ __pllcon_bypass = (1 << 13) | ((__pll_n - 1) << 8) | (__pll_vb << 6) |
  * linker has not defined yet. */
 __cpsys_bit = __cpsys << 8;
 
+/* The memory a part has.  -mmcu= supplies these; the defaults are what an
+ * XC164CM-8F has, so that a script used on its own still links for the part
+ * this file was written against.
+ *
+ * Naming a part is the way to change them.  Editing the numbers here works
+ * too, and is what a board with memory outside the chip has to do, but a part
+ * that Infineon makes is better named than transcribed: the letters in the
+ * middle of an XC164 part number say which peripherals it has and nothing
+ * about its memory, and the suffix says the memory and nothing about the
+ * peripherals, so a map worked out from the name rather than from the
+ * derivative table is wrong in a way that only shows up when a program
+ * overflows a region that was never there. */
+__c166_rom_length    = DEFINED(__c166_rom_length)    ? __c166_rom_length    : 48K;
+__c166_farrom_length = DEFINED(__c166_farrom_length) ? __c166_farrom_length : 16K;
+__c166_farrom2_length = DEFINED(__c166_farrom2_length) ? __c166_farrom2_length : 0;
+__c166_dsram_length  = DEFINED(__c166_dsram_length)  ? __c166_dsram_length  : 2K;
+__c166_dpram_length  = DEFINED(__c166_dpram_length)  ? __c166_dpram_length  : 2K;
+__c166_psram_length  = DEFINED(__c166_psram_length)  ? __c166_psram_length  : 2K;
+
 MEMORY
 {
-  /* Only the first 48 KByte of the Flash fits under the three data page
-   * pointers that map it; the top 16 KByte would collide with the page the RAM
-   * and the special function registers need.  So this region is what a near
-   * address can reach, which is the constraint on read-only data rather than
-   * on code: a branch takes its segment from CSP and its offset from the
-   * instruction, so code is reachable anywhere in the segment. */
-  rom (rx) : ORIGIN = 0x00C00000, LENGTH = 48K
-  /* The rest of the Flash, which only a far access reaches.  A program with
-   * more than 48 KByte of code can put .text here instead, since code does not
-   * go through the data page pointers; read-only data cannot follow it. */
-  farrom (rx) : ORIGIN = 0x00C0C000, LENGTH = 16K
-  /* Static data goes in the DSRAM, which is 2 KByte and entirely free.  It is
-   * a near address like everything else here: the part reaches it through a
-   * data page pointer holding page 3, which is what DPP3 already holds.  The
-   * variant of this part with 32 KByte of Flash has no DSRAM at all, and wants
-   * this region deleted and .data and .bss moved to dpram. */
-  dsram (rw) : ORIGIN = 0x0000C000, LENGTH = 2K
-  /* The DPRAM below the system stack, which the ABI stack gets to itself.
-   * FC20H to FCFFH above the register bank is free too, and FD00H to FDFFH is
-   * the bit-addressable part, which is worth keeping for what needs it. */
-  dpram (rw) : ORIGIN = 0x0000F600, LENGTH = 1K
+  /* Only the first 48 KByte of the program memory fits under the three data
+   * page pointers that map it; the top of the segment would collide with the
+   * page the RAM and the special function registers need.  So this region is
+   * what a near address can reach, which is the constraint on read-only data
+   * rather than on code: a branch takes its segment from CSP and its offset
+   * from the instruction, so code is reachable anywhere in the segment. */
+  rom (rx) : ORIGIN = 0x00C00000, LENGTH = __c166_rom_length
+  /* The rest of it, which only a far access reaches.  A program with more
+   * code than the region above can put .text here instead, since code does not
+   * go through the data page pointers; read-only data cannot follow it.  On a
+   * part whose program memory is 48 KByte or less this is empty. */
+  farrom (rx) : ORIGIN = 0x00C00000 + __c166_rom_length,
+                LENGTH = __c166_farrom_length
+  /* Program memory past the first segment.  A part with more than 64 KByte of
+   * it has a second segment, and that has to be a region of its own rather
+   * than more of the one above: a far access carries one segment, so an object
+   * may not straddle the boundary, and a near branch cannot cross it at all.
+   * Code goes here with __attribute__((far, section(".fartext2"))), the same
+   * way .psramtext takes code that runs from the PSRAM.  It is empty on a part
+   * whose program memory fits in one segment, which is most of them. */
+  farrom2 (rx) : ORIGIN = 0x00C10000, LENGTH = __c166_farrom2_length
+
+  /* Static data goes in the DSRAM, which is a near address like everything
+   * else here: the part reaches it through a data page pointer holding page 3,
+   * which is what DPP3 already holds.
+   *
+   * Some derivatives have no DSRAM at all - the XC164xx-4F is 32 KByte of
+   * Flash and none of it - and there static data goes at the bottom of the
+   * DPRAM instead, with the ABI stack coming down from the top of the same
+   * memory towards it.  That is the classic arrangement and it is what the
+   * region below becomes when the part has nothing else. */
+  dsram (rw) : ORIGIN = __c166_dsram_length ? 0x0000C000 : 0x0000F600,
+               LENGTH = __c166_dsram_length ? __c166_dsram_length
+                                            : __system_stack_limit - 0x0000F600
+  /* The DPRAM under the system stack, which on a part with a DSRAM the ABI
+   * stack has to itself, and on one without is where the static data above
+   * already is - so this region is empty there rather than overlapping it.
+   * Where the system stack starts is a choice rather than a part property, so
+   * the ASSERTs below are what say the choice fits the part. */
+  dpram (rw) : ORIGIN = 0x0000F600,
+               LENGTH = __c166_dsram_length
+                          ? __system_stack_limit - 0x0000F600 : 0
   /* The PSRAM, which is the only RAM here that a near address cannot reach:
    * it is data page 896 and the four pointers are spoken for.  So this is
    * where __far data goes, and it is worth knowing that the manual calls it
    * optimised for code fetches and slower than the data memories for data - a
    * far access pays an EXTS on top of that.  It is for what does not fit. */
-  psram (rw) : ORIGIN = 0x00E00000, LENGTH = 2K
+  psram (rw) : ORIGIN = 0x00E00000, LENGTH = __c166_psram_length
 }
+
 
 /* The pages the data page pointers select, which is what makes a near address
  * mean anything on this part.  DPP0 to DPP2 cover the Flash, so a near address
@@ -157,6 +198,14 @@ ASSERT((ORIGIN(rom) >> 16) == ((ORIGIN(rom) + LENGTH(rom) - 1) >> 16),
        "the rom region crosses a segment boundary")
 ASSERT((ORIGIN(farrom) >> 16) == ((ORIGIN(farrom) + LENGTH(farrom) - 1) >> 16),
        "the farrom region crosses a segment boundary")
+ASSERT(LENGTH(farrom2) == 0 ||
+       (ORIGIN(farrom2) >> 16) == ((ORIGIN(farrom2) + LENGTH(farrom2) - 1) >> 16),
+       "the farrom2 region crosses a segment boundary; this script covers two segments of program memory and this part has more")
+ASSERT(__system_stack_top <= 0x0000F600 + __c166_dpram_length,
+       "the system stack is above the end of this part's dual-port RAM")
+ASSERT(__system_stack_limit >= 0x0000F600,
+       "the system stack starts below the dual-port RAM")
+
 ASSERT((ORIGIN(dsram) >> 16) == ((ORIGIN(dsram) + LENGTH(dsram) - 1) >> 16),
        "the dsram region crosses a segment boundary")
 ASSERT((ORIGIN(dpram) >> 16) == ((ORIGIN(dpram) + LENGTH(dpram) - 1) >> 16),
@@ -182,6 +231,25 @@ SECTIONS
     . = ALIGN(2);
   } > rom
 
+  /* The call frame information, and the tables a personality routine reads to
+   * decide what to do with a frame.  A hosted program finds these by asking
+   * the dynamic loader where the program headers are; there is no loader here,
+   * so the bounds are symbols instead and the unwinder walks between them.
+   *
+   * They live in the Flash with the rest of the read only data, which is above
+   * the first 64 KByte, so the addresses these symbols carry do not fit in a
+   * near pointer.  The unwinder holds them as far pointers, the same way crt0
+   * reaches the load addresses below. */
+  .eh_frame : ALIGN(4) {
+    __eh_frame_start = .;
+    KEEP(*(.eh_frame))
+    __eh_frame_end = .;
+  } > rom
+
+  .gcc_except_table : ALIGN(4) {
+    KEEP(*(.gcc_except_table .gcc_except_table.*))
+  } > rom
+
   /* What a far access reaches, which is what can live above the pages the data
    * page pointers cover. */
   .fartext : {
@@ -192,6 +260,16 @@ SECTIONS
     *(.farrodata .farrodata.*)
     . = ALIGN(2);
   } > farrom
+
+  /* The second segment's share, for a part that has one. */
+  .fartext2 : {
+    *(.fartext2 .fartext2.*)
+  } > farrom2
+
+  .farrodata2 : ALIGN(2) {
+    *(.farrodata2 .farrodata2.*)
+    . = ALIGN(2);
+  } > farrom2
 
   /* Initialised data lives in RAM but its image is in ROM; crt0 copies it
    * across.  Both ends are word aligned so that the copy can move words. */
@@ -251,7 +329,10 @@ SECTIONS
    * has that KByte to itself: the system stack is above it and the static data
    * is in the DSRAM, so the two stacks grow towards each other from either end
    * of FA00H rather than the ABI stack growing into the program's variables. */
-  __user_stack_top = ORIGIN(dpram) + LENGTH(dpram);
+  /* The ABI stack comes down from just under the system stack, whether what
+   * is below it is an empty DPRAM or the static data of a part with no
+   * DSRAM. */
+  __user_stack_top = __system_stack_limit;
   __heap_start = __bss_end;
   __heap_end = __user_stack_top;
 

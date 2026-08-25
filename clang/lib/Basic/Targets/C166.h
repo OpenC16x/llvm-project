@@ -46,6 +46,10 @@ public:
 
     SizeType = UnsignedInt;
     IntMaxType = SignedLongLong;
+    // char32_t is uint_least32_t, and int is only sixteen bits here, so the
+    // default of unsigned int would be a char32_t that cannot hold a code
+    // point.  char16_t is uint_least16_t, which unsigned short already is.
+    Char32Type = UnsignedLong;
     IntPtrType = SignedInt;
     PtrDiffType = SignedInt;
     // A word is what this machine reads and writes in one go, so a word is
@@ -81,6 +85,11 @@ public:
   }
 
   /// The processors the backend knows, which is what -mcpu names.
+  /// _BitInt of any width.  The backend legalises an odd width the way it
+  /// legalises anything else that is not sixteen bits, so there is nothing
+  /// here that has to be true for the target and is not.
+  bool hasBitIntType() const override { return true; }
+
   bool isValidCPUName(StringRef Name) const override {
     return llvm::StringSwitch<bool>(Name)
         .Cases({"generic", "c166", "c167", "st10", "xc16x"}, true)

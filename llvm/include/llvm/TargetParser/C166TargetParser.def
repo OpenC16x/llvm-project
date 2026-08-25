@@ -1,0 +1,69 @@
+//===-- C166TargetParser.def - C166 part table ------------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// The parts -mmcu= knows, and the memory each one has.
+//
+// Every row here comes from a derivative table in a manual, named beside it.
+// Nothing is inferred from a part number: the letters in the middle of an
+// XC164 name say which peripherals it has and nothing about its memory, and
+// the suffix says the memory and nothing about the peripherals, so a row that
+// was guessed from the name would be wrong in a way that only shows up when a
+// program overflows a region that is not there.  A new part needs its table.
+//
+// The sizes are what the manual's memory map gives, in bytes:
+//
+//   PROGRAM  the on-chip program memory at C0'0000H, Flash or ROM
+//   DSRAM    the data SRAM at 00'C000H, which some derivatives do not have
+//   DPRAM    the dual-port RAM at 00'F600H
+//   PSRAM    the program SRAM at E0'0000H, which only a far access reaches
+//
+// CORE is the instruction set, which -mcpu= names: every part here has the
+// C166S V2 core, so every one of them has the multiply-accumulate unit.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef C166_PART
+#define C166_PART(NAME, CORE, PROGRAM, DSRAM, DPRAM, PSRAM, ROMMED)
+#endif
+
+// XC164CM System Units (Vol. 1 of 2), V1.2 2006-03, Table 1-1 "XC164xx
+// Derivative Map".  The six letter pairs differ only in how many TwinCAN, ADC
+// and CAPCOM6 modules they have; the memory is the suffix's.
+//
+//   XC164xx-8F   64 KByte Flash, 2 KByte DSRAM, 2 KByte PSRAM, 2 KByte DPRAM
+//   XC164xx-4F   32 KByte Flash, 0 KByte DSRAM, 2 KByte PSRAM, 2 KByte DPRAM
+
+C166_PART("xc164cm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+C166_PART("xc164gm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+C166_PART("xc164sm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+C166_PART("xc164tm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+C166_PART("xc164km-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+C166_PART("xc164lm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+
+C166_PART("xc164cm-4f", "xc16x", 32768, 0, 2048, 2048, false)
+C166_PART("xc164gm-4f", "xc16x", 32768, 0, 2048, 2048, false)
+C166_PART("xc164sm-4f", "xc16x", 32768, 0, 2048, 2048, false)
+C166_PART("xc164tm-4f", "xc16x", 32768, 0, 2048, 2048, false)
+C166_PART("xc164km-4f", "xc16x", 32768, 0, 2048, 2048, false)
+C166_PART("xc164lm-4f", "xc16x", 32768, 0, 2048, 2048, false)
+
+// XC164-16 Derivatives, System Units (Vol. 1 of 2), V2.1 2004-03, "About this
+// Manual", together with Table 3-1 "XC164 Memory Map".  The map gives the
+// program memory as C0'0000H to C1'FFFFH and the on-chip RAM as 2 KByte of
+// data SRAM, 2 KByte of dual-port RAM and 2 KByte of program SRAM, which is
+// the six the derivative list quotes.
+//
+//   XC164CS-16F  128 KByte Flash    XC164CS-16R  128 KByte ROM
+//   XC164CS-8F    64 KByte Flash    XC164CS-8R    64 KByte ROM
+
+C166_PART("xc164cs-16f", "xc16x", 131072, 2048, 2048, 2048, false)
+C166_PART("xc164cs-8f", "xc16x", 65536, 2048, 2048, 2048, false)
+C166_PART("xc164cs-16r", "xc16x", 131072, 2048, 2048, 2048, true)
+C166_PART("xc164cs-8r", "xc16x", 65536, 2048, 2048, 2048, true)
+
+#undef C166_PART

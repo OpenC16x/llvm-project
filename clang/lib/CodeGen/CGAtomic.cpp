@@ -490,6 +490,14 @@ static void emitAtomicCmpXchgFailureSet(
   auto *SeqCstBB = CGF.createBasicBlock("seqcst_fail", CGF.CurFn);
   auto *ContBB = CGF.createBasicBlock("atomic.continue", CGF.CurFn);
 
+  // The cases below are i32, but the ordering argument has the type of the
+  // language's int, which on a sixteen bit target is narrower than that.
+  // Widen it so the switch is well formed, the way the ordering switch in
+  // EmitAtomicExpr does.
+  FailureOrderVal =
+      CGF.Builder.CreateIntCast(FailureOrderVal, CGF.Builder.getInt32Ty(),
+                                /*isSigned=*/false);
+
   // MonotonicBB is arbitrarily chosen as the default case; in practice, this
   // doesn't matter unless someone is crazy enough to use something that
   // doesn't fold to a constant for the ordering.

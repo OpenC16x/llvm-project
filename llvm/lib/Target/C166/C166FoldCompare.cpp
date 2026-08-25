@@ -31,23 +31,22 @@
 //     though Z and N are right.  cc_SGT after a MOV is the case this rules
 //     out, and it does occur.
 //
-//   - The instruction that produced the value is the one immediately before
-//     the compare.  Asking instead that nothing in between writes PSW would
-//     be wrong here, and quietly: MOV is deliberately not modelled as writing
-//     PSW at all, because it leaves C alone and that is what lets a carry
-//     survive the register shuffling around a wide addition.  It does clobber
-//     Z and N on the part.  So the machine model's idea of what touches the
-//     flags is not the part's, and a gap that looks empty can contain a move
-//     that has already destroyed the answer.  That is not a theory: walking
-//     back over anything the model called flag-preserving removed half as
-//     many compares again and miscompiled two of the differential programs
-//     into infinite loops.
+//   - Nothing between that instruction and the compare writes Z or N, and
+//     nothing between them writes the register either.
 //
-//     Adjacency is not free - it is 83 compares rather than 128 over those
-//     programs, so about a third of them are out of reach.  Getting those
-//     would mean a list of what really preserves Z and N, which is a claim
-//     about the part that would have to be checked against it rather than
-//     against the model that is already wrong here.
+//     This used to be the stricter rule that the two be adjacent, because the
+//     machine description did not model the flags a move writes and so could
+//     not be asked.  It does now, which is what lets the walk ask it: a move
+//     in the way stops the walk, as it must, because it leaves C alone but
+//     clobbers Z and N.  Getting that wrong is not a theory - walking back
+//     over anything the old model called flag-preserving miscompiled two of
+//     the differential programs into infinite loops.
+//
+//     In practice the walk reaches little that adjacency did not, because
+//     almost everything writes Z and N: on this part only the jumps, the
+//     calls, the EXTend prefixes, NOP and ATOMIC leave them alone.  It is
+//     here because it is the rule that is actually true, rather than a
+//     syntactic accident that happened to be safe.
 //
 // ADDC and SUBC set Z differently from everything else: they keep it set only
 // if it already was, so that a wide value tests as zero exactly when every
@@ -103,14 +102,15 @@ static bool readsOnlyZN(C166CC::CondCode CC) {
 /// Whether this instruction sets Z and N from the value it writes to its
 /// first operand.
 ///
-/// The list is taken from the simulator, which implements the flag behaviour
-/// instruction by instruction, rather than from the machine description, which
-/// does not model it - that is the same gap that makes walking back over an
-/// apparently empty gap unsound.  Two kinds of near miss are left out because
-/// checking found them: MOV16prd and MOVB8prd, the pre-decrement stores, set
-/// no flags at all, and ADDC and SUBC set Z only if it was already set, so
-/// that a wide value tests as zero exactly when every word of it did - which
-/// is the answer to a different question from the one "cmp Rw, #0" asks.
+/// This is a stronger question than the machine description answers.  The
+/// description says which flags an instruction writes; this asks whether the
+/// flags it wrote describe the value in its first operand, which is what the
+/// compare is about.  Two kinds of near miss are left out because checking
+/// found them: MOV16prd and MOVB8prd, the pre-decrement stores, do write Z and
+/// N but from the value moved rather than the pointer they leave behind, and
+/// ADDC and SUBC set Z only if it was already set, so that a wide value tests
+/// as zero exactly when every word of it did - which is the answer to a
+/// different question from the one "cmp Rw, #0" asks.
 static bool setsZNFromResult(const MachineInstr &MI) {
   switch (MI.getOpcode()) {
   case C166::ADD16rr:  case C166::ADD16ri:  case C166::ADD16ri3:
@@ -155,6 +155,29 @@ static bool setsZNFromResult(const MachineInstr &MI) {
   default:
     return false;
   }
+}
+
+/// Whether this instruction leaves Z and N as it found them.
+///
+/// The machine description answers this for everything except the four moves
+/// that put a constant in a register.  Those write Z and N like any other move
+/// and say they do not, because declaring it would stop LLVM rematerializing
+/// them; C166InstrInfo.td sets out why, and this is the other end of that
+/// bargain.  Leaving them out here is not a missed fold but a miscompile: the
+/// walk would step over "mov Rw, #0" and reuse flags it had already destroyed,
+/// which is what the differential programs caught when it did.
+static bool writesZN(const MachineInstr &MI, const TargetRegisterInfo *TRI) {
+  switch (MI.getOpcode()) {
+  case C166::MOV16ri:
+  case C166::MOV16ri4:
+  case C166::MOVB8ri:
+  case C166::MOVB8ri4:
+    return true;
+  default:
+    break;
+  }
+  return MI.modifiesRegister(C166::PSW_Z, TRI) ||
+         MI.modifiesRegister(C166::PSW_N, TRI);
 }
 
 class C166FoldCompare : public MachineFunctionPass {
@@ -208,17 +231,26 @@ bool C166FoldCompare::isRedundant(MachineBasicBlock::iterator Cmp,
 
   Register Reg = Cmp->getOperand(0).getReg();
 
-  // The instruction before the compare, skipping anything that is not one.
-  auto I = MachineBasicBlock::reverse_iterator(Cmp);
-  while (I != MBB.rend() && I->isDebugInstr())
-    ++I;
-  if (I == MBB.rend())
-    return false;
+  // Walk back to whatever wrote the register, over anything that leaves Z and
+  // N alone.  The machine description is what says which those are, and it is
+  // now right about it: the flags a move writes are declared, so a move in the
+  // way stops this walk rather than being stepped over.
+  for (auto I = MachineBasicBlock::reverse_iterator(Cmp); I != MBB.rend();
+       ++I) {
+    if (I->isDebugInstr())
+      continue;
 
-  // It has to be what wrote the register being compared, and it has to set Z
-  // and N from what it wrote.
-  return setsZNFromResult(*I) && I->getOperand(0).isReg() &&
-         I->getOperand(0).getReg() == Reg;
+    if (setsZNFromResult(*I) && I->getOperand(0).isReg() &&
+        I->getOperand(0).getReg() == Reg)
+      return true;
+
+    // Anything that writes either flag has destroyed the answer, and anything
+    // that writes the register without setting the flags from it has changed
+    // what the question is about.
+    if (writesZN(*I, TRI) || I->modifiesRegister(Reg, TRI))
+      return false;
+  }
+  return false;
 }
 
 bool C166FoldCompare::runOnMachineFunction(MachineFunction &MF) {

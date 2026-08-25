@@ -38,6 +38,9 @@ def err_drv_invalid_riscv_mtune_string : Error<
 def warn_drv_invalid_arch_name_with_suggestion : Warning<
   "ignoring invalid /arch: argument '%0'; for %select{64|32}1-bit expected one of %2">,
   InGroup<UnusedCommandLineArgument>;
+def err_drv_c166_unknown_mcu : Error<
+  "unknown part '%0' for '-mmcu='; known parts are: %1">;
+
 def warn_drv_avr_mcu_not_specified : Warning<
   "no target microcontroller specified, please pass -mmcu=<mcu name>">,
   InGroup<AVRRtlibLinkingQuirks>;

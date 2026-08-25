@@ -59,6 +59,7 @@
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/YAMLParser.h"
 #include "llvm/TargetParser/AMDGPUTargetParser.h"
+#include "llvm/TargetParser/C166TargetParser.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/PPCTargetParser.h"
 #include <optional>
@@ -826,6 +827,11 @@ std::string tools::getCPUName(const Driver &D, const ArgList &Args,
     // what turns those on.
     if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
       return A->getValue();
+    // A part implies its core, so naming the part is enough.  -mcpu= above
+    // still wins, for building something for a core rather than for a board.
+    if (const Arg *A = Args.getLastArg(options::OPT_mmcu_EQ))
+      if (const llvm::C166::Part *P = llvm::C166::getPart(A->getValue()))
+        return P->Core.str();
     return "";
 
   case llvm::Triple::csky:

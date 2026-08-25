@@ -2378,7 +2378,7 @@ CharUnits MicrosoftCXXABI::getArrayCookieSizeImpl(QualType type) {
 llvm::Value *MicrosoftCXXABI::readArrayCookieImpl(CodeGenFunction &CGF,
                                                   Address allocPtr,
                                                   CharUnits cookieSize) {
-  Address numElementsPtr = allocPtr.withElementType(CGF.SizeTy);
+  Address numElementsPtr = allocPtr.withElementType(CGF.LangSizeTy);
   return CGF.Builder.CreateLoad(numElementsPtr);
 }
 
@@ -2396,7 +2396,7 @@ Address MicrosoftCXXABI::InitializeArrayCookie(CodeGenFunction &CGF,
   Address cookiePtr = newPtr;
 
   // Write the number of elements into the appropriate slot.
-  Address numElementsPtr = cookiePtr.withElementType(CGF.SizeTy);
+  Address numElementsPtr = cookiePtr.withElementType(CGF.LangSizeTy);
   CGF.Builder.CreateStore(numElements, numElementsPtr);
 
   // Finally, compute a pointer to the actual data buffer by skipping

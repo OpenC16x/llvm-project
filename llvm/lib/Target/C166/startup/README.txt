@@ -12,18 +12,25 @@ copied into a project and adjusted rather than installed.
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
   mem.c                memcpy, memmove, memset and memcmp
+  unwind.c             the DWARF unwinder, for C++ exceptions
+  unwind-asm.S         the register capture and restore it needs
+  cxa.c                the personality routine and the __cxa_ calls
+  unwind.h             what a program calls into the unwinder
+  runtime.c            errno, exit, abort and the assert handler
+  include/             the standard headers a freestanding part can mean
 
 Building it
 -----------
 
-Three things have to exist that the LLVM build does not produce, because they
+Four things have to exist that the LLVM build does not produce, because they
 are code for the target rather than for the machine doing the building: crt0.o
-and libc.a, which the driver looks for in <sysroot>/c166-elf/lib, and the
-compiler-rt builtins, which are what the compiler calls for the things the
-instruction set does not do - 32 bit shifts and division, 64 bit arithmetic,
-and all of floating point, which this part has no unit for.
+and libc.a, which the driver looks for in <sysroot>/c166-elf/lib, the headers,
+which it looks for in <sysroot>/c166-elf/include, and the compiler-rt builtins,
+which are what the compiler calls for the things the instruction set does not
+do - 32 bit shifts and division, 64 bit arithmetic, and all of floating point,
+which this part has no unit for.
 
-One script builds all three:
+One script builds all four:
 
   llvm/utils/C166Sim/differential/mksysroot.sh <build-dir> <sysroot>
 
@@ -33,7 +40,40 @@ same thing.
 
 Then a whole program is one command:
 
-  clang -target c166 -O2 --sysroot=sysroot -T c166.ld hello.c -o hello.elf
+  clang -target c166 -mmcu=xc164cm-8f -O2 --sysroot=sysroot -T c166.ld \
+      hello.c -o hello.elf
+
+-mmcu= names the part, and that is what supplies the memory map: the linker
+script below asks for the sizes rather than having them written into it, so
+moving to another derivative is a different name rather than an edited script.
+It also selects the core, so the multiply-accumulate unit comes on by itself
+where the part has one, and defines __XC164CM_8F__ and the sizes as macros so
+that code can ask.  Leaving it out links for an XC164CM-8F, which is what the
+defaults in the script are.
+
+Naming a part that does not exist says so, and lists the ones that do:
+
+  clang -target c166 -mmcu=xc164 -c hello.c
+  error: unknown part 'xc164' for '-mmcu='; known parts are: xc164cm-8f, ...
+
+The corpus in llvm/utils/C166Sim/corpus builds drivers over LLVM's own libc
+and checks them against the host the same way, which is what reaches the shapes
+a hand written program does not.
+
+Every part in the table is built and run by
+
+  llvm/utils/C166Sim/differential/parts.sh <build-bin> <sysroot> c166.ld
+
+which is what checks the maps rather than only the driver: run.sh links
+everything for the default part, so a derivative whose map is wrong would not
+show up there.
+
+The table is llvm/include/llvm/TargetParser/C166TargetParser.def, and every
+row in it cites the derivative table it came from.  Adding a part means
+finding that table, not working the memory out from the part number: the
+letters in the middle of an XC164 name say which peripherals it has and
+nothing about its memory, and the suffix says the memory and nothing about the
+peripherals.
 
 The driver puts crt0.o first, asks for -lc, and adds the compiler-rt builtins;
 -nostartfiles, -nolibc and -nodefaultlibs turn those off one at a time.  There
@@ -43,10 +83,20 @@ is not optional.
 What to change for a particular part
 ------------------------------------
 
-The linker script is written for an XC164CM with nothing outside the chip: the
-64 KByte of program Flash at C0'0000H, the 2 KByte of DSRAM at 00'C000H and the
-2 KByte of DPRAM at 00'F600H.  The MEMORY block at the top of c166.ld is where
-a board's own memory goes.
+The linker script covers a part with nothing outside the chip.  Which part is
+-mmcu='s business now; what is left to change here is memory the chip does not
+have - external Flash or RAM on a board - which goes in the MEMORY block at the
+top of c166.ld alongside the regions the part supplies.
+
+Two derivatives in the table show what the script has to cope with, and both
+are handled without an edit.  The XC164xx-4F has no data SRAM at all, so its
+static data goes at the bottom of the dual-port RAM with the ABI stack coming
+down from the top of the same memory towards it.  The XC164CS-16F has 128
+KByte of program memory, which is two segments, and a far access carries one
+segment while a near branch cannot leave one - so the second segment is a
+region of its own, and code goes there with
+
+  __attribute__((far, section(".fartext2")))
 
 Only 48 KByte of that Flash is in the rom region, and the reason is the thing
 to understand before changing any of this.  A 16 bit address does not name a
@@ -328,6 +378,50 @@ is where this script puts the Flash.  A program that writes either wants a
 different script from this one.  Both are protected after EINIT, so a startup
 sequence that changes them has to do it before that.
 
+The headers
+-----------
+
+include/ holds what a part with one thread, no operating system, no heap and no
+floating point unit can honestly mean of the standard headers.  mksysroot.sh
+copies them into <sysroot>/c166-elf/include, which is the directory the driver
+already searches; clang brings its own <stddef.h>, <stdint.h>, <limits.h> and
+the rest of the freestanding set, so those are not here.  Neither are
+<stdio.h>, <math.h> or <time.h>: there is no I/O, no floating point unit and no
+clock, so there is nothing behind them to declare.
+
+  errno.h     one int, reached through the errno macro, with Linux's numbers
+  string.h    the five mem.c defines, and the rest of <string.h> declared
+  stdlib.h    the integer and search parts, div_t and friends, RAND_MAX
+  assert.h    assert, calling __c166_assert_failed
+  inttypes.h  intmax_t, imaxdiv_t and the PRI and SCN macros
+  wchar.h     wint_t, mbstate_t and the declarations
+  uchar.h     char16_t, char32_t and the declarations
+  locale.h    locale_t, struct lconv and the LC_ macros
+  fenv.h      an environment with no exceptions and one rounding direction
+
+Two rules run through all of them.
+
+Nothing is written down here that the compiler already knows.  Every format
+string in inttypes.h is one of clang's own __INT32_FMTd__ macros, so PRId32 is
+"ld" here because int32_t is long here, and would be "d" on a target where it
+is int; wchar.h uses __WINT_TYPE__ and uchar.h uses __CHAR32_TYPE__.  A change
+to the target's type mapping updates the headers by itself.
+
+Almost everything is declared and not defined.  malloc, strcpy, qsort,
+setlocale, mbrtowc, fegetround: a program that calls one gets a link error
+naming it, which is a better answer than a header that hides the function or a
+one-size-fits-nobody implementation of it in a library nobody chose.  What is
+defined is what already had to be: the five functions in mem.c that the
+compiler calls by itself, and errno, exit, _Exit, abort and the assert handler
+in runtime.c, which the headers promise.  Everything in runtime.c but errno is
+weak, so a program with a watchdog to kick or something to print replaces the
+one it cares about; the defaults stop the machine, which is where crt0 goes
+when main returns.
+
+<stdlib.h> deliberately has no atexit.  exit here runs no handlers - there is
+nothing on this part for one to clean up, and nothing to return to - so
+declaring atexit would promise something exit does not do.
+
 What is missing
 ---------------
 
@@ -341,3 +435,42 @@ simulator: llvm/utils/C166Sim runs it, and the differential tests there link
 this crt0.S and this mem.c into every program they check, so the startup
 sequence, the block functions and the linker script are all exercised on every
 run.  What that does not establish is that a part agrees with the simulator.
+
+
+C++ exceptions
+--------------
+
+Throwing and catching work, and are built into libc.a by mksysroot.sh along
+with everything else.  Nothing has to be turned on:
+
+  clang++ -target c166 -O2 --sysroot=sysroot -T c166.ld prog.cpp -o prog.elf
+
+What makes it work is that a return address on this part is on the system
+stack, which no generated code touches, so the call frame information says
+where it is with a DWARF expression rather than an offset.  The unwinder runs
+that expression.  The tables are found between __eh_frame_start and
+__eh_frame_end, which c166.ld defines, because there is no loader to ask.
+
+Three things are smaller than a hosted implementation, and all three are
+choices rather than oversights.
+
+  Type matching is on the address of the type information object, which is
+  exact-type matching.  catch(...) catches everything and catching a base class
+  by reference does not catch a derived one.  A catch that would need the class
+  hierarchy does not take the wrong branch - it does not match, and the
+  exception carries on to whatever does.
+
+  There is no heap, so thrown objects live in a pool of four slots of 32 bytes.
+  Four is enough for a throw from inside a catch from inside a catch; a program
+  that needs more, or an object bigger than 32 bytes, reaches
+  __cxa_call_terminate rather than corrupting what is already in flight.
+
+  __cxa_call_terminate is a weak symbol that stops the machine.  A program that
+  wants to say something first defines its own.
+
+The cost is worth knowing before designing around it.  Over a throw caught
+three frames up, one throw is about 330,000 states - some 16 ms at 20 MHz -
+because the frame description entries are searched linearly and the call frame
+instructions are interpreted.  The unwinder and the C++ ABI together are about
+13 KByte of Flash, which on a 64 KByte part is a fifth of it.  Exceptions here
+are for what has gone wrong, not for control flow.

@@ -132,3 +132,17 @@ NO_BLOCK_IDIOM void __far *__memset_far(void __far *dst, int c, unsigned n) {
     *d++ = (unsigned char)c;
   return dst;
 }
+
+/* strlen, which is here for the same reason the four above are: the compiler
+ * and the C++ runtime call it without being asked to.  Nothing else of
+ * <string.h> is, because nothing else has turned up being needed - a program
+ * that wants the rest brings its own C library.
+ *
+ * The loop idiom recognizer can turn this into a call to itself, exactly as it
+ * can with the block moves above, so it gets the same attribute. */
+__attribute__((no_builtin("strlen"))) unsigned strlen(const char *s) {
+  const char *p = s;
+  while (*p)
+    p++;
+  return (unsigned)(p - s);
+}
