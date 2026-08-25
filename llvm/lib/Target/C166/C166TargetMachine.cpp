@@ -103,6 +103,18 @@ void C166PassConfig::addPreRegAlloc() {
 }
 
 void C166PassConfig::addPreEmitPass() {
+  // Make the call frame information right across block boundaries.  An
+  // epilogue says the canonical frame address is the stack pointer again, and
+  // when a function has an early return the code after that epilogue is still
+  // running with the frame the prologue set up - so the rule the epilogue left
+  // behind describes the wrong place.  A function that throws from past an
+  // early return unwinds to a frame two bytes out, which is one word of a
+  // caller's saved registers.
+  //
+  // This is the generic pass that fixes it: it works out what each block's
+  // canonical frame address really is and inserts the instructions to say so.
+  addPass(createCFIInstrInserter());
+
   // Late, so that it sees the instructions as they will be emitted: what it
   // looks at is which of them touch memory.
   if (getOptLevel() != CodeGenOptLevel::None) {

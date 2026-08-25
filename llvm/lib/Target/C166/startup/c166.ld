@@ -182,6 +182,25 @@ SECTIONS
     . = ALIGN(2);
   } > rom
 
+  /* The call frame information, and the tables a personality routine reads to
+   * decide what to do with a frame.  A hosted program finds these by asking
+   * the dynamic loader where the program headers are; there is no loader here,
+   * so the bounds are symbols instead and the unwinder walks between them.
+   *
+   * They live in the Flash with the rest of the read only data, which is above
+   * the first 64 KByte, so the addresses these symbols carry do not fit in a
+   * near pointer.  The unwinder holds them as far pointers, the same way crt0
+   * reaches the load addresses below. */
+  .eh_frame : ALIGN(4) {
+    __eh_frame_start = .;
+    KEEP(*(.eh_frame))
+    __eh_frame_end = .;
+  } > rom
+
+  .gcc_except_table : ALIGN(4) {
+    KEEP(*(.gcc_except_table .gcc_except_table.*))
+  } > rom
+
   /* What a far access reaches, which is what can live above the pages the data
    * page pointers cover. */
   .fartext : {

@@ -4,7 +4,8 @@
 # doing the building.
 #
 #   crt0.o   the reset vector and the startup sequence
-#   libc.a   memcpy, memmove, memset and memcmp
+#   libc.a   memcpy, memmove, memset and memcmp, and the unwinder and C++
+#            ABI that a thrown exception runs on
 #   compiler-rt builtins, for what the instruction set does not do itself -
 #            32 bit shifts and division, 64 bit arithmetic, and all of
 #            floating point, which this part has no unit for
@@ -33,7 +34,19 @@ BIN=$(cd "$BUILD/bin" && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 "$BIN/clang" -target c166 -O2 -c "$STARTUP/mem.c" -o "$TMP/mem.o"
-"$BIN/llvm-ar" rcs "$SYSROOT/c166-elf/lib/libc.a" "$TMP/mem.o"
+
+# The unwinder and the C++ ABI, which are what a thrown exception runs on.
+# They are built with unwind tables of their own: an exception is thrown from
+# inside __cxa_throw, so the walk has to be able to step out of these before it
+# reaches any of the program's frames.
+"$BIN/clang" -target c166 -O2 -fasynchronous-unwind-tables \
+    -I "$STARTUP" -c "$STARTUP/unwind.c" -o "$TMP/unwind.o"
+"$BIN/clang" -target c166 -O2 -fasynchronous-unwind-tables \
+    -I "$STARTUP" -c "$STARTUP/cxa.c" -o "$TMP/cxa.o"
+"$BIN/clang" -target c166 -c "$STARTUP/unwind-asm.S" -o "$TMP/unwind-asm.o"
+
+"$BIN/llvm-ar" rcs "$SYSROOT/c166-elf/lib/libc.a" "$TMP/mem.o" \
+    "$TMP/unwind.o" "$TMP/cxa.o" "$TMP/unwind-asm.o"
 
 # Where the driver expects the builtins, which is version specific.
 VERSION=$("$BIN/clang" -print-resource-dir)

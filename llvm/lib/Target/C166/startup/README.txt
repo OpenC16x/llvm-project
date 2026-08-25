@@ -12,6 +12,10 @@ copied into a project and adjusted rather than installed.
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
   mem.c                memcpy, memmove, memset and memcmp
+  unwind.c             the DWARF unwinder, for C++ exceptions
+  unwind-asm.S         the register capture and restore it needs
+  cxa.c                the personality routine and the __cxa_ calls
+  unwind.h             what a program calls into the unwinder
 
 Building it
 -----------
@@ -341,3 +345,42 @@ simulator: llvm/utils/C166Sim runs it, and the differential tests there link
 this crt0.S and this mem.c into every program they check, so the startup
 sequence, the block functions and the linker script are all exercised on every
 run.  What that does not establish is that a part agrees with the simulator.
+
+
+C++ exceptions
+--------------
+
+Throwing and catching work, and are built into libc.a by mksysroot.sh along
+with everything else.  Nothing has to be turned on:
+
+  clang++ -target c166 -O2 --sysroot=sysroot -T c166.ld prog.cpp -o prog.elf
+
+What makes it work is that a return address on this part is on the system
+stack, which no generated code touches, so the call frame information says
+where it is with a DWARF expression rather than an offset.  The unwinder runs
+that expression.  The tables are found between __eh_frame_start and
+__eh_frame_end, which c166.ld defines, because there is no loader to ask.
+
+Three things are smaller than a hosted implementation, and all three are
+choices rather than oversights.
+
+  Type matching is on the address of the type information object, which is
+  exact-type matching.  catch(...) catches everything and catching a base class
+  by reference does not catch a derived one.  A catch that would need the class
+  hierarchy does not take the wrong branch - it does not match, and the
+  exception carries on to whatever does.
+
+  There is no heap, so thrown objects live in a pool of four slots of 32 bytes.
+  Four is enough for a throw from inside a catch from inside a catch; a program
+  that needs more, or an object bigger than 32 bytes, reaches
+  __cxa_call_terminate rather than corrupting what is already in flight.
+
+  __cxa_call_terminate is a weak symbol that stops the machine.  A program that
+  wants to say something first defines its own.
+
+The cost is worth knowing before designing around it.  Over a throw caught
+three frames up, one throw is about 330,000 states - some 16 ms at 20 MHz -
+because the frame description entries are searched linearly and the call frame
+instructions are interpreted.  The unwinder and the C++ ABI together are about
+13 KByte of Flash, which on a 64 KByte part is a fifth of it.  Exceptions here
+are for what has gone wrong, not for control flow.

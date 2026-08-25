@@ -9,6 +9,7 @@
 #ifndef LLVM_LIB_TARGET_C166_C166FRAMELOWERING_H
 #define LLVM_LIB_TARGET_C166_C166FRAMELOWERING_H
 
+#include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/Support/Alignment.h"
 
@@ -33,6 +34,21 @@ public:
 
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
+
+  /// Where the canonical frame address starts out, which is what the common
+  /// information entry says: the ABI stack pointer, with no offset.  A call on
+  /// this part leaves its return address on the other stack, so nothing has
+  /// been pushed on this one when a function is entered.
+  ///
+  /// CFIInstrInserter needs these to work out what each block's frame address
+  /// really is, and to correct the rule where an epilogue has left one behind
+  /// that does not describe the code after it.
+  int getInitialCFAOffset(const MachineFunction &MF) const override {
+    return 0;
+  }
+  Register getInitialCFARegister(const MachineFunction &MF) const override {
+    return C166::R0;
+  }
 
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,

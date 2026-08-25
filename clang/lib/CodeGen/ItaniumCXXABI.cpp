@@ -1465,8 +1465,14 @@ void ItaniumCXXABI::emitRethrow(CodeGenFunction &CGF, bool isNoReturn) {
 static llvm::FunctionCallee getAllocateExceptionFn(CodeGenModule &CGM) {
   // void *__cxa_allocate_exception(size_t thrown_size);
 
+  // The parameter is the language's size_t, which is what emitThrow passes.
+  // CGM.SizeTy is not always that: it shares storage with IntPtrTy and is
+  // built from the target's widest pointer, and a target whose widest pointer
+  // is wider than size_t - one with a near and a far pointer, say - would end
+  // up declaring a parameter of one width and passing an argument of another.
+  llvm::Type *SizeTy = CGM.getTypes().ConvertType(CGM.getContext().getSizeType());
   llvm::FunctionType *FTy =
-    llvm::FunctionType::get(CGM.Int8PtrTy, CGM.SizeTy, /*isVarArg=*/false);
+    llvm::FunctionType::get(CGM.Int8PtrTy, SizeTy, /*isVarArg=*/false);
 
   return CGM.CreateRuntimeFunction(FTy, "__cxa_allocate_exception");
 }
