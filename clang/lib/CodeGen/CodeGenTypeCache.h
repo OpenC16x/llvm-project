@@ -51,6 +51,15 @@ struct CodeGenTypeCache {
     llvm::IntegerType *PtrDiffTy;
   };
 
+  /// size_t as the language defines it, which is not always SizeTy above:
+  /// that is built from the target's widest pointer, and a target can have a
+  /// size_t narrower than that (C166, whose far pointers are twice the width
+  /// of its near ones) or wider (DXIL, whose pointers are half the width of
+  /// its size_t).  Use this, and not SizeTy, wherever the value is a size_t to
+  /// the language and so has to have the width the language gives it: the
+  /// argument of an operator new, the count in an array cookie.
+  llvm::IntegerType *LangSizeTy;
+
   /// void*, void** in the target's default address space (often 0)
   union {
     llvm::PointerType *DefaultPtrTy;
@@ -106,8 +115,20 @@ struct CodeGenTypeCache {
     unsigned char SizeAlignInBytes;
   };
 
+  /// sizeof(size_t) as the language defines it; see LangSizeTy above for why
+  /// that is not always SizeSizeInBytes.
+  unsigned char LangSizeSizeInBytes;
+
   CharUnits getSizeSize() const {
     return CharUnits::fromQuantity(SizeSizeInBytes);
+  }
+  CharUnits getLangSizeSize() const {
+    return CharUnits::fromQuantity(LangSizeSizeInBytes);
+  }
+  /// The alignment of the language's size_t, which this assumes is its size,
+  /// the same way SizeAlignInBytes assumes it of SizeSizeInBytes above.
+  CharUnits getLangSizeAlign() const {
+    return CharUnits::fromQuantity(LangSizeSizeInBytes);
   }
   CharUnits getSizeAlign() const {
     return CharUnits::fromQuantity(SizeAlignInBytes);

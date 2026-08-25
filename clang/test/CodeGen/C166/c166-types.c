@@ -25,6 +25,15 @@ _Static_assert(sizeof(__SIZE_TYPE__) == 2, "");
 _Static_assert(sizeof(__PTRDIFF_TYPE__) == 2, "");
 _Static_assert((__SIZE_TYPE__)-1 > 0, "size_t is unsigned");
 
+// char32_t is uint_least32_t, so it has to hold a code point.  The default in
+// TargetInfo is unsigned int, which is only sixteen bits here; char16_t is
+// uint_least16_t, which unsigned short already is.
+_Static_assert(sizeof(__CHAR32_TYPE__) == 4, "char32_t must hold a code point");
+_Static_assert((__CHAR32_TYPE__)0x10FFFF == 0x10FFFF, "");
+_Static_assert((__CHAR32_TYPE__)-1 > 0, "char32_t is unsigned");
+_Static_assert(sizeof(__CHAR16_TYPE__) == 2, "");
+_Static_assert((__CHAR16_TYPE__)-1 > 0, "char16_t is unsigned");
+
 // A far pointer needs a cast on the way back down: the top eight bits have
 // nowhere to go.
 int *narrow(__far int *p) { return (int *)p; }

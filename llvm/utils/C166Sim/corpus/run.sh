@@ -28,8 +28,14 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 STATUS=0
 
+# LIBC_ERRNO_MODE=6 is LIBC_ERRNO_MODE_SYSTEM_INLINE, which makes libc's
+# errno the errno of whichever <errno.h> is in the include path - the sysroot's
+# on the part, the host's on the machine being compared against - rather than a
+# thread local of libc's own that neither side links.  The name of the constant
+# is only defined inside the header that reads it, so the number has to be
+# spelled out here.
 COMMON="-std=c++17 -fno-exceptions -fno-rtti -nostdinc++ \
-        -DLIBC_NAMESPACE=llvmlibc -I $LIBC -I $LIBC/include"
+        -DLIBC_NAMESPACE=llvmlibc -DLIBC_ERRNO_MODE=6 -I $LIBC -I $LIBC/include"
 
 for SRC in "$HERE"/*.cpp; do
   NAME=$(basename "$SRC" .cpp)

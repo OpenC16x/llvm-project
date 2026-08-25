@@ -4,14 +4,20 @@
 # doing the building.
 #
 #   crt0.o   the reset vector and the startup sequence
-#   libc.a   memcpy, memmove, memset and memcmp, and the unwinder and C++
-#            ABI that a thrown exception runs on
+#   libc.a   memcpy, memmove, memset and memcmp, what the headers promise and
+#            nothing else defines (errno, exit, abort and the assert handler),
+#            and the unwinder and C++ ABI that a thrown exception runs on
+#   headers  what a freestanding part can honestly mean of <errno.h>,
+#            <string.h>, <stdlib.h>, <assert.h>, <inttypes.h>, <wchar.h>,
+#            <uchar.h>, <locale.h> and <fenv.h>, copied into the include
+#            directory the driver searches
 #   compiler-rt builtins, for what the instruction set does not do itself -
 #            32 bit shifts and division, 64 bit arithmetic, and all of
 #            floating point, which this part has no unit for
 #
 # The builtins go in the resource directory, where the driver already looks;
-# the other two go in <sysroot>/c166-elf/lib, which is where it looks for them.
+# the other two go in <sysroot>/c166-elf/lib and the headers in
+# <sysroot>/c166-elf/include, which is where it looks for them.
 #
 # Usage: mksysroot.sh <build-dir> <sysroot>
 set -e
@@ -25,15 +31,18 @@ STARTUP=$(cd "$HERE/../../../lib/Target/C166/startup" && pwd)
 # builtins in a directory of its own, where a relative sysroot would land
 # somewhere else again.  Both are given to us as the caller typed them, so
 # make them absolute here rather than depending on where we were run from.
-mkdir -p "$SYSROOT/c166-elf/lib"
+mkdir -p "$SYSROOT/c166-elf/lib" "$SYSROOT/c166-elf/include"
 SYSROOT=$(cd "$SYSROOT" && pwd)
 BIN=$(cd "$BUILD/bin" && pwd)
+
+cp "$STARTUP"/include/*.h "$SYSROOT/c166-elf/include/"
 
 "$BIN/clang" -target c166 -c "$STARTUP/crt0.S" -o "$SYSROOT/c166-elf/lib/crt0.o"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 "$BIN/clang" -target c166 -O2 -c "$STARTUP/mem.c" -o "$TMP/mem.o"
+"$BIN/clang" -target c166 -O2 -c "$STARTUP/runtime.c" -o "$TMP/runtime.o"
 
 # The unwinder and the C++ ABI, which are what a thrown exception runs on.
 # They are built with unwind tables of their own: an exception is thrown from
@@ -46,7 +55,7 @@ trap 'rm -rf "$TMP"' EXIT
 "$BIN/clang" -target c166 -c "$STARTUP/unwind-asm.S" -o "$TMP/unwind-asm.o"
 
 "$BIN/llvm-ar" rcs "$SYSROOT/c166-elf/lib/libc.a" "$TMP/mem.o" \
-    "$TMP/unwind.o" "$TMP/cxa.o" "$TMP/unwind-asm.o"
+    "$TMP/runtime.o" "$TMP/unwind.o" "$TMP/cxa.o" "$TMP/unwind-asm.o"
 
 # Where the driver expects the builtins, which is version specific.
 VERSION=$("$BIN/clang" -print-resource-dir)
@@ -74,4 +83,5 @@ ninja -C "$TMP/crt" install > "$TMP/build.log" 2>&1 ||
 
 echo "sysroot ready: $SYSROOT"
 echo "  crt0.o and libc.a in $SYSROOT/c166-elf/lib"
+echo "  headers in $SYSROOT/c166-elf/include"
 echo "  builtins in $VERSION"

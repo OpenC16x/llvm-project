@@ -16,18 +16,21 @@ copied into a project and adjusted rather than installed.
   unwind-asm.S         the register capture and restore it needs
   cxa.c                the personality routine and the __cxa_ calls
   unwind.h             what a program calls into the unwinder
+  runtime.c            errno, exit, abort and the assert handler
+  include/             the standard headers a freestanding part can mean
 
 Building it
 -----------
 
-Three things have to exist that the LLVM build does not produce, because they
+Four things have to exist that the LLVM build does not produce, because they
 are code for the target rather than for the machine doing the building: crt0.o
-and libc.a, which the driver looks for in <sysroot>/c166-elf/lib, and the
-compiler-rt builtins, which are what the compiler calls for the things the
-instruction set does not do - 32 bit shifts and division, 64 bit arithmetic,
-and all of floating point, which this part has no unit for.
+and libc.a, which the driver looks for in <sysroot>/c166-elf/lib, the headers,
+which it looks for in <sysroot>/c166-elf/include, and the compiler-rt builtins,
+which are what the compiler calls for the things the instruction set does not
+do - 32 bit shifts and division, 64 bit arithmetic, and all of floating point,
+which this part has no unit for.
 
-One script builds all three:
+One script builds all four:
 
   llvm/utils/C166Sim/differential/mksysroot.sh <build-dir> <sysroot>
 
@@ -374,6 +377,50 @@ in, and resets to C0H for a standard start from internal program memory, which
 is where this script puts the Flash.  A program that writes either wants a
 different script from this one.  Both are protected after EINIT, so a startup
 sequence that changes them has to do it before that.
+
+The headers
+-----------
+
+include/ holds what a part with one thread, no operating system, no heap and no
+floating point unit can honestly mean of the standard headers.  mksysroot.sh
+copies them into <sysroot>/c166-elf/include, which is the directory the driver
+already searches; clang brings its own <stddef.h>, <stdint.h>, <limits.h> and
+the rest of the freestanding set, so those are not here.  Neither are
+<stdio.h>, <math.h> or <time.h>: there is no I/O, no floating point unit and no
+clock, so there is nothing behind them to declare.
+
+  errno.h     one int, reached through the errno macro, with Linux's numbers
+  string.h    the five mem.c defines, and the rest of <string.h> declared
+  stdlib.h    the integer and search parts, div_t and friends, RAND_MAX
+  assert.h    assert, calling __c166_assert_failed
+  inttypes.h  intmax_t, imaxdiv_t and the PRI and SCN macros
+  wchar.h     wint_t, mbstate_t and the declarations
+  uchar.h     char16_t, char32_t and the declarations
+  locale.h    locale_t, struct lconv and the LC_ macros
+  fenv.h      an environment with no exceptions and one rounding direction
+
+Two rules run through all of them.
+
+Nothing is written down here that the compiler already knows.  Every format
+string in inttypes.h is one of clang's own __INT32_FMTd__ macros, so PRId32 is
+"ld" here because int32_t is long here, and would be "d" on a target where it
+is int; wchar.h uses __WINT_TYPE__ and uchar.h uses __CHAR32_TYPE__.  A change
+to the target's type mapping updates the headers by itself.
+
+Almost everything is declared and not defined.  malloc, strcpy, qsort,
+setlocale, mbrtowc, fegetround: a program that calls one gets a link error
+naming it, which is a better answer than a header that hides the function or a
+one-size-fits-nobody implementation of it in a library nobody chose.  What is
+defined is what already had to be: the five functions in mem.c that the
+compiler calls by itself, and errno, exit, _Exit, abort and the assert handler
+in runtime.c, which the headers promise.  Everything in runtime.c but errno is
+weak, so a program with a watchdog to kick or something to print replaces the
+one it cares about; the defaults stop the machine, which is where crt0 goes
+when main returns.
+
+<stdlib.h> deliberately has no atexit.  exit here runs no handlers - there is
+nothing on this part for one to clean up, and nothing to return to - so
+declaring atexit would promise something exit does not do.
 
 What is missing
 ---------------

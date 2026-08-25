@@ -554,6 +554,9 @@ CodeGenModule::CodeGenModule(ASTContext &C,
   IntTy = llvm::IntegerType::get(LLVMContext, C.getTargetInfo().getIntWidth());
   IntPtrTy = llvm::IntegerType::get(LLVMContext,
     C.getTargetInfo().getMaxPointerWidth());
+  LangSizeTy =
+      llvm::IntegerType::get(LLVMContext, C.getTypeSize(C.getSizeType()));
+  LangSizeSizeInBytes = C.getTypeSizeInChars(C.getSizeType()).getQuantity();
   Int8PtrTy = llvm::PointerType::get(LLVMContext,
                                      C.getTargetAddressSpace(LangAS::Default));
   const llvm::DataLayout &DL = M.getDataLayout();

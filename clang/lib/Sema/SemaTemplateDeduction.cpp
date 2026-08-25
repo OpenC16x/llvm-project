@@ -2009,7 +2009,15 @@ static TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
       assert(NTTP.getDepth() == Info.getDeducedDepth() &&
              "saw non-type template parameter with wrong depth");
       if (const auto *CAA = dyn_cast<ConstantArrayType>(AA)) {
-        llvm::APSInt Size(CAA->getSize());
+        // An array bound is stored at the width of the target's widest
+        // pointer, which is not always the width of size_t: a target with a
+        // near and a far pointer has a size_t narrower than that.  Deducing
+        // it as a size_t means giving it that type's width; nothing is lost,
+        // because ConstantArrayType::getMaxSizeBits already limits a bound to
+        // what a size_t can hold.
+        llvm::APSInt Size(CAA->getSize().zextOrTrunc(S.Context.getIntWidth(
+                              S.Context.getSizeType())),
+                          /*isUnsigned=*/true);
         return DeduceNonTypeTemplateArgument(
             S, TemplateParams, NTTP, Size, S.Context.getSizeType(),
             /*ArrayBound=*/true, Info, POK != PartialOrderingKind::None,

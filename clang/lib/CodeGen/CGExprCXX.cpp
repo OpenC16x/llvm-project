@@ -728,12 +728,14 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
   if (!e->isArray()) {
     CharUnits typeSize = CGF.getContext().getTypeSizeInChars(type);
     sizeWithoutCookie =
-        llvm::ConstantInt::get(CGF.SizeTy, typeSize.getQuantity());
+        llvm::ConstantInt::get(CGF.LangSizeTy, typeSize.getQuantity());
     return sizeWithoutCookie;
   }
 
-  // The width of size_t.
-  unsigned sizeWidth = CGF.SizeTy->getBitWidth();
+  // The width of size_t.  LangSizeTy and not SizeTy: everything computed here
+  // ends up as the argument of an operator new, which takes the language's
+  // size_t, and the overflow checks below are only right at that width.
+  unsigned sizeWidth = CGF.LangSizeTy->getBitWidth();
 
   // Figure out the cookie size.
   llvm::APInt cookieSize(sizeWidth,
@@ -806,7 +808,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
     // care because it only overflows if allocationSize does, too, and
     // if that overflows then we shouldn't use this.
     numElements =
-        llvm::ConstantInt::get(CGF.SizeTy, adjustedCount * arraySizeMultiplier);
+        llvm::ConstantInt::get(CGF.LangSizeTy, adjustedCount * arraySizeMultiplier);
 
     // Compute the size before cookie, and track whether it overflowed.
     bool overflow;
@@ -818,7 +820,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
     if (cookieSize != 0) {
       // Save the current size without a cookie.  This shouldn't be
       // used if there was overflow.
-      sizeWithoutCookie = llvm::ConstantInt::get(CGF.SizeTy, allocationSize);
+      sizeWithoutCookie = llvm::ConstantInt::get(CGF.LangSizeTy, allocationSize);
 
       allocationSize = allocationSize.uadd_ov(cookieSize, overflow);
       hasAnyOverflow |= overflow;
@@ -826,9 +828,9 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
 
     // On overflow, produce a -1 so operator new will fail.
     if (hasAnyOverflow) {
-      size = llvm::Constant::getAllOnesValue(CGF.SizeTy);
+      size = llvm::Constant::getAllOnesValue(CGF.LangSizeTy);
     } else {
-      size = llvm::ConstantInt::get(CGF.SizeTy, allocationSize);
+      size = llvm::ConstantInt::get(CGF.LangSizeTy, allocationSize);
     }
 
     // Otherwise, we might need to use the overflow intrinsics.
@@ -859,12 +861,12 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
           llvm::ConstantInt::get(numElementsType, threshold);
 
       hasOverflow = CGF.Builder.CreateICmpUGE(numElements, thresholdV);
-      numElements = CGF.Builder.CreateTrunc(numElements, CGF.SizeTy);
+      numElements = CGF.Builder.CreateTrunc(numElements, CGF.LangSizeTy);
 
       // Otherwise, if we're signed, we want to sext up to size_t.
     } else if (isSigned) {
       if (numElementsWidth < sizeWidth)
-        numElements = CGF.Builder.CreateSExt(numElements, CGF.SizeTy);
+        numElements = CGF.Builder.CreateSExt(numElements, CGF.LangSizeTy);
 
       // If there's a non-1 type size multiplier, then we can do the
       // signedness check at the same time as we do the multiply
@@ -873,20 +875,20 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
       // in this case, we can subsume the >= minElements check.
       if (typeSizeMultiplier == 1)
         hasOverflow = CGF.Builder.CreateICmpSLT(
-            numElements, llvm::ConstantInt::get(CGF.SizeTy, minElements));
+            numElements, llvm::ConstantInt::get(CGF.LangSizeTy, minElements));
 
       // Otherwise, zext up to size_t if necessary.
     } else if (numElementsWidth < sizeWidth) {
-      numElements = CGF.Builder.CreateZExt(numElements, CGF.SizeTy);
+      numElements = CGF.Builder.CreateZExt(numElements, CGF.LangSizeTy);
     }
 
-    assert(numElements->getType() == CGF.SizeTy);
+    assert(numElements->getType() == CGF.LangSizeTy);
 
     if (minElements) {
       // Don't allow allocation of fewer elements than we have initializers.
       if (!hasOverflow) {
         hasOverflow = CGF.Builder.CreateICmpULT(
-            numElements, llvm::ConstantInt::get(CGF.SizeTy, minElements));
+            numElements, llvm::ConstantInt::get(CGF.LangSizeTy, minElements));
       } else if (numElementsWidth > sizeWidth) {
         // The other existing overflow subsumes this check.
         // We do an unsigned comparison, since any signed value < -1 is
@@ -894,7 +896,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
         hasOverflow = CGF.Builder.CreateOr(
             hasOverflow,
             CGF.Builder.CreateICmpULT(
-                numElements, llvm::ConstantInt::get(CGF.SizeTy, minElements)));
+                numElements, llvm::ConstantInt::get(CGF.LangSizeTy, minElements)));
       }
     }
 
@@ -909,10 +911,10 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
     // allocation fails.
     if (typeSizeMultiplier != 1) {
       llvm::Function *umul_with_overflow =
-          CGF.CGM.getIntrinsic(llvm::Intrinsic::umul_with_overflow, CGF.SizeTy);
+          CGF.CGM.getIntrinsic(llvm::Intrinsic::umul_with_overflow, CGF.LangSizeTy);
 
       llvm::Value *tsmV =
-          llvm::ConstantInt::get(CGF.SizeTy, typeSizeMultiplier);
+          llvm::ConstantInt::get(CGF.LangSizeTy, typeSizeMultiplier);
       llvm::Value *result =
           CGF.Builder.CreateCall(umul_with_overflow, {size, tsmV});
 
@@ -935,7 +937,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
           // Otherwise we need a separate multiply.
         } else {
           llvm::Value *asmV =
-              llvm::ConstantInt::get(CGF.SizeTy, arraySizeMultiplier);
+              llvm::ConstantInt::get(CGF.LangSizeTy, arraySizeMultiplier);
           numElements = CGF.Builder.CreateMul(numElements, asmV);
         }
       }
@@ -949,9 +951,9 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
       sizeWithoutCookie = size;
 
       llvm::Function *uadd_with_overflow =
-          CGF.CGM.getIntrinsic(llvm::Intrinsic::uadd_with_overflow, CGF.SizeTy);
+          CGF.CGM.getIntrinsic(llvm::Intrinsic::uadd_with_overflow, CGF.LangSizeTy);
 
-      llvm::Value *cookieSizeV = llvm::ConstantInt::get(CGF.SizeTy, cookieSize);
+      llvm::Value *cookieSizeV = llvm::ConstantInt::get(CGF.LangSizeTy, cookieSize);
       llvm::Value *result =
           CGF.Builder.CreateCall(uadd_with_overflow, {size, cookieSizeV});
 
@@ -969,7 +971,7 @@ static llvm::Value *EmitCXXNewAllocSize(CodeGenFunction &CGF,
     // operator new to throw.
     if (hasOverflow)
       size = CGF.Builder.CreateSelect(
-          hasOverflow, llvm::Constant::getAllOnesValue(CGF.SizeTy), size);
+          hasOverflow, llvm::Constant::getAllOnesValue(CGF.LangSizeTy), size);
   }
 
   if (cookieSize == 0)
@@ -1492,7 +1494,7 @@ public:
     // to operator delete(size_t, ...), we may not have it available.
     if (isAlignedAllocation(Params.Alignment))
       DeleteArgs.add(RValue::get(llvm::ConstantInt::get(
-                         CGF.SizeTy, AllocAlign.getQuantity())),
+                         CGF.LangSizeTy, AllocAlign.getQuantity())),
                      CGF.getContext().getSizeType());
 
     // Pass the rest of the arguments, which must match exactly.
@@ -1647,7 +1649,10 @@ llvm::Value *CodeGenFunction::EmitCXXNewExpr(const CXXNewExpr *E) {
     ++ParamsToSkip;
 
     if (allocSize != allocSizeWithoutCookie) {
-      CharUnits cookieAlign = getSizeAlign(); // FIXME: Ask the ABI.
+      // The cookie holds a size_t, so it needs that type's alignment.
+      // getSizeAlign() is built from the target's widest pointer and would
+      // over-claim on a target whose size_t is narrower than that.
+      CharUnits cookieAlign = getLangSizeAlign(); // FIXME: Ask the ABI.
       allocAlign = std::max(allocAlign, cookieAlign);
     }
 
@@ -1665,7 +1670,8 @@ llvm::Value *CodeGenFunction::EmitCXXNewExpr(const CXXNewExpr *E) {
         assert(allocator->isVariadic() && "can't pass alignment to allocator");
       }
       allocatorArgs.add(
-          RValue::get(llvm::ConstantInt::get(SizeTy, allocAlign.getQuantity())),
+          RValue::get(
+              llvm::ConstantInt::get(LangSizeTy, allocAlign.getQuantity())),
           AlignValT);
     }
 
@@ -1865,7 +1871,7 @@ void CodeGenFunction::EmitDeleteCall(const FunctionDecl *DeleteFD,
     // If there is a cookie, add the cookie size.
     if (!CookieSize.isZero())
       Size = Builder.CreateAdd(
-          Size, llvm::ConstantInt::get(SizeTy, CookieSize.getQuantity()));
+          Size, llvm::ConstantInt::get(LangSizeTy, CookieSize.getQuantity()));
 
     DeleteArgs.add(RValue::get(Size), SizeType);
   }

@@ -46,6 +46,10 @@ public:
 
     SizeType = UnsignedInt;
     IntMaxType = SignedLongLong;
+    // char32_t is uint_least32_t, and int is only sixteen bits here, so the
+    // default of unsigned int would be a char32_t that cannot hold a code
+    // point.  char16_t is uint_least16_t, which unsigned short already is.
+    Char32Type = UnsignedLong;
     IntPtrType = SignedInt;
     PtrDiffType = SignedInt;
     // A word is what this machine reads and writes in one go, so a word is

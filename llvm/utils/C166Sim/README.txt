@@ -52,8 +52,9 @@ compared.  It is what checks the backend, the builtins, the linker, crt0 and
 this simulator together, which is as close to running on the part as anything
 here gets.
 
-  mksysroot.sh   builds crt0.o, libc.a and the compiler-rt builtins, which a
-                 program has to link against and the LLVM build does not make
+  mksysroot.sh   builds crt0.o, libc.a, the headers and the compiler-rt
+                 builtins, which a program has to compile and link against and
+                 the LLVM build does not make
   run.sh         the hand written programs, at every optimisation level
   generate.py    emits a program from a seed
   fuzz.sh        sweeps seeds through the same comparison
@@ -251,3 +252,10 @@ produces; llvm/lib/Target/C166/startup/README.txt says how to build them, and
 then:
 
   llvm/utils/C166Sim/differential/run.sh <build>/bin <sysroot> <linker script>
+
+corpus/ is the same comparison over code nobody here wrote: drivers over LLVM's
+own libc, which reaches shapes the hand written programs do not because nobody
+chose them.  It has its own README; what it is for is finding the things a test
+written against this backend would not think to look for.
+
+  llvm/utils/C166Sim/corpus/run.sh <build>/bin <sysroot> <linker script>
