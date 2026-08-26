@@ -769,6 +769,41 @@ Known limitations / things to do
 * Only the X-peripheral registers the XC164CM's own two manuals name are
   modelled.  The CAN module has a manual of its own that this was not built
   from, so its registers have to be written as addresses.
+* thread_local is rejected: clang's C166 target sets TLSSupported to false, so
+  a program that uses it does not compile, and neither does
+  libc/src/stdlib/l64a.cpp.  On a part with one thread, per-thread storage and
+  static storage are the same storage, so accepting it and lowering it as
+  ordinary static data would be correct and is probably what this should do.
+  What has to be settled first is what an interrupt handler is: a handler is
+  not a thread and has to see the same object the interrupted code sees, which
+  rules out anything that gives one storage of its own.  Emulated TLS through
+  compiler-rt's __emutls_get_address would compile but costs a call per access,
+  which is the wrong trade here if the answer above is "the same storage".
+* Two of the clang bugs fixed for this target were not this target's, and
+  neither has been sent upstream.  A __atomic_compare_exchange whose failure
+  order is not a constant built a switch whose cases were i32 over a value
+  typed as the language's int, which is malformed IR on any target with a
+  sixteen bit int; three lines of C reproduce it on MSP430 and AVR, and the fix
+  here covers all three.  The char32_t defect is still live on MSP430, whose
+  Char32Type is TargetInfo's default of unsigned int and so is sixteen bits
+  there, too narrow to hold a code point.  Setting it is one line.  It was left
+  alone because changing another target's type mapping means changing its ABI,
+  and there is no way to run that target's tests from here.
+* 104 of the 129 libc sources in string, stdlib, ctype and inttypes compile for
+  this target.  Of the 25 that do not, 23 are not about this target: seventeen
+  fail on an #error inside libc itself, which declares locale_t,
+  __atexithandler_t and mbstate_t unavailable in overlay mode; four assume a
+  thirty two bit int or a four byte wchar_t and fail on MSP430 too; and two
+  want internals that exist only in a full build, the startup object's app and
+  a Mutex.  wchar_t is sixteen bits here, which is a choice rather than an
+  oversight - it is what the existing C166 compilers use - and libc's wcrtomb
+  static_asserts that it is four.  That leaves two that are this target's:
+  mkstemp, which wants an fcntl.h for a part with no filesystem, and l64a,
+  which wants the thread_local above.
+  llvm/lib/Target/C166/startup/README.txt says what the sysroot headers are and
+  why almost everything in them is declared and not defined;
+  llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
+  what it found.
 * No debugger knows the c166 architecture, so nothing puts a source level front
   end on this yet.  What is in place is everything under one: the debug
   information is right, the unwind information is right and the simulator walks
