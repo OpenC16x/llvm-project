@@ -92,12 +92,7 @@ C166RegisterInfo::getPointerRegClass(unsigned Kind) const {
 /// inserter allocated for the callee saved registers.
 static bool isCalleeSavedFrameIndex(const MachineFrameInfo &MFI,
                                     int FrameIndex) {
-  const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
-  if (CSI.empty())
-    return false;
-
-  return FrameIndex >= CSI.front().getFrameIdx() &&
-         FrameIndex <= CSI.back().getFrameIdx();
+  return MFI.isCalleeSavedObjectIndex(FrameIndex);
 }
 
 bool C166RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,

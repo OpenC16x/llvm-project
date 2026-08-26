@@ -111,6 +111,15 @@ static bool readsOnlyZN(C166CC::CondCode CC) {
 /// ADDC and SUBC set Z only if it was already set, so that a wide value tests
 /// as zero exactly when every word of it did - which is the answer to a
 /// different question from the one "cmp Rw, #0" asks.
+///
+/// This list has to be kept up with C166InstrInfo.td.  An ALU instruction added
+/// there and not here costs a fold, which is only a missed optimisation; one
+/// added here that does not really set Z and N from its result removes a
+/// compare that was doing something, which is a miscompile.  That asymmetry is
+/// why this is a list of what does rather than of what does not.  The answer
+/// for a given instruction is its Flags row in the Instruction Set Manual for
+/// the C166 Family (V2.0, Mar. 2001), which is where the rest of the flag
+/// behaviour in this backend comes from - only a "-" there means untouched.
 static bool setsZNFromResult(const MachineInstr &MI) {
   switch (MI.getOpcode()) {
   case C166::ADD16rr:  case C166::ADD16ri:  case C166::ADD16ri3:
