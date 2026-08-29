@@ -11,7 +11,7 @@ define i32 @mac(i32 %acc, i16 %a, i16 %b) {
 ; MAC-NEXT:    comac r4, r5
 ; MAC-NEXT:    costore r2, mal
 ; MAC-NEXT:    costore r3, mah
-; MAC-NOT:     mul
+; MAC-NOT:     {{^[[:space:]]+mul[[:space:]]}}
 ;
 ; NOMAC-LABEL: mac:
 ; NOMAC:         mul r4, r5
@@ -24,11 +24,15 @@ define i32 @mac(i32 %acc, i16 %a, i16 %b) {
 }
 
 ; The multiply has to feed nothing else.  Here the product is returned as well
-; as accumulated, so a MAC would have to compute it twice.
+; as accumulated, so a MAC would have to compute it twice.  It is still a
+; coprocessor multiply - see comul.ll - just not an accumulate, so the check
+; that matters is that no CoMAC appears rather than that a MUL does.
 
 define i32 @product_used_twice(i32 %acc, i16 %a, i16 %b, ptr %out) {
 ; MAC-LABEL: product_used_twice:
-; MAC:         mul
+; MAC:         comul r4, r5
+; MAC:         add r2, r4
+; MAC-NEXT:    addc r3, r5
 ; MAC-NOT:     comac
   %sa = sext i16 %a to i32
   %sb = sext i16 %b to i32
@@ -48,7 +52,7 @@ define i32 @unsigned_mac(i32 %acc, i16 %a, i16 %b) {
 ; MAC-NEXT:    comacu r4, r5
 ; MAC-NEXT:    costore r2, mal
 ; MAC-NEXT:    costore r3, mah
-; MAC-NOT:     mul
+; MAC-NOT:     {{^[[:space:]]+mul[[:space:]]}}
 ;
 ; NOMAC-LABEL: unsigned_mac:
 ; NOMAC:         mul r4, r5
@@ -69,7 +73,7 @@ define i32 @mac_subtract(i32 %acc, i16 %a, i16 %b) {
 ; MAC-NEXT:    comac- r4, r5
 ; MAC-NEXT:    costore r2, mal
 ; MAC-NEXT:    costore r3, mah
-; MAC-NOT:     mul
+; MAC-NOT:     {{^[[:space:]]+mul[[:space:]]}}
   %sa = sext i16 %a to i32
   %sb = sext i16 %b to i32
   %m = mul i32 %sa, %sb
@@ -83,7 +87,7 @@ define i32 @unsigned_mac_subtract(i32 %acc, i16 %a, i16 %b) {
 ; MAC-NEXT:    comacu- r4, r5
 ; MAC-NEXT:    costore r2, mal
 ; MAC-NEXT:    costore r3, mah
-; MAC-NOT:     mul
+; MAC-NOT:     {{^[[:space:]]+mul[[:space:]]}}
   %za = zext i16 %a to i32
   %zb = zext i16 %b to i32
   %m = mul i32 %za, %zb
@@ -96,7 +100,8 @@ define i32 @unsigned_mac_subtract(i32 %acc, i16 %a, i16 %b) {
 
 define i32 @product_minus_acc(i32 %acc, i16 %a, i16 %b) {
 ; MAC-LABEL: product_minus_acc:
-; MAC:         mul r4, r5
+; MAC:         sub r4, r2
+; MAC-NEXT:    subc r5, r3
 ; MAC-NOT:     comac
   %sa = sext i16 %a to i32
   %sb = sext i16 %b to i32

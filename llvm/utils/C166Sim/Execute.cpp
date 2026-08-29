@@ -114,7 +114,7 @@ enum class Op {
   X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
   X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
   X(CoLOAD_rr) X(CoMAC_rr) X(CoMACu_rr) X(CoMACN_rr) X(CoMACuN_rr)               \
-  X(CoMUL_rr) X(CoSTORE_sr)
+  X(CoMUL_rr) X(CoMULu_rr) X(CoSTORE_sr)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -458,6 +458,7 @@ static unsigned baseStateTime(Op O, bool Taken) {
   // out loud rather than leaving to chance: the figure is read, not assumed.
   case Op::CoLOAD_rr:
   case Op::CoMUL_rr:
+  case Op::CoMULu_rr:
   case Op::CoMAC_rr:
   case Op::CoMACu_rr:
   case Op::CoMACN_rr:
@@ -1161,6 +1162,7 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     break;
   }
   case Op::CoMUL_rr:
+  case Op::CoMULu_rr:
   case Op::CoMAC_rr:
   case Op::CoMACu_rr:
   case Op::CoMACN_rr:
@@ -1168,14 +1170,16 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     // The unsigned forms multiply the words as they stand and the signed ones
     // sign extend them first, which is the whole of the difference; the
     // product is 32 bits either way and the accumulator is 40.
-    bool Unsigned = O == Op::CoMACu_rr || O == Op::CoMACuN_rr;
+    bool Unsigned = O == Op::CoMACu_rr || O == Op::CoMACuN_rr ||
+                    O == Op::CoMULu_rr;
     int64_t P = Unsigned
                     ? int64_t(uint32_t(W(0)) * uint32_t(W(1)))
                     : int64_t(int32_t(int16_t(W(0))) * int32_t(int16_t(W(1))));
     if ((M.MCW >> 10) & 1)
       P <<= 1;
     bool Negate = O == Op::CoMACN_rr || O == Op::CoMACuN_rr;
-    M.setACC(O == Op::CoMUL_rr ? P : (Negate ? M.ACC - P : M.ACC + P));
+    bool Replace = O == Op::CoMUL_rr || O == Op::CoMULu_rr;
+    M.setACC(Replace ? P : (Negate ? M.ACC - P : M.ACC + P));
     break;
   }
   case Op::CoSTORE_sr: {

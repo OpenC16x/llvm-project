@@ -394,6 +394,38 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       Emit(C166::MOVfromMDH).addDef(Rem);
     break;
   }
+  case C166::MULMAC16rr:
+  case C166::MULMACHS16rr:
+  case C166::MULMACHU16rr: {
+    // One CoMUL and one word back out of the accumulator.  Nothing loads it
+    // first: CoMUL replaces what is there rather than adding to it, so the
+    // accumulator is dead going in.
+    Register Dst = MI.getOperand(0).getReg();
+    Register Src1 = MI.getOperand(1).getReg();
+    Register Src2 = MI.getOperand(2).getReg();
+    bool Unsigned = MI.getOpcode() == C166::MULMACHU16rr;
+    bool High = MI.getOpcode() != C166::MULMAC16rr;
+
+    Emit(Unsigned ? C166::CoMULu_rr : C166::CoMUL_rr).addReg(Src1).addReg(Src2);
+    Emit(C166::CoSTORE_sr).addDef(Dst).addReg(High ? C166::MAH : C166::MAL);
+    break;
+  }
+  case C166::SMULMAC16rrLOHI:
+  case C166::UMULMAC16rrLOHI: {
+    // The same, with both words wanted.  This is the one that pays best: two
+    // CoSTOREs cost what the two moves out of MDL and MDH cost, so the whole
+    // of the difference between MUL and CoMUL is saved.
+    Register Lo = MI.getOperand(0).getReg();
+    Register Hi = MI.getOperand(1).getReg();
+    Register Src1 = MI.getOperand(2).getReg();
+    Register Src2 = MI.getOperand(3).getReg();
+    bool Unsigned = MI.getOpcode() == C166::UMULMAC16rrLOHI;
+
+    Emit(Unsigned ? C166::CoMULu_rr : C166::CoMUL_rr).addReg(Src1).addReg(Src2);
+    Emit(C166::CoSTORE_sr).addDef(Lo).addReg(C166::MAL);
+    Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
+    break;
+  }
   case C166::MAC32rr: {
     // The accumulator goes into the unit, the product is accumulated onto it,
     // and the two words come back out.  It does not stay: nothing saves the

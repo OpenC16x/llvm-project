@@ -805,6 +805,48 @@ def HasMAC : Predicate<"Subtarget->hasMAC()">;
 // of a summing loop, where the total is worth keeping in the unit across the
 // whole of it; what is left here is every accumulate that pass does not
 // recognise.
+// The same product without an accumulate.  MUL is ten states and leaves the
+// answer in MDL and MDH, so a multiply is that plus a move out of one of them,
+// and a widening multiply is that plus two: twelve states in six bytes, or
+// fourteen in ten.  CoMUL is two states and the answer comes out with
+// CoSTOREs, which is four states in eight bytes, or six in twelve.
+//
+// Eight states for two bytes is worth taking wherever the two bytes are not
+// what is scarce, so these stand down at -Os and the MUL forms above are
+// selected there instead.  A 32 bit multiply is three of these and is where it
+// shows: forty two states become eighteen.
+//
+// They also leave two things alone that MUL does not.  PSW is untouched, so a
+// comparison can survive a multiply; and so is the multiply/divide unit, which
+// the C166 interrupts part way through and which an interrupt handler that
+// reaches it therefore has to save and put back.
+def NotOptForSize : Predicate<"!MF->getFunction().hasOptSize()">;
+
+let Predicates = [HasMAC, NotOptForSize], Defs = [MAL, MAH, MSW],
+    AddedComplexity = 10 in {
+// The low word of a product is the same whether the operands were signed or
+// not, so there is one of these rather than two.
+def MULMAC16rr   : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+                          "#MULMAC16rr",
+                          [(set GR16:$dst, (mul GR16:$src1, GR16:$src2))]>;
+def MULMACHS16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+                          "#MULMACHS16rr",
+                          [(set GR16:$dst, (mulhs GR16:$src1, GR16:$src2))]>;
+def MULMACHU16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+                          "#MULMACHU16rr",
+                          [(set GR16:$dst, (mulhu GR16:$src1, GR16:$src2))]>;
+def SMULMAC16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                             (ins GR16:$src1, GR16:$src2),
+                             "#SMULMAC16rrLOHI",
+                             [(set GR16:$lo, GR16:$hi,
+                                   (smullohi GR16:$src1, GR16:$src2))]>;
+def UMULMAC16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                             (ins GR16:$src1, GR16:$src2),
+                             "#UMULMAC16rrLOHI",
+                             [(set GR16:$lo, GR16:$hi,
+                                   (umullohi GR16:$src1, GR16:$src2))]>;
+}
+
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
 def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
                      (ins GR16:$acclo, GR16:$acchi, GR16:$a, GR16:$b,

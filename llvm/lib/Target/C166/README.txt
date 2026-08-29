@@ -76,7 +76,8 @@ pseudos at the same point.
 One MUL leaves both halves of the product behind, so SMUL_LOHI and UMUL_LOHI
 are kept whole rather than expanded: a widening multiply is one MUL and two
 moves.  Splitting them would make mul and mulhs separate nodes again, and each
-would issue a MUL of its own.
+would issue a MUL of its own.  On a part with the coprocessor it is a CoMUL
+and two CoSTOREs instead; see below.
 
 The carry is different, and the difference is what makes wide arithmetic
 cheap.  MOV, MOVB, MOVBZ, MOVBS, PUSH and POP are all documented as leaving V
@@ -998,6 +999,37 @@ unsigned load.
 
 Only the XC16x has the unit.  -mcpu=xc16x is what turns it on, and defines
 __C166_MAC__ so that code can ask.
+
+Multiplying without the multiply unit
+-------------------------------------
+
+The same coprocessor does a plain multiply, and it is not close.  MUL is ten
+states and leaves the answer in MDL and MDH, so a multiply is that plus a move
+out of one of them and a widening multiply is that plus two: twelve states in
+six bytes, or fourteen in ten.  CoMUL is two states and the answer comes out
+with CoSTOREs, which is four states in eight bytes, or six in twelve.
+
+Nothing loads the accumulator first.  CoMUL replaces what is in it rather than
+adding to it, so the accumulator is dead going in, which is what keeps this to
+three instructions where an accumulate needs four.
+
+A 32 bit multiply is where it shows, because it is three of these rather than
+a library call: both widening multiply nodes are legal here, so "long * long"
+is expanded inline into two low multiplies and one widening one, and __mulsi3
+is never reached.  Forty two states become eighteen.
+
+Eight states for two bytes is the trade, and it is not free on a part whose
+near addresses reach 48 KByte, so these stand down where a function asks to be
+small and the MUL forms are selected there instead.  That is the only place in
+this backend where -Os changes which instruction is chosen rather than how many
+of them there are.
+
+Two things the coprocessor leaves alone that MUL does not.  PSW is untouched,
+so a comparison can survive a multiply - which matters here, where nearly every
+instruction writes the zero and negative flags and the fused compare-and-branch
+pseudos exist because of it.  And the multiply/divide unit is untouched, which
+is state the C166 interrupts MUL and DIV part way through and that a handler
+reaching it therefore has to save and put back.
 
 Compares the flags already answer
 ---------------------------------
