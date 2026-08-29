@@ -27,7 +27,14 @@ class LLVM_LIBRARY_VISIBILITY C166TargetInfo : public TargetInfo {
 public:
   C166TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    TLSSupported = false;
+    // One thread, so per-thread storage and static storage are the same
+    // storage, and the backend lowers a thread_local to an ordinary global.
+    // Rejecting it instead would only push portable code that uses it as a
+    // "one per thread, and there is one thread" idiom off this target.
+    // llvm/lib/Target/C166/C166LowerThreadLocal.cpp has the reasoning,
+    // including why an interrupt handler makes this the right answer rather
+    // than merely the cheap one.
+    TLSSupported = true;
 
     // A 16 bit machine: int is a register, and nothing needs more than word
     // alignment because the bus is a word wide.

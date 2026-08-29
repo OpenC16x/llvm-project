@@ -422,6 +422,15 @@ when main returns.
 nothing on this part for one to clean up, and nothing to return to - so
 declaring atexit would promise something exit does not do.
 
+thread_local compiles, and means static: this part runs one thread, so
+per-thread storage and static storage are the same storage.  An interrupt
+handler and the code it interrupted therefore see the same object, which is
+what a handler needs, since it is not a thread.  A thread_local with a
+constructor is built on first use; its destructor is handed to
+__cxa_thread_atexit in cxa.c, which records nothing and so never runs it, for
+the same reason exit runs no handlers.  llvm/lib/Target/C166/README.txt says
+what this does not do, which is make a second thread work.
+
 What is missing
 ---------------
 

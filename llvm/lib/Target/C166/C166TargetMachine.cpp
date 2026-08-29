@@ -32,6 +32,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166Target() {
   initializeC166MergeExtendPass(PR);
   initializeC166FoldComparePass(PR);
   initializeC166MACChainPass(PR);
+  initializeC166LowerThreadLocalPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -86,6 +87,10 @@ TargetPassConfig *C166TargetMachine::createPassConfig(PassManagerBase &PM) {
 }
 
 void C166PassConfig::addIRPasses() {
+  // Before anything looks at a global's section or its address: from here on
+  // there is no thread-local storage in the module, so nothing after this has
+  // to have an opinion about it.
+  addPass(createC166LowerThreadLocalPass());
   addPass(createAtomicExpandLegacyPass());
   TargetPassConfig::addIRPasses();
 }
