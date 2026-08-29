@@ -38,6 +38,11 @@ void C166TargetInfo::getTargetDefines(const LangOptions &Opts,
   // rather than guessing from the part number.
   if (HasMAC)
     Builder.defineMacro("__C166_MAC__");
+  // And whether ATOMIC and the EXTend instructions are, which is what decides
+  // whether a far object can be reached at all.  The runtime's far block moves
+  // ask this rather than being built for a part that cannot run them.
+  if (HasExtInstr)
+    Builder.defineMacro("__C166_EXT_INSTR__");
 
   // Far data lives in address space 1.  Spell it the way the vendor
   // toolchains do; the name is in the reserved identifier space, so it cannot

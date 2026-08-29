@@ -138,6 +138,12 @@ static MCAsmInfo *createC166MCAsmInfo(const MCRegisterInfo &MRI,
 
 static MCSubtargetInfo *createC166MCSubtargetInfo(const Triple &TT,
                                                   StringRef CPU, StringRef FS) {
+  // The same default the code generator picks, for the same reason: "c166" is
+  // the first generation part, which has neither the EXTend instructions nor
+  // ATOMIC, and an assembler that rejected those by default would reject the
+  // output of a compiler that was not told a CPU either.  See C166.td.
+  if (CPU.empty())
+    CPU = "generic";
   return createC166MCSubtargetInfoImpl(TT, CPU, /*TuneCPU=*/CPU, FS);
 }
 

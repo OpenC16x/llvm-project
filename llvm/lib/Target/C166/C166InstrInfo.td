@@ -1947,8 +1947,19 @@ def JNBS : BitBranch<0xBA, "jnbs", 1>;
 // an explicit segment (EXTS).  Code crosses segments with JMPS and CALLS,
 // which name the target segment directly, and returns with RETS.
 //
-// These are MC level only for now: nothing generates them yet.
+// These arrived with the second generation of the family, so everything below
+// carries HasExtInstr: on a first generation part they are undefined opcodes
+// and the assembler should say so rather than emit a trap.
 //===----------------------------------------------------------------------===//
+
+// The instruction set extension the second generation brought.  It gates the
+// assembler and the disassembler as well as selection, because an EXTS in a
+// listing for an 80C166 is not an EXTS, it is whatever that part does with an
+// opcode it has never heard of.
+def HasExtInstr : Predicate<"Subtarget->hasExtInstr()">,
+                  AssemblerPredicate<(all_of FeatureExtInstr), "ext-instr">;
+
+let Predicates = [HasExtInstr] in {
 
 // EXTS/EXTP and their combined-with-EXTR forms taking the page or segment
 // from a register.  Bits 7-6 select which of the four it is.
@@ -2018,6 +2029,8 @@ def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
   let Inst{11-8} = 0;
 }
 }
+
+} // Predicates = [HasExtInstr]
 
 // Inter-segment control flow.
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in

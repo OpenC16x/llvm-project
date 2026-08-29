@@ -544,6 +544,32 @@ bool C166TargetLowering::getPostIndexedAddressParts(SDNode *N, SDNode *Op,
   return true;
 }
 
+/// Whether a far access can be reached at all on the part being built for.
+///
+/// A far address is a segment and an offset, and the only way to hand a
+/// segment to an ordinary MOV is the EXTS in front of it.  The first
+/// generation of the family has no EXTS, and there is no sequence that stands
+/// in for one: rewriting a data page pointer would reach the object, but it
+/// would also silently redirect every near address that shares that pointer,
+/// including the ones an interrupt taken in the middle would use.
+///
+/// So this is a diagnostic rather than a fallback, and the caller drops the
+/// access afterwards - continuing to select it would put an EXTS through the
+/// asm printer's predicate check, which reports a rather less helpful thing.
+static bool diagnoseFarWithoutExtInstr(const C166Subtarget &Subtarget,
+                                       SelectionDAG &DAG, const SDLoc &DL,
+                                       StringRef What) {
+  if (Subtarget.hasExtInstr())
+    return false;
+  DAG.getContext()->diagnose(DiagnosticInfoUnsupported(
+      DAG.getMachineFunction().getFunction(),
+      "cannot reach a far object on this part: " + What +
+          " needs an EXTS, which the first generation of the family does not "
+          "have; -mcpu=c167 or later has it",
+      DL.getDebugLoc()));
+  return true;
+}
+
 SDValue C166TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   auto *LD = cast<LoadSDNode>(Op);
   MVT AccessVT;
@@ -552,6 +578,10 @@ SDValue C166TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
     return SDValue();
 
   SDLoc DL(Op);
+  if (diagnoseFarWithoutExtInstr(Subtarget, DAG, DL, "a load"))
+    return DAG.getMergeValues(
+        {DAG.getPOISON(LD->getValueType(0)), LD->getChain()}, DL);
+
   SDValue Offset, Segment;
   splitFarPointer(LD->getBasePtr(), DL, DAG, Offset, Segment);
 
@@ -581,6 +611,9 @@ SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
     return SDValue();
 
   SDLoc DL(Op);
+  if (diagnoseFarWithoutExtInstr(Subtarget, DAG, DL, "a store"))
+    return ST->getChain();
+
   SDValue Offset, Segment;
   splitFarPointer(ST->getBasePtr(), DL, DAG, Offset, Segment);
 
@@ -1034,6 +1067,14 @@ C166TargetLowering::shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const {
   // before any of it is written out.
   if (diagnoseFarAtomic(AI, AI->getPointerOperand(), "a read-modify-write"))
     return AtomicExpansionKind::NotAtomic;
+
+  // A first generation part has no ATOMIC, so none of these fit in a sequence
+  // it can hold.  They all go round the compare and exchange loop instead,
+  // which is what the minimum and maximum already do here and which reaches
+  // indivisibility by clearing PSW.IEN rather than by counting instructions -
+  // an idiom this part does have.  Longer per turn, and correct.
+  if (!Subtarget.hasExtInstr())
+    return AtomicExpansionKind::CmpXChg;
 
   switch (AI->getOperation()) {
   case AtomicRMWInst::Add:

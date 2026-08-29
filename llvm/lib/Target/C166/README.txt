@@ -273,12 +273,25 @@ small case needs, computed once and used twice.
 Which half ends up where is then two selects on bit 4 of the amount.  A 32 bit
 division is still a call.
 
-EXTS does not exist on the SAB 8XC166(W) devices, and no subtarget feature
-guards that yet.  Inside a class A or class B trap handler the EXTend
-instructions do nothing while a class B trap flag is set, so a far access in
-one will read the wrong place.  There is also only one instruction counter, so
-inline assembly must not wrap a far access in an ATOMIC or EXTend sequence of
-its own.
+EXTS does not exist on the first generation of the family - the SAB 80C166 and
+83C166 - and neither does ATOMIC.  FeatureExtInstr is what says so; -mcpu=c166
+is that generation by name and clears it, and everything else in the processor
+list has it, "generic" included, because every part -mmcu= knows is second
+generation and so are the linker script and startup code here.  A far access
+without it is a diagnostic, since nothing stands in for an EXTS: rewriting a
+data page pointer would reach the object and also redirect every near address
+sharing that pointer, an interrupt handler's included.  A read-modify-write
+without it goes round the compare and exchange loop, which holds together by
+clearing PSW.IEN rather than by counting instructions.
+
+The predicate gates the assembler and the disassembler as well, which is the
+point rather than a side effect: an EXTS in a listing for a part that has no
+EXTS is not an EXTS.
+
+Inside a class A or class B trap handler the EXTend instructions do nothing
+while a class B trap flag is set, so a far access in one will read the wrong
+place.  There is also only one instruction counter, so inline assembly must
+not wrap a far access in an ATOMIC or EXTend sequence of its own.
 
 Switches
 --------
