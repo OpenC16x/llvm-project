@@ -199,7 +199,8 @@ bool C166MACChain::chainLoop(MachineLoop *L) {
       .addDef(C166::MAH, RegState::Implicit)
       .addDef(C166::MSW, RegState::Implicit);
 
-  BuildMI(*H, MAC, MAC->getDebugLoc(), TII->get(C166::CoMAC_rr))
+  BuildMI(*H, MAC, MAC->getDebugLoc(),
+          TII->get(C166::getMACOpcode(MAC->getOperand(6).getImm())))
       .add(MAC->getOperand(4))
       .add(MAC->getOperand(5))
       .addDef(C166::MAL, RegState::Implicit)

@@ -405,9 +405,10 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Register AccHi = MI.getOperand(3).getReg();
     Register A = MI.getOperand(4).getReg();
     Register B = MI.getOperand(5).getReg();
+    unsigned Kind = MI.getOperand(6).getImm();
 
     Emit(C166::CoLOAD_rr).addReg(AccLo).addReg(AccHi);
-    Emit(C166::CoMAC_rr).addReg(A).addReg(B);
+    Emit(C166::getMACOpcode(Kind)).addReg(A).addReg(B);
     Emit(C166::CoSTORE_sr).addDef(Lo).addReg(C166::MAL);
     Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
     break;

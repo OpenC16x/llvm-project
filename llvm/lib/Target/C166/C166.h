@@ -42,6 +42,23 @@ enum TOF : unsigned {
 };
 } // end namespace C166II
 
+namespace C166MAC {
+/// Which of the coprocessor's multiply-accumulates a MAC32rr stands for.
+///
+/// The four differ only in how the product is formed and whether it is added
+/// or taken away, so they share one pseudo and one expansion; this says which
+/// CoXXX comes out of it.  The accumulator is loaded and stored the same way
+/// for all four, because CoLOAD sign extends into a forty bit accumulator that
+/// is truncated back to thirty two on the way out, and 2^32 divides 2^40 - so
+/// what the top eight bits hold never reaches the answer.
+enum Kind : unsigned {
+  Signed = 0,          ///< CoMAC:   ACC += (signed)a * (signed)b
+  Unsigned = 1,        ///< CoMACu:  ACC += (unsigned)a * (unsigned)b
+  SignedNegate = 2,    ///< CoMAC-:  ACC -= (signed)a * (signed)b
+  UnsignedNegate = 3,  ///< CoMACu-: ACC -= (unsigned)a * (unsigned)b
+};
+} // end namespace C166MAC
+
 namespace C166CC {
 /// C166 condition codes.  These are the values encoded in the 'cc' field of
 /// the conditional jump and call instructions.

@@ -174,7 +174,8 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   setIndexedLoadAction(ISD::POST_INC, MVT::i16, Legal);
 
   setTargetDAGCombine(ISD::ADD);
-  setTargetDAGCombine({ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM, ISD::ADDE});
+  setTargetDAGCombine(
+      {ISD::SDIV, ISD::UDIV, ISD::SREM, ISD::UREM, ISD::ADDE, ISD::SUBE});
 
   // A far pointer is an i32, which is not a legal type, so an access through
   // one is caught while the type legalizer is expanding the pointer operand.
@@ -670,12 +671,21 @@ static SDValue combineDivRem(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
   return Pair.getValue(IsDiv ? 0 : 1);
 }
 
-/// "acc += a * b" with a and b signed words, onto the MAC unit.
+/// "acc += a * b" and "acc -= a * b" with a and b words, onto the MAC unit.
 ///
-/// By the time this runs the widening multiply is an SMUL_LOHI and the 32 bit
-/// add is the ADDC and ADDE pair that carries between the two words, so what
-/// is matched is the ADDE: its carry has to come from the ADDC of the other
-/// half, and both halves have to be the two results of the same multiply.
+/// By the time this runs the widening multiply is an SMUL_LOHI or a UMUL_LOHI
+/// and the 32 bit add is the ADDC and ADDE pair that carries between the two
+/// words, so what is matched is the ADDE: its carry has to come from the ADDC
+/// of the other half, and both halves have to be the two results of the same
+/// multiply.  A subtraction is the same shape in SUBC and SUBE, and picks the
+/// negating form of the instruction.
+///
+/// Which multiply the type legalizer built is what says whether the product is
+/// signed, and so which of CoMAC and CoMACu this is.  There is no node for a
+/// mixed sign widening multiply and the legalizer does not make one - a value
+/// zero extended from a word has sixteen sign bits, one short of what its
+/// check for a signed pair wants - so CoMACsu and CoMACus have no shape here
+/// to match and are left to hand written assembly.
 ///
 /// The multiply has to feed nothing else.  If either half is used again the
 /// MAC would compute the product a second time to hand it over, which costs
@@ -685,17 +695,26 @@ static SDValue combineMAC(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
   if (!ST.hasMAC() || N->getValueType(0) != MVT::i16)
     return SDValue();
 
+  // Subtraction does not commute, so on that side the product has to be the
+  // right hand operand of both halves rather than either one.
+  bool Negate = N->getOpcode() == ISD::SUBE;
+  unsigned LowOpc = Negate ? ISD::SUBC : ISD::ADDC;
+
   SDValue AccHi = N->getOperand(0), MulHi = N->getOperand(1);
-  if (MulHi.getOpcode() != ISD::SMUL_LOHI)
+  if (!Negate && MulHi.getOpcode() != ISD::SMUL_LOHI &&
+      MulHi.getOpcode() != ISD::UMUL_LOHI)
     std::swap(AccHi, MulHi);
-  if (MulHi.getOpcode() != ISD::SMUL_LOHI || MulHi.getResNo() != 1)
+  bool Unsigned = MulHi.getOpcode() == ISD::UMUL_LOHI;
+  if (!Unsigned && MulHi.getOpcode() != ISD::SMUL_LOHI)
+    return SDValue();
+  if (MulHi.getResNo() != 1)
     return SDValue();
 
   SDNode *AddC = N->getOperand(2).getNode();
-  if (AddC->getOpcode() != ISD::ADDC)
+  if (AddC->getOpcode() != LowOpc)
     return SDValue();
   SDValue AccLo = AddC->getOperand(0), MulLo = AddC->getOperand(1);
-  if (MulLo.getNode() != MulHi.getNode())
+  if (!Negate && MulLo.getNode() != MulHi.getNode())
     std::swap(AccLo, MulLo);
   if (MulLo.getNode() != MulHi.getNode() || MulLo.getResNo() != 0)
     return SDValue();
@@ -713,11 +732,16 @@ static SDValue combineMAC(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
   if (N->hasAnyUseOfValue(1))
     return SDValue();
 
+  unsigned Kind = Negate ? (Unsigned ? C166MAC::UnsignedNegate
+                                     : C166MAC::SignedNegate)
+                         : (Unsigned ? C166MAC::Unsigned : C166MAC::Signed);
+
   SelectionDAG &DAG = DCI.DAG;
   SDLoc DL(N);
-  SDValue MAC =
-      DAG.getNode(C166ISD::MAC, DL, DAG.getVTList(MVT::i16, MVT::i16), AccLo,
-                  AccHi, Mul->getOperand(0), Mul->getOperand(1));
+  SDValue MAC = DAG.getNode(C166ISD::MAC, DL,
+                            DAG.getVTList(MVT::i16, MVT::i16), AccLo, AccHi,
+                            Mul->getOperand(0), Mul->getOperand(1),
+                            DAG.getTargetConstant(Kind, DL, MVT::i16));
   // Both words are replaced by hand.  Returning one of them would not do:
   // these two nodes each carry a glue result besides their sum, and the
   // combiner's own replacement is for a node with a single value.
@@ -740,6 +764,7 @@ SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
   case ISD::UREM:
     return combineDivRem(N, DCI);
   case ISD::ADDE:
+  case ISD::SUBE:
     return combineMAC(N, DCI, Subtarget);
   default:
     break;

@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_C166_C166INSTRINFO_H
 #define LLVM_LIB_TARGET_C166_C166INSTRINFO_H
 
+#include "C166.h"
 #include "C166RegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
@@ -22,6 +23,27 @@
 namespace llvm {
 
 class C166Subtarget;
+
+namespace C166 {
+/// The coprocessor instruction a MAC32rr's $kind operand stands for.
+///
+/// Both places that take a MAC32rr apart - the expansion in
+/// C166InstrInfo.cpp and the loop pass that hoists the accumulator - have to
+/// agree about this, so it is written once.
+inline unsigned getMACOpcode(unsigned Kind) {
+  switch (Kind) {
+  case C166MAC::Signed:
+    return C166::CoMAC_rr;
+  case C166MAC::Unsigned:
+    return C166::CoMACu_rr;
+  case C166MAC::SignedNegate:
+    return C166::CoMACN_rr;
+  case C166MAC::UnsignedNegate:
+    return C166::CoMACuN_rr;
+  }
+  llvm_unreachable("Unknown C166MAC::Kind");
+}
+} // end namespace C166
 
 class C166InstrInfo : public C166GenInstrInfo {
   const C166RegisterInfo RI;

@@ -939,8 +939,12 @@ wrong, and why the simulator counts states.
 Multiply-accumulate
 -------------------
 
-"acc += a * b", with a and b signed words and acc 32 bits, is CoMAC on a part
-that has the coprocessor.  MUL is ten states and CoMAC is two, so this wins
+"acc += a * b", with a and b words and acc 32 bits, is CoMAC on a part that
+has the coprocessor.  "acc -= a * b" is CoMAC-, and an unsigned product picks
+CoMACu or CoMACu- instead - four instructions behind one pseudo, whose $kind
+operand says which, because they differ only in the middle instruction the
+expansion emits and share one accumulator lifetime for C166MACChain to reason
+about.  MUL is ten states and CoMAC is two, so this wins
 even with the accumulator loaded and stored around each one: eight states
 against the eighteen of a multiply, the two reads out of MDL and MDH, and the
 add and the add with carry.
@@ -951,14 +955,26 @@ and MDH, and unlike them saved by nothing - so a MAC left live across a call
 or an interrupt would have to be saved somewhere.  Holding it only between the
 CoLOAD and the CoSTOREs of a single accumulate means it never is.
 
-By the time the combine runs the widening multiply is an SMUL_LOHI and the 32
-bit add is the ADDC and ADDE pair that carries between the words, so what is
-matched is the ADDE.  Three things have to hold: the carry comes from the ADDC
-of the other half, both halves are the two results of the same multiply, and
-that multiply feeds nothing else - a product wanted twice would have to be
-computed twice.  An ADDE whose own carry is used is part of something wider
-than 32 bits and is left alone, because the MAC produces no carry to continue
-with.
+By the time the combine runs the widening multiply is an SMUL_LOHI or a
+UMUL_LOHI and the 32 bit add is the ADDC and ADDE pair that carries between the
+words, so what is matched is the ADDE.  Three things have to hold: the carry
+comes from the ADDC of the other half, both halves are the two results of the
+same multiply, and that multiply feeds nothing else - a product wanted twice
+would have to be computed twice.  An ADDE whose own carry is used is part of
+something wider than 32 bits and is left alone, because the MAC produces no
+carry to continue with.
+
+A subtraction is the same shape in SUBC and SUBE.  What differs is that
+subtraction does not commute, so there the product has to be the right hand
+operand of both halves rather than either one: "a * b - acc" is not a
+multiply-accumulate and is left as a multiply.
+
+Which of the two multiply nodes the type legalizer built is what says whether
+the product is signed.  There is no node for a mixed sign widening multiply and
+the legalizer does not make one either - its check for a signed pair wants
+seventeen sign bits and a value zero extended from a word has sixteen - so
+CoMACsu and CoMACus have no shape here to match and are left to hand written
+assembly.
 
 Measured on a dot product of 32 elements run eight times: 9584 states without
 and 7024 with, which is 1.36 times.  The difference is exactly ten states per
@@ -973,6 +989,12 @@ One shape it does not catch: an unrolled loop whose adds have been
 reassociated no longer has a multiply feeding the accumulator, so nothing
 matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
 what the unit's CoMUL is for, and is not done.
+
+The accumulator is loaded and stored the same way for all four.  CoLOAD sign
+extends into a forty bit accumulator and the two CoSTOREs truncate back to
+thirty two on the way out, and 2^32 divides 2^40, so what the top eight bits
+hold never reaches the answer - which is why an unsigned accumulate needs no
+unsigned load.
 
 Only the XC16x has the unit.  -mcpu=xc16x is what turns it on, and defines
 __C166_MAC__ so that code can ask.

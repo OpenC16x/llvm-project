@@ -47,12 +47,13 @@ def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
 
 // A 32 bit accumulator as two words and the two 16 bit operands of a signed
 // multiply, giving the accumulated 32 bit result as two words.
-def SDT_C166MAC          : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
+def SDT_C166MAC          : SDTypeProfile<2, 5, [SDTCisVT<0, i16>,
                                                 SDTCisVT<1, i16>,
                                                 SDTCisVT<2, i16>,
                                                 SDTCisVT<3, i16>,
                                                 SDTCisVT<4, i16>,
-                                                SDTCisVT<5, i16>]>;
+                                                SDTCisVT<5, i16>,
+                                                SDTCisVT<6, i16>]>;
 
 // A 32 bit dividend as a low and a high word and a 16 bit divisor, giving the
 // two words of the quotient and the one word remainder.
@@ -785,11 +786,17 @@ def UDIVREM32by16 : Pseudo<(outs GR16:$qlo, GR16:$qhi, GR16:$rem),
 // The multiply-accumulate coprocessor, which only some of the family has.
 def HasMAC : Predicate<"Subtarget->hasMAC()">;
 
-// "acc += a * b" on the MAC unit, where acc is 32 bits and a and b are signed
-// words.  MUL alone is ten states and CoMAC is two, so this wins even with
+// "acc += a * b" and "acc -= a * b" on the MAC unit, where acc is 32 bits and
+// a and b are words - signed for CoMAC and CoMAC-, unsigned for CoMACu and
+// CoMACu-.  MUL alone is ten states and CoMAC is two, so this wins even with
 // the accumulator loaded and stored around every one: eight states against
 // the eighteen of a multiply, the two reads out of MDL and MDH, and the add
 // and add-with-carry.
+//
+// All four are one pseudo because they differ only in the middle instruction
+// the expansion emits; $kind says which, and C166MAC::Kind names the values.
+// Keeping them together is not only brevity - C166MACChain has to reason about
+// the accumulator's lifetime, and there is one lifetime rather than four.
 //
 // The accumulator never leaves the pseudo, which is what keeps this simple:
 // it is one piece of state shared with everything else on the part, so holding
@@ -800,11 +807,12 @@ def HasMAC : Predicate<"Subtarget->hasMAC()">;
 // recognise.
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
 def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
-                     (ins GR16:$acclo, GR16:$acchi, GR16:$a, GR16:$b),
+                     (ins GR16:$acclo, GR16:$acchi, GR16:$a, GR16:$b,
+                      i16imm:$kind),
                      "#MAC32rr",
                      [(set GR16:$lo, GR16:$hi,
                            (C166mac GR16:$acclo, GR16:$acchi,
-                                    GR16:$a, GR16:$b))]>;
+                                    GR16:$a, GR16:$b, timm:$kind))]>;
 
 //===----------------------------------------------------------------------===//
 // Move Instructions
