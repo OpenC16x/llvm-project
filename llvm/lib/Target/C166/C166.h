@@ -162,6 +162,7 @@ inline ArrayRef<std::pair<const char *, CondCode>> getCondCodeAliases() {
 
 class C166TargetMachine;
 class FunctionPass;
+class ModulePass;
 class PassRegistry;
 
 FunctionPass *createC166ISelDag(C166TargetMachine &TM,
@@ -176,6 +177,11 @@ void initializeC166FoldComparePass(PassRegistry &);
 
 FunctionPass *createC166MACChainPass();
 void initializeC166MACChainPass(PassRegistry &);
+
+/// Take the thread-local marker off every global that has one.  This part runs
+/// one thread, so per-thread storage and static storage are the same storage.
+ModulePass *createC166LowerThreadLocalPass();
+void initializeC166LowerThreadLocalPass(PassRegistry &);
 
 void initializeC166AsmPrinterPass(PassRegistry &);
 void initializeC166DAGToDAGISelLegacyPass(PassRegistry &);

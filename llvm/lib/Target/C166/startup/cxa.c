@@ -377,3 +377,22 @@ __attribute__((weak)) void __cxa_pure_virtual(void) { __cxa_call_terminate(); }
  * destructor during unwinding, or out of a noexcept function.  It is the same
  * place everything else ends up. */
 __attribute__((weak)) void _ZSt9terminatev(void) { __cxa_call_terminate(); }
+
+/* Registering a destructor for a thread_local object with a non-trivial one.
+ * The compiler emits a call to this from the object's initialiser.
+ *
+ * It records nothing and returns success, which is the same answer exit gives
+ * here: this part stops rather than returning to anything, so there is no
+ * point at which a registered destructor would run.  A thread_local object is
+ * constructed on first use and then lives as long as the program does, which
+ * on a part with one thread is what a thread's lifetime is.
+ *
+ * Weak, so a program that does have somewhere to run these - one that resets
+ * rather than hanging, say - can keep its own table instead. */
+__attribute__((weak)) int __cxa_thread_atexit(void (*dtor)(void *), void *obj,
+                                              void *dso_handle) {
+  (void)dtor;
+  (void)obj;
+  (void)dso_handle;
+  return 0;
+}

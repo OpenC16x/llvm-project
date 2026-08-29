@@ -769,16 +769,30 @@ Known limitations / things to do
 * Only the X-peripheral registers the XC164CM's own two manuals name are
   modelled.  The CAN module has a manual of its own that this was not built
   from, so its registers have to be written as addresses.
-* thread_local is rejected: clang's C166 target sets TLSSupported to false, so
-  a program that uses it does not compile, and neither does
-  libc/src/stdlib/l64a.cpp.  On a part with one thread, per-thread storage and
-  static storage are the same storage, so accepting it and lowering it as
-  ordinary static data would be correct and is probably what this should do.
-  What has to be settled first is what an interrupt handler is: a handler is
-  not a thread and has to see the same object the interrupted code sees, which
-  rules out anything that gives one storage of its own.  Emulated TLS through
-  compiler-rt's __emutls_get_address would compile but costs a call per access,
-  which is the wrong trade here if the answer above is "the same storage".
+* thread_local means static here.  This part runs one thread, so per-thread
+  storage and static storage are the same storage, and C166LowerThreadLocal
+  takes the thread-local marker off every global that carries one before
+  anything looks at a section or an address.  From there the rest of the
+  compiler sees ordinary data: .data and .bss rather than .tdata and .tbss,
+  STT_OBJECT rather than STT_TLS, and a GlobalAddress instruction selection
+  already knows how to lower.  An access is byte for byte what a plain global
+  would have produced.
+
+  An interrupt handler is why that is the right answer rather than merely the
+  cheap one.  A handler is not a thread: it runs on the interrupted code's
+  stack, in the middle of that code, and has to see the same objects that code
+  sees.  Emulated thread-local storage would keep the per-thread shape and pay
+  a call to __emutls_get_address per access to arrive back at one object
+  anyway.  A handler and main sharing one thread_local is checked by running
+  it, not by reading the code.
+
+  What this does not do is make a second thread work.  There is no thread
+  library on this target and no thread pointer for an ABI to use, so a program
+  that schedules tasks of its own gets one object shared between them rather
+  than a diagnostic.  That is the same bargain errno already makes here.  A
+  thread_local with a constructor is built on first use and its destructor is
+  registered with __cxa_thread_atexit, which records nothing, so it never runs
+  - which is what exit already does with atexit on this part.
 * Two of the clang bugs fixed for this target were not this target's, and
   neither has been sent upstream.  A __atomic_compare_exchange whose failure
   order is not a constant built a switch whose cases were i32 over a value
@@ -789,17 +803,16 @@ Known limitations / things to do
   there, too narrow to hold a code point.  Setting it is one line.  It was left
   alone because changing another target's type mapping means changing its ABI,
   and there is no way to run that target's tests from here.
-* 104 of the 129 libc sources in string, stdlib, ctype and inttypes compile for
-  this target.  Of the 25 that do not, 23 are not about this target: seventeen
+* 105 of the 129 libc sources in string, stdlib, ctype and inttypes compile for
+  this target.  Of the 24 that do not, 23 are not about this target: seventeen
   fail on an #error inside libc itself, which declares locale_t,
   __atexithandler_t and mbstate_t unavailable in overlay mode; four assume a
   thirty two bit int or a four byte wchar_t and fail on MSP430 too; and two
   want internals that exist only in a full build, the startup object's app and
   a Mutex.  wchar_t is sixteen bits here, which is a choice rather than an
   oversight - it is what the existing C166 compilers use - and libc's wcrtomb
-  static_asserts that it is four.  That leaves two that are this target's:
-  mkstemp, which wants an fcntl.h for a part with no filesystem, and l64a,
-  which wants the thread_local above.
+  static_asserts that it is four.  That leaves one that is this target's:
+  mkstemp, which wants an fcntl.h for a part with no filesystem.
   llvm/lib/Target/C166/startup/README.txt says what the sysroot headers are and
   why almost everything in them is declared and not defined;
   llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
