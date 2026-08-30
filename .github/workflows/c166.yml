@@ -80,7 +80,7 @@ jobs:
       # time rather than building it, so asking ninja for it is an error.
       - name: Build
         run: |
-          ninja -C build clang lld llc llvm-mc llvm-objdump llvm-objcopy \
+          ninja -C build clang lld llc opt llvm-mc llvm-objdump llvm-objcopy \
             llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump llvm-symbolizer \
             llvm-ar llvm-ranlib llvm-size llvm-config c166-sim \
             FileCheck count not split-file
@@ -109,12 +109,8 @@ jobs:
       # build rather than producing something that only looks right.
       - name: Lit tests
         run: |
-          ./build/bin/llvm-lit -sv \
-            llvm/test/CodeGen/C166 \
-            llvm/test/MC/C166 \
-            llvm/test/DebugInfo/C166 \
-            llvm/test/tools/c166-sim \
-            llvm/test/Analysis/CostModel/C166
+          ./build/bin/llvm-lit -sv $(grep -v '^#' \
+            llvm/utils/C166Sim/differential/testdirs.txt)
 
       - name: lld tests for C166
         run: |
