@@ -706,6 +706,14 @@ Known limitations / things to do
   The 48 KByte a near address reaches is the same on both, because that limit
   is what the data page pointers cover rather than where the memory is.
 
+  vectors.ld serves both parts unchanged.  A C167 has no VECSEG and no
+  CPUCON1.VECSC, so its table is four bytes per vector at the bottom of segment
+  0 and it has no choice about it; c167.ld's rom region starts there, so
+  placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
+  c167-vectors.inc names that part's 56 interrupt sources, whose numbers run
+  from 10H to 47H with none missing and whose locations are four times their
+  numbers in every row - the same self-check the XC164CM's table passes.
+
   The C167's extension RAM is at 00'E000H, which the User's Manual gives - the
   data sheet the part table was read from has the size and not the address, and
   0800H of it is exactly the 2 KByte that sheet quotes.  Static data goes there

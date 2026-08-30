@@ -11,9 +11,12 @@ copied into a project and adjusted rather than installed.
   c167-crt0.S          the same for a C167, which has no PLL to program and
                        no RAM outside the data page pointers
   c167.ld              a linker script for a C167
-  vectors.ld           the interrupt vector table, for a program with handlers
+  vectors.ld           the interrupt vector table, for a program with handlers;
+                       it serves both parts, since a C167 has the layout an
+                       XC164CM comes up with and no registers to change it
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
+  c167-vectors.inc     the same for a C167
 
 Which of each pair a program gets is the core's, and -mcpu= or -mmcu= decides:
 the driver puts c167-crt0.o first for the c167 core and crt0.o for the rest, in

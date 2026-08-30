@@ -26,6 +26,12 @@
  * table lives in.  A program that writes either of them wants a different
  * script from this one.
  *
+ * It is also the layout a C167 has, which has no choice about it: that part
+ * has neither of those registers and its table is four bytes per vector at the
+ * bottom of segment 0.  Since c167.ld's rom region starts there, placing a
+ * slot at ORIGIN(rom) + 4n comes out in the same place, so this file serves
+ * both parts unchanged.
+ *
  * The table goes at the start of the rom region, because that is the segment
  * VECSEG names: on an XC164CM the Flash is at C0'0000H and VECSEG comes out of
  * reset holding C0H, so the reset vector is the first double word of Flash.
