@@ -122,6 +122,28 @@ static DecodeStatus decodeBitAddrOperand(MCInst &MI, uint64_t Imm,
   return MCDisassembler::Success;
 }
 
+/// A short address, as the register the part being disassembled for has there.
+///
+/// The register file holds every derivative's map at once and the same short
+/// address names different registers on different parts, so the subtarget is
+/// what picks; without it a listing for one part would be read as another.
+/// Only the registers this backend models can be named, so the rest of the
+/// space does not decode.
+static DecodeStatus decodeSFRShortAddress(MCInst &MI, uint64_t Imm,
+                                          const MCDisassembler *Decoder) {
+  const MCRegisterClass &SFRs = getC166MCRegisterClass(C166::SFRRegClassID);
+  const MCRegisterInfo *MRI = Decoder->getContext().getRegisterInfo();
+  for (MCPhysReg Reg : SFRs) {
+    if (MRI->getEncodingValue(Reg) != Imm)
+      continue;
+    if (!C166::isSFRInSelectedMap(Reg, Decoder->getSubtargetInfo()))
+      continue;
+    MI.addOperand(MCOperand::createReg(Reg));
+    return MCDisassembler::Success;
+  }
+  return MCDisassembler::Fail;
+}
+
 /// The 8 bit "reg" field of PUSH and POP: F0H + n is a general purpose
 /// register, anything else is the short address of a special function
 /// register.  Only the special function registers the backend models can be
@@ -140,15 +162,7 @@ static DecodeStatus decodeReg8Operand(MCInst &MI, uint64_t Imm,
   if (Imm >= 0xF0)
     return DecodeGR16RegisterClass(MI, Imm - 0xF0, Address, Decoder);
 
-  const MCRegisterClass &SFRs = getC166MCRegisterClass(C166::SFRRegClassID);
-  const MCRegisterInfo *MRI = Decoder->getContext().getRegisterInfo();
-  for (MCPhysReg Reg : SFRs) {
-    if (MRI->getEncodingValue(Reg) == Imm) {
-      MI.addOperand(MCOperand::createReg(Reg));
-      return MCDisassembler::Success;
-    }
-  }
-  return MCDisassembler::Fail;
+  return decodeSFRShortAddress(MI, Imm, Decoder);
 }
 
 /// The same field in a byte instruction, where F0H + n is a byte register.
@@ -158,15 +172,7 @@ static DecodeStatus decodeReg8bOperand(MCInst &MI, uint64_t Imm,
   if (Imm >= 0xF0)
     return DecodeGR8RegisterClass(MI, Imm - 0xF0, Address, Decoder);
 
-  const MCRegisterClass &SFRs = getC166MCRegisterClass(C166::SFRRegClassID);
-  const MCRegisterInfo *MRI = Decoder->getContext().getRegisterInfo();
-  for (MCPhysReg Reg : SFRs) {
-    if (MRI->getEncodingValue(Reg) == Imm) {
-      MI.addOperand(MCOperand::createReg(Reg));
-      return MCDisassembler::Success;
-    }
-  }
-  return MCDisassembler::Fail;
+  return decodeSFRShortAddress(MI, Imm, Decoder);
 }
 
 /// A MAC unit pointer comes back as the register and its step, which is how

@@ -32,6 +32,22 @@ def FeatureMAC
     : SubtargetFeature<"mac", "HasMAC", "true",
                        "Enable the C166S v2 multiply-accumulate unit">;
 
+// Which special function registers exist, and under which names.  The short
+// address a register carries is its encoding, and the same short address names
+// different registers on different derivatives - so this is a property of the
+// part rather than of the family and has to be chosen.  What every map here
+// agrees about is always available; these two say what to add to it.
+//
+// A part whose map has not been read is better served by the shared set alone
+// than by another part's, so neither of these is a default.
+def FeatureSFRXC164
+    : SubtargetFeature<"sfr-xc164", "HasSFRXC164", "true",
+                       "The XC164CM's special function registers">;
+
+def FeatureSFRC167
+    : SubtargetFeature<"sfr-c167", "HasSFRC167", "true",
+                       "The C167's special function registers">;
+
 //===----------------------------------------------------------------------===//
 // C166 supported processors
 //===----------------------------------------------------------------------===//
@@ -39,6 +55,12 @@ def FeatureMAC
 class Proc<string Name, list<SubtargetFeature> Features>
     : Processor<Name, NoItineraries, Features>;
 
+// Only two of these name a peripheral map, because only two have been read.
+// "st10" is a C167 derivative and very likely shares its map, but likely is
+// not the standard the rest of this file is held to, so it gets the shared set
+// until somebody checks an ST10 manual.  "c166" is the first generation, whose
+// peripherals are its own.
+//
 // "generic" is the second generation core rather than the oldest one the
 // family ever had.  Every part still sold, every part -mmcu= knows, and the
 // linker script and startup code in this tree are all second generation; a
@@ -47,9 +69,9 @@ class Proc<string Name, list<SubtargetFeature> Features>
 // is what naming a part that old ought to mean.
 def : Proc<"generic", [FeatureExtInstr]>;
 def : Proc<"c166",    []>;
-def : Proc<"c167",    [FeatureExtInstr]>;
+def : Proc<"c167",    [FeatureExtInstr, FeatureSFRC167]>;
 def : Proc<"st10",    [FeatureExtInstr]>;
-def : Proc<"xc16x",   [FeatureExtInstr, FeatureMAC]>;
+def : Proc<"xc16x",   [FeatureExtInstr, FeatureMAC, FeatureSFRXC164]>;
 
 //===----------------------------------------------------------------------===//
 // Register File Description

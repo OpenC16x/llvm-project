@@ -336,6 +336,36 @@ class C166AsmParser : public MCTargetAsmParser {
   bool parseBitAddr(OperandVector &Operands);
   bool parseBitOffValue(int64_t &Off, StringRef &BitPosText);
 
+  /// MatchRegisterName, less the registers this part does not have.
+  ///
+  /// The register file holds every derivative's special function register map
+  /// at once, because the same short address names different registers on
+  /// different parts.  Naming one from another part's map has to be refused
+  /// rather than encoded: the bytes would assemble, and would mean something
+  /// else on the part they were assembled for.
+  MCRegister matchRegisterInMap(StringRef Name) const {
+    MCRegister Reg = MatchRegisterName(Name.lower());
+    if (Reg && !C166::isSFRInSelectedMap(Reg, getSTI()))
+      return MCRegister();
+    return Reg;
+  }
+
+  /// Refuse a name the register file knows but this part does not have.
+  ///
+  /// Every path that turns a name into a short address goes through here, and
+  /// there are three of them - a register operand, a special function register
+  /// reached by address, and a bit address.  Saying which is which is better
+  /// than the operand diagnostic that would otherwise come out, and a name
+  /// reaching none of them is not an error here at all, so this returns an
+  /// empty message for anything it does not recognise.
+  std::string reportRegisterNotInMap(SMLoc S, StringRef Name) const {
+    if (!MatchRegisterName(Name.lower()) || matchRegisterInMap(Name))
+      return std::string();
+    return ("'" + Name.lower() +
+            "' is not a register on the selected processor; it is another "
+            "derivative's special function register");
+  }
+
   bool parseRegister(MCRegister &Reg, SMLoc &StartLoc, SMLoc &EndLoc) override;
   ParseStatus tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
                                SMLoc &EndLoc) override;
@@ -588,6 +618,9 @@ bool C166AsmParser::parseBitOffValue(int64_t &Off, StringRef &BitPosText) {
       BitPosText = Name.drop_front(Dot + 1);
     }
 
+    if (std::string Msg = reportRegisterNotInMap(S, Word); !Msg.empty())
+      return Error(S, Msg);
+
     Off = matchBitAddressableWord(*getContext().getRegisterInfo(), Word);
     if (Off < 0)
       return Error(S, "not a bit-addressable word");
@@ -711,6 +744,12 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
       return false;
     }
 
+    // A name the register file knows but this part does not have is an error
+    // rather than a symbol.  It cannot become one anyway - every register name
+    // is reserved, whichever map it is in.
+    if (std::string Msg = reportRegisterNotInMap(S, Name); !Msg.empty())
+      return Error(S, Msg);
+
     if (int64_t Addr =
             matchSpecialFunctionRegister(*getContext().getRegisterInfo(), Name);
         Addr >= 0) {
@@ -719,14 +758,14 @@ bool C166AsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
       // The address came from the register file, so there is a register behind
       // every name that gets here; the fallback stands in case one is ever
       // known by address alone.
-      MCRegister Reg = MatchRegisterName(Name.lower());
+      MCRegister Reg = matchRegisterInMap(Name);
       const MCExpr *AddrExpr = MCConstantExpr::create(Addr, getContext());
       Operands.push_back(Reg ? C166Operand::createSFR(Reg, AddrExpr, S, E)
                              : C166Operand::createAddr(AddrExpr, S, E));
       return false;
     }
 
-    if (MCRegister Reg = MatchRegisterName(Name.lower())) {
+    if (MCRegister Reg = matchRegisterInMap(Name)) {
       SMLoc E = getLexer().getLoc();
       Lex();
       Operands.push_back(C166Operand::createReg(Reg, S, E));
@@ -790,7 +829,7 @@ ParseStatus C166AsmParser::tryParseRegister(MCRegister &Reg, SMLoc &StartLoc,
     return ParseStatus::NoMatch;
 
   StringRef Name = getLexer().getTok().getIdentifier();
-  Reg = MatchRegisterName(Name.lower());
+  Reg = matchRegisterInMap(Name);
   if (!Reg)
     return ParseStatus::NoMatch;
 

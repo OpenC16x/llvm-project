@@ -136,6 +136,22 @@ static MCAsmInfo *createC166MCAsmInfo(const MCRegisterInfo &MRI,
   return MAI;
 }
 
+bool C166::isSFRInSelectedMap(MCRegister Reg, const MCSubtargetInfo &STI) {
+  if (getC166MCRegisterClass(C166::SFRXC164RegClassID).contains(Reg))
+    return STI.hasFeature(C166::FeatureSFRXC164);
+  if (getC166MCRegisterClass(C166::SFRC167RegClassID).contains(Reg))
+    return STI.hasFeature(C166::FeatureSFRC167);
+  // The extended and X-peripheral registers are the XC164CM's entire, so they
+  // go the same way as its own short-address ones.  They are reachable by
+  // address rather than through a "reg" field, which makes them harmless to
+  // encode and not at all harmless to name: the address would be written, and
+  // would mean something else on a part that has something else there.
+  if (getC166MCRegisterClass(C166::ESFRRegClassID).contains(Reg) ||
+      getC166MCRegisterClass(C166::XSFRRegClassID).contains(Reg))
+    return STI.hasFeature(C166::FeatureSFRXC164);
+  return true;
+}
+
 static MCSubtargetInfo *createC166MCSubtargetInfo(const Triple &TT,
                                                   StringRef CPU, StringRef FS) {
   // The same default the code generator picks, for the same reason: "c166" is
@@ -187,9 +203,11 @@ int64_t C166::getSFRAddress(const MCRegisterInfo &MRI, StringRef Name) {
   return -1;
 }
 
-StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr) {
+StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr,
+                           const MCSubtargetInfo *STI) {
   for (MCPhysReg Reg : MRI.getRegClass(C166::SFRRegClassID))
-    if (getSFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)
+    if (getSFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr &&
+        (!STI || isSFRInSelectedMap(Reg, *STI)))
       return C166InstPrinter::getRegisterName(Reg);
   for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
     if (getESFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)

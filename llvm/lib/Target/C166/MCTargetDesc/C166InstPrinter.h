@@ -24,6 +24,12 @@ public:
       : MCInstPrinter(MAI, MII, MRI) {}
 
   void printRegName(raw_ostream &O, MCRegister Reg) override;
+
+  /// The part being printed for, kept from printInst so that the operand
+  /// helpers below can name a special function register the way that part
+  /// has it.  The same address is two different registers on two derivatives,
+  /// so printing one without knowing which part would be a guess.
+  const MCSubtargetInfo *STI = nullptr;
   void printInst(const MCInst *MI, uint64_t Address, StringRef Annot,
                  const MCSubtargetInfo &STI, raw_ostream &O) override;
 

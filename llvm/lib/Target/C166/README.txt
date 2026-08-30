@@ -763,10 +763,41 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
-* The SFR map is the XC164CM's, and only that part's: the same short address
-  names different registers on different derivatives, so nothing here is right
-  for another one and nothing selects between them.  C166RegisterInfo.td says
-  where the XC164CM departs from the older C167 layout.
+* Two SFR maps are modelled and the subtarget picks between them, because the
+  same short address names different registers on different derivatives.  What
+  the two agree about - 91 names at the same short address, which is the
+  classic C166 layout of timers, A/D converter, serial channels, peripheral
+  event controller, interrupt control registers and ports 1, 3 and 5 on top of
+  the CPU core - is always available.  What they do not is FeatureSFRXC164 and
+  FeatureSFRC167, which -mcpu=xc16x and -mcpu=c167 select.
+
+  They disagree about exactly seven short addresses, and the disagreement is
+  the external bus: the XC164CM has none, so it put CPUCON1, CPUCON2, SPSEG,
+  VECSEG and port 9 where a C167 has ADDRSEL1, ADDRSEL2, BUSCON0, SYSCON and
+  BUSCON2 to 4.  The C167 also has CAPCOM1, the PWM unit and ports 0, 2, 4, 6,
+  7 and 8, which the XC164CM does not have at all.
+
+  The encodings were never part-specific; only the names are.  So this is a
+  naming layer over one instruction set rather than a second instruction set,
+  and it applies in three places: the assembler refuses a name from another
+  part's map, the disassembler decodes a short address to the register this
+  part has there, and the printer names an address the same way.  The same
+  bytes therefore read back as "mov r2, cpucon1" for one part and
+  "mov r2, addrsel1" for another, which is what they mean.
+
+  The C167 map is the C167CS's and is named for that part rather than for the
+  family, for the reason the other one is the XC164CM's.  Its addresses are
+  from the Keil C167CS device header, which cites the Siemens C167CS User
+  Manual V1.0 of 1999-05.  The check that both were read correctly is that the
+  91 names the two maps share agree on the short address of every single one.
+
+  Two things this does not do.  -mcpu=st10 gets the shared set alone: an ST10
+  is a C167 derivative and very likely has its map, but very likely is not the
+  standard the rest of this is held to, so it waits for somebody with an ST10
+  manual.  And the extended and X-peripheral registers are the XC164CM's
+  entire, gated with the rest of its map rather than split into a shared part
+  and a per-derivative one, because there is no second ESFR map here to split
+  them against.
 * An extended special function register is reachable by address but not
   through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
   Getting at one that way needs an EXTR, and once encoded it is the same bytes
