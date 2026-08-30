@@ -43,6 +43,21 @@ inline unsigned getMACOpcode(unsigned Kind) {
   }
   llvm_unreachable("Unknown C166MAC::Kind");
 }
+
+/// The rounding multiply a MULRND32rr's $kind operand stands for.
+///
+/// Only the two plain signs: the rounding idiom this comes from has no
+/// accumulator to take a product away from, so the negating kinds never reach
+/// here.
+inline unsigned getMULRNDOpcode(unsigned Kind) {
+  switch (Kind) {
+  case C166MAC::Signed:
+    return C166::CoMUL_rr_rnd;
+  case C166MAC::Unsigned:
+    return C166::CoMULu_rr_rnd;
+  }
+  llvm_unreachable("Unexpected C166MAC::Kind for a rounding multiply");
+}
 } // end namespace C166
 
 class C166InstrInfo : public C166GenInstrInfo {

@@ -991,6 +991,35 @@ reassociated no longer has a multiply feeding the accumulator, so nothing
 matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
 what the unit's CoMUL is for, and is not done.
 
+Rounding a fixed point product
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+"(a * b + 0x8000) >> 16" is a fixed point product rounded to its high word,
+and it is one instruction: the rounding forms add 00 0000 8000H to the
+accumulator and clear MAL, so MAH alone is the answer.  Two instructions
+against the six the accumulate onto a materialised constant used to be.
+
+The shape reaching the combiner is an accumulate whose accumulator is the
+constant pair 0x8000 and 0, with the low word of the sum thrown away, so it is
+recognised where the rest of the multiply-accumulate matching already happens
+rather than in a pass of its own.
+
+It is exactly the C answer and not merely close, because the addend cannot
+carry out of thirty two bits: a signed 16 by 16 product reaches 2^30 and an
+unsigned one 2^32 - 2^17, so neither wraps once 0x8000 is added.
+
+That argument is also what confines this to a bare product.  With a real
+accumulator in play the forty bit accumulator can hold a sum that a thirty two
+bit one would have wrapped, and reading MAH with no CoSTORE of MAL to truncate
+through would then differ from what the program asked for - so an accumulating
+round is left alone, and there is a test saying so.  The same goes for a low
+word that is wanted: the instruction clears MAL, so it can only stand in where
+that word is thrown away.
+
+The simulator implements the two rounding multiplies and still refuses the
+rounding accumulates, which is what it does with anything it does not model:
+it stops and names the instruction rather than guessing.
+
 The accumulator is loaded and stored the same way for all four.  CoLOAD sign
 extends into a forty bit accumulator and the two CoSTOREs truncate back to
 thirty two on the way out, and 2^32 divides 2^40, so what the top eight bits

@@ -738,6 +738,33 @@ static SDValue combineMAC(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
 
   SelectionDAG &DAG = DCI.DAG;
   SDLoc DL(N);
+
+  // What looks like an accumulate onto the constant 00 0000 8000H, with the
+  // low word of the sum thrown away, is "(a * b + 0x8000) >> 16" - rounding a
+  // fixed point product to its high word.  The unit does that in one
+  // instruction: the rounding forms add 00 0000 8000H and clear MAL, leaving
+  // the answer in MAH alone.  Six instructions become two.
+  //
+  // It is exactly the C answer and not merely close, because the addend
+  // cannot carry out of thirty two bits: a signed 16 by 16 product reaches
+  // 2^30 and an unsigned one 2^32 - 2^17, so neither wraps once 0x8000 is
+  // added.  That argument is what confines this to a bare product.  With a
+  // real accumulator in play the forty bit accumulator can hold a sum that a
+  // thirty two bit one would have wrapped, and reading MAH alone - with no
+  // CoSTORE of MAL to truncate through - would then differ from what the
+  // program asked for.  So an accumulating round is left alone.
+  auto isConstant = [](SDValue V, uint64_t Want) {
+    auto *C = dyn_cast<ConstantSDNode>(V);
+    return C && C->getAPIntValue() == Want;
+  };
+  if (!Negate && isConstant(AccLo, 0x8000) && isConstant(AccHi, 0) &&
+      !AddC->hasAnyUseOfValue(0)) {
+    SDValue Rnd = DAG.getNode(
+        C166ISD::MUL_RND, DL, MVT::i16, Mul->getOperand(0), Mul->getOperand(1),
+        DAG.getTargetConstant(Kind, DL, MVT::i16));
+    DAG.ReplaceAllUsesOfValueWith(SDValue(N, 0), Rnd);
+    return SDValue(N, 0);
+  }
   SDValue MAC = DAG.getNode(C166ISD::MAC, DL,
                             DAG.getVTList(MVT::i16, MVT::i16), AccLo, AccHi,
                             Mul->getOperand(0), Mul->getOperand(1),
