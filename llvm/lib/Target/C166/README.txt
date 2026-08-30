@@ -706,11 +706,21 @@ Known limitations / things to do
   The 48 KByte a near address reaches is the same on both, because that limit
   is what the data page pointers cover rather than where the memory is.
 
-  The C167's extension RAM is deliberately not a region in c167.ld.  Its size
-  is in the part table, from the data sheet; where it is mapped is in the User's
-  Manual, which is not what the table was read from, and a region at a guessed
-  address would let a program link and then write somewhere else.  A board
-  script that knows the address can add it.
+  The C167's extension RAM is at 00'E000H, which the User's Manual gives - the
+  data sheet the part table was read from has the size and not the address, and
+  0800H of it is exactly the 2 KByte that sheet quotes.  Static data goes there
+  and the two stacks keep the internal RAM, which is the same split c166.ld
+  makes between the data SRAM and the dual-port RAM; a part with no extension
+  RAM puts its static data at the bottom of the internal RAM instead, with the
+  ABI stack coming down towards it.
+
+  It is an X-peripheral, so c167-crt0.S sets SYSCON.XPEN before writing
+  anything into it and before EINIT locks that register.  Whether to is the
+  linker script's answer rather than the startup file's, because it depends on
+  there being an extension RAM at all: the script defines __c166_enable_xper
+  and the startup branches on it.  SYSCON is bit addressable, so it is one
+  BSET and not a read-modify-write of a register whose other bits the reset
+  pins set.
 
 * The near addressing model is the XC164CM's: a near reference relocates as
   SOF16, the offset within a segment, and the data page pointers decide which

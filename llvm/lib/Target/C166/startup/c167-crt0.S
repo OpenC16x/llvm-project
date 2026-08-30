@@ -16,7 +16,11 @@
 //
 //   - There is no RAM outside the data page pointers, so nothing has to be
 //     copied or zeroed with an EXTS.  What a C167 has past the ROM is the
-//     internal RAM at 00'F600H and the extension RAM, and both are near.
+//     internal RAM at 00'F600H and the extension RAM at 00'E000H, and both are
+//     page 3, which DPP3 reaches.
+//
+// What it adds is one BSET: the extension RAM is an X-peripheral and has to be
+// enabled before anything is written to it.
 //
 // The addresses this file uses all come from the linker script.
 //
@@ -60,6 +64,25 @@ _start:
         mov     dpp1, #__dpp1_page
         mov     dpp2, #__dpp2_page
         mov     dpp3, #__dpp3_page
+
+        // The extension RAM is an X-peripheral, and SYSCON.XPEN is what turns
+        // those on: XPERCON comes up selecting the 2 KByte XRAM, and this is
+        // the bit that makes the selection take effect.  It has to happen
+        // before the copy below, which writes static data into that RAM, and
+        // it has to happen before EINIT, which locks SYSCON.
+        //
+        // SYSCON is at FF12H and so is bit addressable, which is why this is
+        // one BSET rather than a read-modify-write of a register whose other
+        // bits the reset pins set and nothing here should disturb.
+        //
+        // The linker script says whether to: there is nothing to enable on a
+        // part with no extension RAM, and a board that knows its own answer
+        // defines __c166_enable_xper itself.
+        mov     r1, #__c166_enable_xper
+        cmp     r1, #0
+        jmpa    cc_z, .Lno_xper
+        bset    syscon.2
+.Lno_xper:
 
         // CP is left where reset put it.  It says where R0 to R15 are, so an
         // instruction that moves it changes the meaning of every register

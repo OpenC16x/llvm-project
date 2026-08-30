@@ -31,6 +31,20 @@ static const llvm::C166::Part *getPart(const ArgList &Args) {
   return A ? llvm::C166::getPart(A->getValue()) : nullptr;
 }
 
+/// The core being built for, which is what picks the startup file.
+///
+/// -mcpu= names it outright and a part implies it, in that order, which is the
+/// order getCPUName resolves them in - the startup file has to agree with what
+/// the compiler was told, and a program built for a core with no part named is
+/// still built for that core.
+static StringRef getCore(const ArgList &Args) {
+  if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
+    return A->getValue();
+  if (const llvm::C166::Part *P = getPart(Args))
+    return P->Core;
+  return StringRef();
+}
+
 C166ToolChain::C166ToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
     : Generic_ELF(D, Triple, Args) {
@@ -201,8 +215,8 @@ void c166::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // same one with branches in it.
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_r,
                    options::OPT_nostartfiles)) {
-    const llvm::C166::Part *P = getPart(Args);
-    const char *Crt0 = P && P->Core == "c167" ? "c167-crt0.o" : "crt0.o";
+    const char *Crt0 =
+        getCore(Args) == "c167" ? "c167-crt0.o" : "crt0.o";
     CmdArgs.push_back(Args.MakeArgString(TC.GetFilePath(Crt0)));
   }
 

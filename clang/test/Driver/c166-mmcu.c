@@ -90,3 +90,9 @@ int main(void) { return 0; }
 // RUN:   | FileCheck %s --check-prefix=CM8FCRT
 // CM8FCRT: "{{[^"]*}}crt0.o"
 // CM8FCRT-NOT: c167-crt0.o
+
+// The startup file follows the core, so naming the core alone is enough - a
+// program built for a C167 with no part named is still built for a C167.
+// RUN: %clang -### --target=c166 -mcpu=c167 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=C167CPU
+// C167CPU: "c167-crt0.o"

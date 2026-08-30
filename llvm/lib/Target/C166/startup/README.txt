@@ -15,8 +15,9 @@ copied into a project and adjusted rather than installed.
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
 
-Which of each pair a program gets is the part's, and -mmcu= decides: the driver
-puts c167-crt0.o first for a part whose core is c167 and crt0.o for the rest.
+Which of each pair a program gets is the core's, and -mcpu= or -mmcu= decides:
+the driver puts c167-crt0.o first for the c167 core and crt0.o for the rest, in
+the order those two options already resolve the core in.
 The linker script is passed with -T and is not chosen for you, because the
 memory map is the board's rather than the part's; the two here are starting
 points for the two parts they name.

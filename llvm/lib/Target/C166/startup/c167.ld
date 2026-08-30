@@ -3,8 +3,8 @@
  * The memory map is that part's rather than an XC164CM's, which is what makes
  * this a second script instead of a switch inside c166.ld: the program memory
  * is at the bottom of segment 0 instead of in a segment of its own, the RAM is
- * the internal RAM at 00'F600H and nothing else, and there is no PLL to
- * program.  See README.txt in this directory.
+ * the extension RAM at 00'E000H and the internal RAM at 00'F600H, and there is
+ * no PLL to program.  See README.txt in this directory.
  *
  * The lower 32 KByte of the on-chip ROM can be mapped to segment 0 or segment
  * 1, which SYSCON.ROMS1 chooses.  This assumes segment 0, its reset value, so
@@ -30,9 +30,8 @@ ENTRY(__reset_vector)
  * layout below is the one the hardware already assumes: the system stack grows
  * down from FC00H into FA00H, and R0 to R15 sit at FC00H just above it.
  *
- * That leaves 00'F600H to 00'F9FFH for static data and the ABI stack, which on
- * a C167CR is all the RAM there is once the system stack has its KByte.  It is
- * not much, and it is what the part has. */
+ * That leaves 00'F600H to 00'F9FFH for the ABI stack, with the static data in
+ * the extension RAM below. */
 __system_stack_top   = 0xFC00;
 __system_stack_limit = 0xFA00;
 __register_bank      = 0xFC00;
@@ -41,14 +40,19 @@ __register_bank      = 0xFC00;
  * C167CR-16RM has, so that a script used on its own still links for a part
  * this file was written against.
  *
- * The extension RAM is deliberately not a region here.  Its size is in the
- * part table and reaches this script as __c166_xram_length, but where it is
- * mapped is in the C167 User's Manual rather than in the data sheet the table
- * was read from, and a region placed at a guessed address is worse than no
- * region at all: a program would link and then write somewhere else.  A board
- * script that knows the address can add it. */
+ * The extension RAM is at 00'E000H, which the User's Manual gives; the data
+ * sheet the part table was read from has its size and not its address. */
 __c166_rom_length    = DEFINED(__c166_rom_length)    ? __c166_rom_length    : 128K;
 __c166_iram_length   = DEFINED(__c166_iram_length)   ? __c166_iram_length   : 2K;
+__c166_xram_length   = DEFINED(__c166_xram_length)   ? __c166_xram_length   : 2K;
+
+/* Whether crt0 sets SYSCON.XPEN, which is what turns the X-peripherals on and
+ * with them the XRAM.  The C167CS manual documents that bit as the enable and
+ * says XPERCON comes up selecting the 2 KByte XRAM, so setting it is what
+ * makes the region below exist.  A board that knows its part needs otherwise
+ * defines this as 0; there is nothing to enable where there is no XRAM. */
+__c166_enable_xper = DEFINED(__c166_enable_xper) ? __c166_enable_xper
+                                                 : (__c166_xram_length ? 1 : 0);
 
 /* How much of the program memory a near address reaches, and what is left.
  * This is the same 48 KByte the XC164CM script has, and for the same reason:
@@ -75,10 +79,31 @@ MEMORY
    * object may not straddle the boundary, and a near branch cannot cross it. */
   farrom2 (rx) : ORIGIN = 0x00010000, LENGTH = __c166_rom_far2
 
-  /* The internal RAM under the system stack.  Static data and the ABI stack
-   * share it, growing towards each other from either end. */
+  /* Static data goes in the extension RAM at 00'E000H.  It is page 3 like the
+   * internal RAM, so DPP3 reaches it and a near address names it directly.
+   *
+   * Three things the manual says about it shape what goes here.  It permits 16
+   * bit accesses at full speed, so it is not a slow memory to put data in; it
+   * cannot hold the system stack or a register bank, which is why those stay
+   * where reset put them; and it is not bit addressable, which costs nothing
+   * because the bit addressable window is FD00H to FDFFH and static data was
+   * never in it.
+   *
+   * A part with no extension RAM puts its static data at the bottom of the
+   * internal RAM instead, with the ABI stack coming down towards it.  That is
+   * this region becoming the other one rather than a second set of output
+   * sections, which is how c166.ld handles the same choice. */
+  xram (rw) : ORIGIN = __c166_xram_length ? 0x0000E000 : 0x0000F600,
+              LENGTH = __c166_xram_length
+                         ? __c166_xram_length
+                         : __system_stack_limit - 0x0000F600
+
+  /* The internal RAM under the system stack, which the ABI stack has to itself
+   * on a part with an extension RAM and which is empty on one without, since
+   * the static data is already there. */
   iram (rw) : ORIGIN = 0x0000F600,
-              LENGTH = __system_stack_limit - 0x0000F600
+              LENGTH = __c166_xram_length
+                         ? __system_stack_limit - 0x0000F600 : 0
 }
 
 /* The pages the data page pointers select.  With the program memory in segment
@@ -107,6 +132,9 @@ ASSERT(__system_stack_top <= 0x0000F600 + __c166_iram_length,
        "the system stack is above the end of this part's internal RAM")
 ASSERT(__system_stack_limit >= 0x0000F600,
        "the system stack starts below the internal RAM")
+ASSERT(LENGTH(xram) == 0 ||
+       (ORIGIN(xram) >> 16) == ((ORIGIN(xram) + LENGTH(xram) - 1) >> 16),
+       "the xram region crosses a segment boundary")
 
 SECTIONS
 {
@@ -165,7 +193,7 @@ SECTIONS
     *(.data .data.*)
     . = ALIGN(2);
     __data_end = .;
-  } > iram AT > rom
+  } > xram AT > rom
   __data_load = LOADADDR(.data);
 
   .bss (NOLOAD) : ALIGN(2) {
@@ -174,7 +202,7 @@ SECTIONS
     *(COMMON)
     . = ALIGN(2);
     __bss_end = .;
-  } > iram
+  } > xram
 
   /* This part has no RAM that a near address cannot reach, so there is nothing
    * for __far data to live in and these are empty rather than absent: the
