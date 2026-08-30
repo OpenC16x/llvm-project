@@ -121,6 +121,16 @@ enum class Op {
 #undef X
 };
 
+/// Which part is being simulated, which the decoder needs because the same
+/// short address names different special function registers on different
+/// derivatives - so "mov cpucon1, #x" and "mov addrsel1, #x" are the same
+/// bytes and only the part says which was meant.
+///
+/// The default is the XC164CM, because that is the part this simulator models:
+/// CPUCON1's vector spacing, VECSEG, the PLL and the coprocessor are all its.
+/// A program for another derivative says so with --mcpu.
+static std::string SimCPU = "xc16x";
+
 /// Everything the decoder needs, set up once.
 struct Decoder {
   std::unique_ptr<const MCRegisterInfo> MRI;
@@ -146,7 +156,7 @@ struct Decoder {
     MCTargetOptions Options;
     MAI.reset(T->createMCAsmInfo(*MRI, TT, Options));
     MII.reset(T->createMCInstrInfo());
-    STI.reset(T->createMCSubtargetInfo(TT, "", ""));
+    STI.reset(T->createMCSubtargetInfo(TT, SimCPU, ""));
     Ctx = std::make_unique<MCContext>(TT, *MAI, *MRI, *STI);
     DisAsm.reset(T->createMCDisassembler(*STI, *Ctx));
     Printer.reset(T->createMCInstPrinter(TT, 0, *MAI, *MII, *MRI));
@@ -175,6 +185,8 @@ Decoder &decoder() {
 }
 
 } // namespace
+
+void c166sim::setSimCPU(StringRef CPU) { SimCPU = CPU.str(); }
 
 // ---------------------------------------------------------------------------
 // Flag helpers.  Each one names the manual's wording for the flag it sets.

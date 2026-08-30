@@ -1,8 +1,12 @@
 # REQUIRES: c166-registered-target
-# RUN: llvm-mc -filetype=obj -triple=c166 %s -o %t.o
+# RUN: llvm-mc -filetype=obj -triple=c166 -mcpu=xc16x %s -o %t.o
 # RUN: llvm-objcopy -O binary %t.o %t.bin
 # RUN: %c166_sim --binary --dump-state %t.bin 2>&1 | FileCheck %s
 
+## CPUCON1 is the XC164CM's, so this is assembled for that part.  A register
+## name from one derivative's map is refused for another; saying which part a
+## file is for is how it gets past that, the same way crt0.S does.
+##
 ## How far apart the vector table's entries are is not fixed on this core:
 ## CPUCON1's VECSC field scales it, so trap 2 is at 8 with the reset value of
 ## that field and at 16 once it says four words instead of two.  Both handlers

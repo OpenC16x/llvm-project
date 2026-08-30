@@ -24,6 +24,15 @@
 
 namespace c166sim {
 
+/// Name the part being simulated, before anything is decoded.
+///
+/// The decoder needs it: the same short address is a different special function
+/// register on different derivatives, so a listing read for the wrong one names
+/// the wrong registers and, where a name is gated, does not decode at all.
+/// Defaults to the XC164CM, which is the part this simulator models - CPUCON1's
+/// vector spacing, VECSEG, the PLL and the coprocessor are all its.
+void setSimCPU(llvm::StringRef CPU);
+
 /// The whole bus is 24 bits: 256 segments of 64 KByte.
 static constexpr uint32_t AddressSpaceSize = 1u << 24;
 static constexpr uint32_t AddressMask = AddressSpaceSize - 1;
