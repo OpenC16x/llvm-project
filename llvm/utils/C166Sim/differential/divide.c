@@ -57,6 +57,20 @@ static const u16 divisors[] = {
 };
 #define NDVR ((int)(sizeof divisors / sizeof divisors[0]))
 
+/* Divisors that do not fit in a word, and the two values on either side of the
+   boundary where they stop fitting.  The runtime helpers branch on exactly
+   that: a divisor of 0xFFFF or below goes to the divide unit as two
+   instructions, and one of 0x10000 or above goes to the shift and subtract
+   loop.  The divisors above are all on the near side of it, so without these
+   the far side and the boundary itself are untested.  See
+   compiler-rt/lib/builtins/c166/int_divmod.h. */
+static const u32 wide_divisors[] = {
+  0x0000FFFFu, 0x00010000u, 0x00010001u, 0x0001FFFFu, 0x00020000u,
+  0x12345678u, 0x7FFFFFFFu, 0x80000000u, 0x80000001u, 0xFFFFFFFEu,
+  0xFFFFFFFFu,
+};
+#define NWDVR ((int)(sizeof wide_divisors / sizeof wide_divisors[0]))
+
 /* A 32 bit dividend over a divisor that started life 16 bits wide.  This is
    the shape that becomes DIVU followed by DIVLU. */
 static void wide(void) {
@@ -131,9 +145,37 @@ static void pairs(void) {
     }
 }
 
+/* Every dividend over every divisor that is a full 32 bits wide, which is the
+   path the divide unit cannot take.  Signed as well: __divsi3 reaches the
+   unsigned helper through its magnitudes, so a fault in the fallback shows up
+   there too, and the one undefined case - the most negative dividend over -1 -
+   is stepped over rather than tested. */
+static void wide_by_wide(void) {
+  for (int i = 0; i < NDIV; i++)
+    for (int j = 0; j < NWDVR; j++) {
+      vn32 = dividends[i];
+      u32 n = vn32;
+      vn32 = wide_divisors[j];
+      u32 d = vn32;
+
+      puthex(n / d, 8);
+      puthex(n % d, 8);
+      /* Both from one call, and each on its own, so that a helper that
+         returns the wrong one of the two cannot pass. */
+      puthex((n / d) + (n % d), 8);
+
+      s32 sn = (s32)n, sd = (s32)d;
+      if (sd != 0 && !(n == 0x80000000u && sd == -1)) {
+        puthex((u32)(sn / sd), 8);
+        puthex((u32)(sn % sd), 8);
+      }
+    }
+}
+
 int main(void) {
   wide();
   widths();
   pairs();
+  wide_by_wide();
   return 0;
 }

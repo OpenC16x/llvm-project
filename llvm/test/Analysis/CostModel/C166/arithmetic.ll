@@ -50,27 +50,28 @@ define void @wide(i32 %a, i32 %b) {
 ;; A schoolbook product of the words.
 ; TIME: cost of 10 for instruction:   %mul = mul i32
   %mul = mul i32 %a, %b
-;; A divide by a variable is a call to __udivsi3, which walks the dividend a
-;; bit at a time - 143 instructions in the compiler-rt this target builds.
-;; That is what it costs to run, and it is not what it costs to emit: the loop
-;; is in the builtin and is shared, so the call site is the arguments, the
-;; CALLA and the result.  Answering the running cost to a caller asking about
-;; size makes a loop body look far bigger than the code it becomes.
-; TIME: cost of 144 for instruction:   %udiv = udiv i32
+;; A divide by a variable is a call to __udivsi3, which sends a divisor that
+;; fits in a word to the divide unit and only walks the dividend a bit at a
+;; time for a wider one.  32 instructions executed, measured in the simulator.
+;; That is what it costs to run, and it is not what it costs to emit: the
+;; helper is shared, so the call site is the arguments, the CALLA and the
+;; result.  Answering the running cost to a caller asking about size makes a
+;; loop body look far bigger than the code it becomes.
+; TIME: cost of 32 for instruction:   %udiv = udiv i32
 ; SIZE: cost of 6 for instruction:   %udiv = udiv i32
   %udiv = udiv i32 %a, %b
-;; Signed is that with both signs taken off and one put back.
-; TIME: cost of 176 for instruction:   %sdiv = sdiv i32
+;; Signed is that with both signs taken off and one put back: 63 measured.
+; TIME: cost of 63 for instruction:   %sdiv = sdiv i32
 ; SIZE: cost of 6 for instruction:   %sdiv = sdiv i32
   %sdiv = sdiv i32 %a, %b
   ret void
 }
 
 define void @wide_by_constant(i32 %a) {
-;; A wide divide by a constant never reaches a builtin: the combiner turns it
-;; into a multiply and a shift.  Pricing it as a call would be the largest
-;; single error this file could make, so both forms are here to hold them
-;; apart - 144 above against 8 here.
+;; A wide divide by a constant never reaches a builtin at all: the combiner
+;; turns it into a multiply and a shift.  Pricing it as a call would be the
+;; largest single error this file could make, so both forms are here to hold
+;; them apart - 32 above against 8 here.
 ; TIME: cost of 8 for instruction:   %d13 = udiv i32
 ; SIZE: cost of 8 for instruction:   %d13 = udiv i32
   %d13 = udiv i32 %a, 13

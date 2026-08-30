@@ -78,6 +78,8 @@ InstructionCost C166TTIImpl::getArithmeticInstrCost(
   // constant is not a call at all - the combiner turns it into a multiply and
   // a shift - and pricing the second as the first is the largest single error
   // this file could make.
+  const bool IsSigned =
+      Opcode == Instruction::SDiv || Opcode == Instruction::SRem;
   const bool ConstOp2 = Op2Info.isConstant();
   const bool Pow2Op2 = ConstOp2 && Op2Info.isPowerOf2();
 
@@ -133,17 +135,29 @@ InstructionCost C166TTIImpl::getArithmeticInstrCost(
     if (WantSize)
       return 6;
 
-    // Asked about time, it is the builtin's own bit loop, which walks the
-    // dividend a bit at a time: about four instructions per bit, plus the
-    // call and the setup.  A signed one wraps the unsigned loop in taking
-    // both signs off and putting one back.
+    // Asked about time, it is whatever the builtin does.  At 32 bits that is
+    // this target's own helper, which sends a divisor that fits in a word to
+    // the divide unit and only falls back to the loop for a wider one; see
+    // compiler-rt/lib/builtins/c166/int_divmod.h.  Measured in the simulator,
+    // a division by a word divisor is 32 instructions executed and a signed
+    // one is 63, so the numbers below are the measurements rather than a
+    // formula.
     //
-    // Measured on the compiler-rt builtins this target builds: __udivsi3 is
-    // 143 instructions and __divsi3 is 31 on top of it.  The formula is what
-    // the shape of a restoring division predicts, and those are what it
-    // predicts for 32 bits.
-    InstructionCost Cost = 4 * Bits + 16;
-    if (Opcode == Instruction::SDiv || Opcode == Instruction::SRem)
+    // They are the common case and not the worst one: a divisor that does not
+    // fit in a word still walks the loop, at about 740 instructions.  The
+    // model takes the case the helper is built for, because that is the one
+    // ordinary code divides by - and because overstating a division is not
+    // free either, being what stops loops containing one from unrolling.
+    if (Bits == 32)
+      return IsSigned ? 63 : 32;
+
+    // Wider than that has no helper and is the generic loop, which walks the
+    // dividend a bit at a time: roughly two dozen instructions per bit once
+    // the 32 bit shifts inside it are counted.  Note this is what it executes,
+    // which is not what it occupies - __udivsi3 is 140 instructions of code
+    // and runs about 740 of them.
+    InstructionCost Cost = 24 * Bits;
+    if (IsSigned)
       Cost += 32;
     return Cost;
   }

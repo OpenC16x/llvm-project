@@ -919,8 +919,18 @@ set(c166_SOURCES
   c166/ashlsi3.c
   c166/ashrsi3.c
   c166/lshrsi3.c
+  c166/udivmodsi4.c
+  c166/udivsi3.c
+  c166/umodsi3.c
   ${GENERIC_SOURCES}
 )
+
+# The generic 32 bit division helpers are a shift and subtract loop, and this
+# part has a divide unit that does 32 by 16 in two instructions.  The versions
+# above use it and fall back to the loop for a divisor too wide for a word; see
+# c166/int_divmod.h.  The signed helpers need no replacing - their COMPUTE_UDIV
+# is a plain division, so they call __udivsi3 and inherit it.
+list(REMOVE_ITEM c166_SOURCES udivmodsi4.c udivsi3.c umodsi3.c)
 
 # hexagon arch
 set(hexagon_SOURCES
