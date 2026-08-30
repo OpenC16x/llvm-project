@@ -691,6 +691,27 @@ does unconditionally.
 Known limitations / things to do
 --------------------------------
 
+* Two parts' worth of board support is here rather than one.  c167.ld and
+  c167-crt0.S are the C167's, and -mmcu= picks the startup file while -T still
+  picks the script, because the map is the board's rather than the part's and
+  the scripts here are starting points.
+
+  Two things make the C167 simpler rather than harder.  Its program memory is
+  at the bottom of segment 0, so the data page pointers want the values they
+  already hold after reset; and it has no RAM outside them, so nothing has to
+  be copied or zeroed through an EXTS.  What it does not have is a PLL to
+  program - the clock comes from the CLKCFG pins - which is half the length of
+  the XC164CM's crt0.
+
+  The 48 KByte a near address reaches is the same on both, because that limit
+  is what the data page pointers cover rather than where the memory is.
+
+  The C167's extension RAM is deliberately not a region in c167.ld.  Its size
+  is in the part table, from the data sheet; where it is mapped is in the User's
+  Manual, which is not what the table was read from, and a region at a guessed
+  address would let a program link and then write somewhere else.  A board
+  script that knows the address can add it.
+
 * The near addressing model is the XC164CM's: a near reference relocates as
   SOF16, the offset within a segment, and the data page pointers decide which
   page that offset lands in.  DPP0 to DPP2 cover the Flash and DPP3 the RAM and

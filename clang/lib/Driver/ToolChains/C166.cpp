@@ -107,9 +107,14 @@ void C166ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
   Macro += "__";
   define(Macro);
 
+  // Named for what each memory is rather than for where it is, the way the
+  // part table is, because where it is belongs to the core.  __C166_IRAM_SIZE__
+  // is the internal RAM window at 00'F600H, which the XC16x manuals call the
+  // dual-port RAM and the C167 manuals the IRAM; __C166_XRAM_SIZE__ is
+  // whatever RAM is outside it.
   define("__C166_PROGRAM_SIZE__=" + Twine(P->ProgramSize));
-  define("__C166_DSRAM_SIZE__=" + Twine(P->DSRAMSize));
-  define("__C166_DPRAM_SIZE__=" + Twine(P->DPRAMSize));
+  define("__C166_XRAM_SIZE__=" + Twine(P->XRAMSize));
+  define("__C166_IRAM_SIZE__=" + Twine(P->IRAMSize));
   define("__C166_PSRAM_SIZE__=" + Twine(P->PSRAMSize));
   if (P->IsROM)
     define("__C166_PROGRAM_IS_ROM__");
@@ -123,12 +128,30 @@ Tool *C166ToolChain::buildLinker() const {
 /// than having the sizes written into it.  A script that is not written to
 /// expect them - somebody's own, for a board with memory outside the chip -
 /// simply does not refer to them and is unaffected.
+///
+/// Which symbols there are is the core's business, because the shape of the
+/// map is: an XC16x has program memory at C0'0000H that a near address reaches
+/// only the first 48 KByte of, and a program SRAM no near address reaches at
+/// all; a C167 has neither of those and an extension RAM instead.  So each
+/// core gets the script it has, and the names match it.
 static void addPartMemoryMap(const llvm::C166::Part &P, ArgStringList &CmdArgs,
                              const ArgList &Args) {
   auto def = [&](StringRef Name, unsigned long Value) {
     CmdArgs.push_back(
         Args.MakeArgString("--defsym=" + Name + "=" + Twine(Value)));
   };
+
+  if (P.Core == "c167") {
+    // A C167 addresses 16 MByte the same way, but its on-chip program memory
+    // is at the bottom of a segment rather than in one of its own, so the
+    // whole of it is under a data page pointer and there is no near/far split
+    // to make.  A romless part has none of it and the board's script says
+    // what is out there instead.
+    def("__c166_rom_length", P.ProgramSize);
+    def("__c166_iram_length", P.IRAMSize);
+    def("__c166_xram_length", P.XRAMSize);
+    return;
+  }
 
   // Only the first 48 KByte of the program memory is under a data page
   // pointer, so that is as much of it as a near address can reach; the rest is
@@ -148,8 +171,8 @@ static void addPartMemoryMap(const llvm::C166::Part &P, ArgStringList &CmdArgs,
   def("__c166_farrom_length", Far);
   def("__c166_farrom2_length", Rest - Far);
 
-  def("__c166_dsram_length", P.DSRAMSize);
-  def("__c166_dpram_length", P.DPRAMSize);
+  def("__c166_dsram_length", P.XRAMSize);
+  def("__c166_dpram_length", P.IRAMSize);
   def("__c166_psram_length", P.PSRAMSize);
 }
 
@@ -172,9 +195,16 @@ void c166::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // crt0.o holds the reset vector, so it has to come first: the linker script
   // puts whatever lands in .reset at address zero and the part starts there.
+  //
+  // Which one is the core's: a C167 has no PLL to program and no RAM outside
+  // the data page pointers, so its startup is a different file rather than the
+  // same one with branches in it.
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_r,
-                   options::OPT_nostartfiles))
-    CmdArgs.push_back(Args.MakeArgString(TC.GetFilePath("crt0.o")));
+                   options::OPT_nostartfiles)) {
+    const llvm::C166::Part *P = getPart(Args);
+    const char *Crt0 = P && P->Core == "c167" ? "c167-crt0.o" : "crt0.o";
+    CmdArgs.push_back(Args.MakeArgString(TC.GetFilePath(Crt0)));
+  }
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   TC.AddFilePathLibArgs(Args, CmdArgs);
