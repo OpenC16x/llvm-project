@@ -710,9 +710,19 @@ Known limitations / things to do
   CPUCON1.VECSC, so its table is four bytes per vector at the bottom of segment
   0 and it has no choice about it; c167.ld's rom region starts there, so
   placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
-  c167-vectors.inc names that part's 56 interrupt sources, whose numbers run
-  from 10H to 47H with none missing and whose locations are four times their
-  numbers in every row - the same self-check the XC164CM's table passes.
+  c167-vectors.inc names that part's 56 interrupt sources and its four hardware
+  traps.  Both tables pass the self-check the XC164CM's does - the location is
+  four times the trap number in every row - and together they account for the
+  vector space completely: 00H to 0AH are the traps, 0BH to 0FH are reserved,
+  and 10H to 47H are the interrupts with none missing.
+
+  Trap number 08H is the one slot nothing claims.  It is in the trap table
+  neither as a trap nor among the reserved numbers, and it is where an XC164CM
+  has a software break trap that this part does not name, so the file leaves it
+  alone rather than guessing.  Its class B trap is raised by five conditions
+  where the XC164CM's is raised by four: an illegal instruction access and an
+  illegal external bus access are this part's own, and it has no Flash to raise
+  a PMI access error.
 
   The C167's extension RAM is at 00'E000H, which the User's Manual gives - the
   data sheet the part table was read from has the size and not the address, and

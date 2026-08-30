@@ -26,11 +26,26 @@
  * are in the register file - the CAPCOM2 ones are not - which costs nothing
  * here, because a vector number is a number and this file names no register.
  *
- * The hardware traps are deliberately not here.  They are the core's rather
- * than this derivative's, and the table this file was built from does not
- * cover them, so a handler for one uses VECTOR with the number from a manual
- * rather than a name from a guess.  xc164cm-vectors.inc has them for that
- * part.
+ * The hardware traps are at the end, and they agree with themselves the same
+ * way: the location is four times the trap number in all five.  They occupy
+ * every other slot rather than consecutive ones.
+ *
+ * Between the two the vector space accounts for itself completely: 00H to 0AH
+ * are the traps, 0BH to 0FH are reserved - which is locations 2CH to 3CH, as
+ * the table gives them - and 10H to 47H are the interrupts.
+ *
+ * One slot is not spoken for: trap number 08H, which is location 00'0020H.
+ * The trap table lists it neither as a trap nor among the reserved numbers,
+ * and where an XC164CM has its software break trap this part has nothing
+ * named, so nothing here claims it.  A program that knows better uses
+ * VECTOR 008 directly.
+ *
+ * Everything in this file is a trap number rather than a location, because
+ * that is what the section names and the VECTOR macro take.  The two differ
+ * by a factor of four and the comments give both where it matters.
+ *
+ * The TRAP instruction reaches any of 00H to 7FH, so a software trap can enter
+ * a slot this file names or one it does not.
  *
  * Part of the LLVM Project, under the Apache License v2.0 with LLVM
  * Exceptions.  See https://llvm.org/LICENSE.txt for license information.
@@ -323,4 +338,32 @@
 /* ASC0 Transmit Buffer, at 47H in the table. */
 .macro VECTOR_S0TBIC handler
         VECTOR 071, \handler
+.endm
+
+
+/* The hardware traps.  Vector 0 is reset, which crt0.S claims with its own
+   section, so there is no macro for it. */
+
+/* Non-maskable interrupt, at 02H in the table. */
+.macro VECTOR_NMITRAP handler
+        VECTOR 002, \handler
+.endm
+
+/* Stack overflow, at 04H in the table. */
+.macro VECTOR_STOTRAP handler
+        VECTOR 004, \handler
+.endm
+
+/* Stack underflow, at 06H in the table. */
+.macro VECTOR_STUTRAP handler
+        VECTOR 006, \handler
+.endm
+
+/* Undefined opcode, protected instruction fault, illegal word operand access,
+   illegal instruction access or illegal external bus access.  All five raise
+   this one vector and TFR says which of them it was, at 0AH in the table.
+   The last two are this part's own: an XC164CM has no external bus to make an
+   illegal access to, and raises a PMI access error here instead. */
+.macro VECTOR_BTRAP handler
+        VECTOR 010, \handler
 .endm
