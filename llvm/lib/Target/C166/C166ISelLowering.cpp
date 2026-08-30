@@ -167,6 +167,20 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
 
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
 
+  // __builtin_mul_overflow.  MUL and MULU set V exactly when the product will
+  // not fit in a word, which is the question being asked, so this is answered
+  // out of the flags instead of by working it out again.
+  setOperationAction(ISD::SMULO, MVT::i16, Custom);
+  setOperationAction(ISD::UMULO, MVT::i16, Custom);
+
+  // llvm.trap and llvm.debugtrap.  The default for the first is a call to
+  // abort(), which on a part with no operating system is a call to something
+  // that may not be linked; the default for the second is no lowering at all,
+  // so __builtin_debugtrap() was a compile error.  Both are a TRAP here: see
+  // the patterns in C166InstrInfo.td for which vector and why.
+  setOperationAction(ISD::TRAP, MVT::Other, Legal);
+  setOperationAction(ISD::DEBUGTRAP, MVT::Other, Legal);
+
   // [Rw+] reads and then steps the pointer past what it read, which is what
   // walking an array wants.  There is no matching post-incrementing store:
   // the only auto-stepping store form is the pre-decrementing [-Rw].
@@ -212,6 +226,9 @@ SDValue C166TargetLowering::LowerOperation(SDValue Op,
     return LowerBR_CC(Op, DAG);
   case ISD::SETCC:
     return LowerSETCC(Op, DAG);
+  case ISD::SMULO:
+  case ISD::UMULO:
+    return LowerXMULO(Op, DAG);
   case ISD::SELECT_CC:
     return LowerSELECT_CC(Op, DAG);
   case ISD::FRAMEADDR:
@@ -419,6 +436,26 @@ SDValue C166TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 
   return DAG.getNode(C166ISD::BR_CC, DL, Op.getValueType(), Chain, Dest, LHS,
                      RHS, TargetCC);
+}
+
+/// __builtin_mul_overflow on a word, as one multiply and a branch on its
+/// overflow flag.  The node produces the product and the flag as two words;
+/// the flag is narrowed to the i1 the caller asked for.
+SDValue C166TargetLowering::LowerXMULO(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  bool IsSigned = Op.getOpcode() == ISD::SMULO;
+  SDVTList VTs = DAG.getVTList(MVT::i16, MVT::i16);
+  SDValue Res = DAG.getNode(IsSigned ? C166ISD::SMULO : C166ISD::UMULO, DL, VTs,
+                            Op.getOperand(0), Op.getOperand(1));
+  // Type legalization has already been over this, so the overflow result is a
+  // word by the time it gets here rather than the i1 the intrinsic declares.
+  // The inserter produces exactly zero or one, which is what
+  // ZeroOrOneBooleanContent promises, so nothing has to be masked.
+  EVT OvfVT = Op->getValueType(1);
+  SDValue Ovf = Res.getValue(1);
+  if (OvfVT != MVT::i16)
+    Ovf = DAG.getNode(ISD::TRUNCATE, DL, OvfVT, Ovf);
+  return DAG.getMergeValues({Res.getValue(0), Ovf}, DL);
 }
 
 SDValue C166TargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
@@ -1141,6 +1178,83 @@ C166TargetLowering::shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const {
   }
 }
 
+/// One multiply, and the overflow taken out of the flag it already set.
+///
+/// MUL and MULU both set V when the product will not fit in a word, so the
+/// answer __builtin_mul_overflow wants is a branch on cc_V.  What the generic
+/// expansion does instead is read MDH back and, for the signed case, sign
+/// extend MDL to compare against it - four instructions to recompute what the
+/// multiply already recorded.
+///
+///   thisMBB:
+///     %one = MOV #1
+///     MUL / MULU a, b            ; sets V
+///     %prod = MOV MDL            ; row "* * - - *", so V survives it
+///     JMPR cc_V, sinkMBB
+///   falseMBB:
+///     %zero = MOV #0
+///   sinkMBB:
+///     %ovf = phi [ %zero, falseMBB ], [ %one, thisMBB ]
+///
+/// The constant one is materialised ahead of the multiply rather than after
+/// it, so that nothing stands between the MUL and the branch except the move
+/// out of MDL.
+MachineBasicBlock *
+C166TargetLowering::emitMulOverflow(MachineInstr &MI,
+                                    MachineBasicBlock *BB) const {
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
+  MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
+  DebugLoc DL = MI.getDebugLoc();
+  bool Unsigned = MI.getOpcode() == C166::UMULO16;
+
+  Register Prod = MI.getOperand(0).getReg();
+  Register Ovf = MI.getOperand(1).getReg();
+  Register A = MI.getOperand(2).getReg();
+  Register B = MI.getOperand(3).getReg();
+
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator It = ++BB->getIterator();
+  MachineFunction *MF = BB->getParent();
+  MachineBasicBlock *ThisMBB = BB;
+  MachineBasicBlock *FalseMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MF->insert(It, FalseMBB);
+  MF->insert(It, SinkMBB);
+
+  unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
+  FalseMBB->setCallFrameSize(CallFrameSize);
+  SinkMBB->setCallFrameSize(CallFrameSize);
+
+  SinkMBB->splice(SinkMBB->begin(), BB,
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
+  SinkMBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  Register One = MRI.createVirtualRegister(&C166::GR16RegClass);
+  Register Zero = MRI.createVirtualRegister(&C166::GR16RegClass);
+
+  BuildMI(BB, DL, TII.get(C166::MOV16ri4), One).addImm(1);
+  BuildMI(BB, DL, TII.get(Unsigned ? C166::MULUrr : C166::MULrr))
+      .addReg(A)
+      .addReg(B);
+  BuildMI(BB, DL, TII.get(C166::MOVfromMDL), Prod);
+  BuildMI(BB, DL, TII.get(C166::JMPRcc)).addMBB(SinkMBB).addImm(C166CC::COND_V);
+
+  BB->addSuccessor(FalseMBB);
+  BB->addSuccessor(SinkMBB);
+
+  BuildMI(FalseMBB, DL, TII.get(C166::MOV16ri4), Zero).addImm(0);
+  FalseMBB->addSuccessor(SinkMBB);
+
+  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(C166::PHI), Ovf)
+      .addReg(Zero)
+      .addMBB(FalseMBB)
+      .addReg(One)
+      .addMBB(ThisMBB);
+
+  MI.eraseFromParent();
+  return SinkMBB;
+}
+
 MachineBasicBlock *
 C166TargetLowering::emitCmpXchg(MachineInstr &MI, MachineBasicBlock *BB) const {
   bool Byte = MI.getOpcode() == C166::CMPXCHG8;
@@ -1212,6 +1326,9 @@ C166TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
   if (MI.getOpcode() == C166::CMPXCHG16 || MI.getOpcode() == C166::CMPXCHG8)
     return emitCmpXchg(MI, BB);
+
+  if (MI.getOpcode() == C166::SMULO16 || MI.getOpcode() == C166::UMULO16)
+    return emitMulOverflow(MI, BB);
 
   // The comparison is a word or a byte one depending on what is being
   // compared, not on what is being selected, and its right hand side is

@@ -61,6 +61,11 @@ def SDT_C166MULRND       : SDTypeProfile<1, 3, [SDTCisVT<0, i16>,
                                                 SDTCisVT<2, i16>,
                                                 SDTCisVT<3, i16>]>;
 
+// A multiply that answers whether the product fit as well as what it was: two
+// words out - the product and the overflow as zero or one - and two in.
+def SDT_C166MULO : SDTypeProfile<2, 2, [SDTCisVT<0, i16>, SDTCisVT<1, i16>,
+                                        SDTCisVT<2, i16>, SDTCisSameAs<3, 2>]>;
+
 // A 32 bit dividend as a low and a high word and a 16 bit divisor, giving the
 // two words of the quotient and the one word remainder.
 def SDT_C166DivL         : SDTypeProfile<3, 3, [SDTCisVT<0, i16>,
@@ -104,6 +109,8 @@ def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
 def C166udivl32  : SDNode<"C166ISD::UDIVREM32BY16", SDT_C166DivL>;
 def C166mac      : SDNode<"C166ISD::MAC", SDT_C166MAC>;
 def C166mulrnd   : SDNode<"C166ISD::MUL_RND", SDT_C166MULRND>;
+def C166smulo    : SDNode<"C166ISD::SMULO", SDT_C166MULO>;
+def C166umulo    : SDNode<"C166ISD::UMULO", SDT_C166MULO>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -731,6 +738,30 @@ def MULHU16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
 // widening multiply is one instruction and two moves rather than two of each.
 // These are what makes that happen: without them mul and mulhs are separate
 // nodes and each expands to a MUL of its own.
+// __builtin_mul_overflow, answered out of the flags rather than worked out
+// again.  MUL and MULU both set V when the product will not fit in a word,
+// which is exactly the question being asked - so the overflow is a branch on
+// cc_V rather than a second look at MDH and, for the signed case, a sign
+// extension of MDL to compare it against.
+//
+// These need the custom inserter because materialising a flag as a zero or a
+// one is a branch, and the V they branch on has to still be the MUL's.  Only
+// MOVfromMDL sits in between, whose row leaves V alone; the register
+// allocator may add a reload there, which is also a move and also leaves it
+// alone.  That is the same kind of flag range an ADDC chain already keeps
+// across instructions here, and V is clobbered by exactly what clobbers the
+// carry, so it is no more fragile than what the backend already relies on.
+let Defs = [MDL, MDH, MDC, PSW], usesCustomInserter = 1 in {
+def SMULO16 : Pseudo<(outs GR16:$prod, GR16:$ovf), (ins GR16:$a, GR16:$b),
+                     "#SMULO16",
+                     [(set GR16:$prod, GR16:$ovf,
+                           (C166smulo GR16:$a, GR16:$b))]>;
+def UMULO16 : Pseudo<(outs GR16:$prod, GR16:$ovf), (ins GR16:$a, GR16:$b),
+                     "#UMULO16",
+                     [(set GR16:$prod, GR16:$ovf,
+                           (C166umulo GR16:$a, GR16:$b))]>;
+}
+
 def SMUL16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
                           (ins GR16:$src1, GR16:$src2),
                           "#SMUL16rrLOHI",
@@ -2152,6 +2183,27 @@ def TRAP : InstS<0x9B, (outs), (ins trap7:$num), "trap\t$num", []> {
 //===----------------------------------------------------------------------===//
 // Non-Instruction Patterns
 //===----------------------------------------------------------------------===//
+
+// llvm.trap and llvm.debugtrap both enter the software break vector.
+//
+// 08H is the one slot the family names for a break raised by software: it is
+// the XC164CM's software break trap, and TRAP reaches it on every derivative
+// because the instruction covers the whole table.  A C167 leaves 08H unclaimed
+// - see c167-vectors.inc - so a program for one that wants to catch these
+// fills it with VECTOR 008.
+//
+// The two are the same instruction because the family names one vector and
+// not two, and inventing a second number would be inventing a convention.
+// What separates them is not the vector but what surrounds it, and that comes
+// from the caller rather than from here: llvm.trap is noreturn, so clang
+// follows __builtin_trap() with unreachable and no return is emitted after the
+// TRAP - a handler that returns anyway runs off the end of the function.
+// llvm.debugtrap is resumable and the return follows it.
+// That is the same bargain calling abort() made here before, since nothing
+// followed that call either - only now it does not need abort() to be linked,
+// which on a part with no operating system it may well not be.
+def : Pat<(trap), (TRAP 8)>;
+def : Pat<(debugtrap), (TRAP 8)>;
 
 // ADD and SUB always leave a carry behind, so the low word of a wider
 // addition or subtraction is a plain one and only the words above it need

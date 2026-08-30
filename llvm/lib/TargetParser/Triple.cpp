@@ -278,6 +278,9 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case avr:
     return "avr";
 
+  case c166:
+    return "c166";
+
   case ppc64:
   case ppc64le:
   case ppc:
