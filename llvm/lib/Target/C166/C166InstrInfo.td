@@ -217,10 +217,10 @@ def CoIdxAsmOperand : AsmOperandClass {
   let DiagnosticString = "expected [idx0] or [idx1], with an optional step";
 }
 
-def Imm5AsmOperand : AsmOperandClass {
-  let Name = "Imm5";
+def CoShiftAsmOperand : AsmOperandClass {
+  let Name = "CoShift";
   let RenderMethod = "addImmOperands";
-  let DiagnosticString = "expected an immediate in the range [0, 31]";
+  let DiagnosticString = "expected a shift count in the range [0, 8]";
 }
 
 def Trap7AsmOperand : AsmOperandClass {
@@ -476,8 +476,24 @@ def coreg : RegisterOperand<CoREG> {
 }
 
 // The shift count of the MAC unit's shifts.
-def imm5 : Operand<i8> {
-  let ParserMatchClass = Imm5AsmOperand;
+//
+// The field is five bits wide, and the shifter does not use all of it: the ST10
+// Family Programming Manual (PM0036) says in section 2.4.8 that "the shifter
+// authorizes only 8-bit left/right shifts.  Shift values must be between 0-8
+// (inclusive)", and CoSHL's own description repeats it - a clarification the
+// manual's revision history records adding.  So a count of nine or more encodes
+// but does not do anything the manual defines, and is refused here rather than
+// assembled into a result nothing predicts.
+//
+// The range is the shifter's rather than one derivative's.  The MAC the ST10
+// manual documents is the one this file already describes: all 53 of the
+// coprocessor mnemonics carry the same function codes in both, and CoSTORE's
+// six CoReg codes are the same six.  See C166.td.
+//
+// Only the immediate form can be checked.  The count may also come from the
+// low five bits of a register, and what is in the register is not known here.
+def coshift : Operand<i8> {
+  let ParserMatchClass = CoShiftAsmOperand;
 }
 
 // A trap number.  It is written as the trap number itself; where it sits in
@@ -822,7 +838,17 @@ def UDIVREM32by16 : Pseudo<(outs GR16:$qlo, GR16:$qhi, GR16:$rem),
 }
 
 // The multiply-accumulate coprocessor, which only some of the family has.
-def HasMAC : Predicate<"Subtarget->hasMAC()">;
+//
+// It gates the assembler and the disassembler as well as selection, for the
+// reason HasExtInstr does: a CoMAC in a listing for a part without the unit is
+// not a CoMAC, it is whatever that part does with an opcode it has never heard
+// of.  Which parts have it is the part's business rather than the family's -
+// the ST10 Family Programming Manual says to "refer to device datasheets for
+// information about which ST10 devices include the MAC" - so this is asked for
+// by name: "-mcpu=st10 -mattr=+mac", or an -mcpu= whose part is known to have
+// one.
+def HasMAC : Predicate<"Subtarget->hasMAC()">,
+             AssemblerPredicate<(all_of FeatureMAC), "mac">;
 
 // "acc += a * b" and "acc -= a * b" on the MAC unit, where acc is 32 bits and
 // a and b are words - signed for CoMAC and CoMAC-, unsigned for CoMACu and

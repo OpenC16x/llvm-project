@@ -145,7 +145,9 @@ public:
 
   bool isImm3() const { return isImmInRange(0, 7, /*AllowSymbol=*/false); }
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
-  bool isImm5() const { return isImmInRange(0, 31, /*AllowSymbol=*/false); }
+  // The MAC shifter's count.  Five bits are encoded and only 0 to 8 are
+  // defined; see "coshift" in C166InstrInfo.td.
+  bool isCoShift() const { return isImmInRange(0, 8, /*AllowSymbol=*/false); }
   bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);

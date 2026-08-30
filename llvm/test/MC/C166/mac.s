@@ -1,4 +1,8 @@
-; RUN: llvm-mc -triple=c166 -show-encoding < %s | FileCheck %s
+; RUN: llvm-mc -triple=c166 -mcpu=xc16x -show-encoding < %s | FileCheck %s
+
+;; The coprocessor is not on every part, so this says which one it is for.
+;; Without that the instructions below do not assemble at all - see
+;; mac-st10.s, which is the other side of the same gate.
 
 ;; The MAC unit.  Every instruction is four bytes: the first selects the
 ;; operand form, the second holds the register numbers or the pointer control,
@@ -43,11 +47,16 @@
 ; CHECK: coload- r2, [r3+] ; encoding: [0x83,0x23,0x2a,0x02]
         coload- r2, [r3+]
 
-;; The shifts take a count in a register or as five bits in the last byte.
+;; The shifts take a count in a register or in the last byte.  The field there
+;; is five bits wide and the shifter uses nine of the values it can hold: the
+;; ST10 Family Programming Manual (PM0036) section 2.4.8 has "the shifter
+;; authorizes only 8-bit left/right shifts.  Shift values must be between 0-8
+;; (inclusive)".  Eight is the largest that means anything, so it is the one
+;; written here; see coshift-range.s for the other side of it.
 ; CHECK: coshl r4         ; encoding: [0xa3,0x44,0x8a,0x00]
         coshl   r4
-; CHECK: coshl #17        ; encoding: [0xa3,0x00,0x82,0x11]
-        coshl   #17
+; CHECK: coshl #8         ; encoding: [0xa3,0x00,0x82,0x08]
+        coshl   #8
 ; CHECK: coashr #7, rnd   ; encoding: [0xa3,0x00,0xb2,0x07]
         coashr  #7, rnd
 

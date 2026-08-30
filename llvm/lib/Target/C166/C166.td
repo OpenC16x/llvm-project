@@ -30,7 +30,25 @@ def FeatureExtInstr
 
 def FeatureMAC
     : SubtargetFeature<"mac", "HasMAC", "true",
-                       "Enable the C166S v2 multiply-accumulate unit">;
+                       "Enable the multiply-accumulate unit">;
+
+// One feature and not two, which is worth saying because the ST10's DSP looks
+// at first like a second unit.  It is not: the ST10 Family Programming Manual
+// (PM0036) documents the same unit this backend already describes.  Checked
+// mechanically rather than by eye - all 53 coprocessor mnemonics carry the same
+// function code in both, and CoSTORE's six CoReg codes are the same six.  The
+// one disagreement is CoMACMR, which that manual prints as F9 for both the
+// plain form and the rounding one; every other pair there differs in the low
+// bit, so F8/F9 is the reading that fits and is what this file has.
+//
+// Which parts have it is a property of the part rather than of the family -
+// PM0036 says to "refer to device datasheets for information about which ST10
+// devices include the MAC" - so it is a feature to be asked for rather than
+// something a -mcpu= implies: "-mcpu=st10 -mattr=+mac".
+//
+// What that manual does not settle is the peripheral map below.  It documents
+// an instruction set, not where an ST10 keeps its special function registers,
+// so -mcpu=st10 still gets the shared set alone.
 
 // Which special function registers exist, and under which names.  The short
 // address a register carries is its encoding, and the same short address names
@@ -58,8 +76,10 @@ class Proc<string Name, list<SubtargetFeature> Features>
 // Only two of these name a peripheral map, because only two have been read.
 // "st10" is a C167 derivative and very likely shares its map, but likely is
 // not the standard the rest of this file is held to, so it gets the shared set
-// until somebody checks an ST10 manual.  "c166" is the first generation, whose
-// peripherals are its own.
+// until somebody reads an ST10 user manual.  The ST10 Family Programming
+// Manual has been read - see FeatureMAC above - and it is the wrong book for
+// this: it gives the instruction set and not the register addresses.  "c166"
+// is the first generation, whose peripherals are its own.
 //
 // "generic" is the second generation core rather than the oldest one the
 // family ever had.  Every part still sold, every part -mmcu= knows, and the

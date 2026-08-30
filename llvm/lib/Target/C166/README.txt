@@ -842,8 +842,11 @@ Known limitations / things to do
 
   Two things this does not do.  -mcpu=st10 gets the shared set alone: an ST10
   is a C167 derivative and very likely has its map, but very likely is not the
-  standard the rest of this is held to, so it waits for somebody with an ST10
-  manual.  And the extended and X-peripheral registers are the XC164CM's
+  standard the rest of this is held to, so it waits for an ST10 user manual.
+  The ST10 Family Programming Manual is not that book - it gives the
+  instruction set, which is where it settled a different question: the ST10's
+  MAC is this MAC, sharing every function code, so there is one mac feature
+  rather than one per derivative.  And the extended and X-peripheral registers are the XC164CM's
   entire, gated with the rest of its map rather than split into a shared part
   and a per-derivative one, because there is no second ESFR map here to split
   them against.

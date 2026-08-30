@@ -67,7 +67,7 @@ class CoR<bits<8> ext, string asmstr>
 
 // A3 00 EE rrr#:# - a five bit shift count in the last byte.
 class CoI<bits<8> ext, string asmstr>
-    : CoInst<0xA3, ext, (ins imm5:$s), asmstr> {
+    : CoInst<0xA3, ext, (ins coshift:$s), asmstr> {
   bits<5> s;
   let Inst{15-8} = 0;
   let Inst{28-24} = s;
@@ -161,6 +161,12 @@ class CoStoreR<string asmstr>
   let Inst{18-16} = 0;
   let Inst{26-24} = 0;
 }
+
+
+// Everything below is the coprocessor's, so nothing below assembles or
+// disassembles for a part that does not have one.  See HasMAC in
+// C166InstrInfo.td.
+let Predicates = [HasMAC] in {
 
 
 def CoABS_n            : CoN<0x1A, "coabs">;
@@ -343,3 +349,5 @@ def CoSUB2R_xp         : CoXP<0x93, 0x52, "cosub2r\t$x, $m">;
 def CoSUBR_rr          : CoRR<0x12, "cosubr\t$n, $m">;
 def CoSUBR_rp          : CoRP<0x12, "cosubr\t$n, $m">;
 def CoSUBR_xp          : CoXP<0x93, 0x12, "cosubr\t$x, $m">;
+
+} // Predicates = [HasMAC]
