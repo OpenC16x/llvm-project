@@ -14,6 +14,7 @@
 #include "C166.h"
 #include "C166MachineFunctionInfo.h"
 #include "C166TargetObjectFile.h"
+#include "C166TargetTransformInfo.h"
 #include "TargetInfo/C166TargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -54,6 +55,11 @@ C166TargetMachine::C166TargetMachine(const Target &T, const Triple &TT,
 }
 
 C166TargetMachine::~C166TargetMachine() = default;
+
+TargetTransformInfo
+C166TargetMachine::getTargetTransformInfo(const Function &F) const {
+  return TargetTransformInfo(std::make_unique<C166TTIImpl>(this, F));
+}
 
 MachineFunctionInfo *C166TargetMachine::createMachineFunctionInfo(
     BumpPtrAllocator &Allocator, const Function &F,
