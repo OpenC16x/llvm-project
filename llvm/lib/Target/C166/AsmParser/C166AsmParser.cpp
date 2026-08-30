@@ -361,8 +361,16 @@ class C166AsmParser : public MCTargetAsmParser {
   /// reaching none of them is not an error here at all, so this returns an
   /// empty message for anything it does not recognise.
   std::string reportRegisterNotInMap(SMLoc S, StringRef Name) const {
-    if (!MatchRegisterName(Name.lower()) || matchRegisterInMap(Name))
+    MCRegister Reg = MatchRegisterName(Name.lower());
+    if (!Reg || matchRegisterInMap(Name))
       return std::string();
+    // The coprocessor's offset registers are missing for a different reason
+    // than the rest: they are not another part's, they are the MAC unit's, and
+    // what is absent is the unit.
+    if (getC166MCRegisterClass(C166::CoOFFSRegClassID).contains(Reg))
+      return ("'" + Name.lower() +
+              "' is a register of the multiply-accumulate unit, which the "
+              "selected processor does not have");
     return ("'" + Name.lower() +
             "' is not a register on the selected processor; it is another "
             "derivative's special function register");

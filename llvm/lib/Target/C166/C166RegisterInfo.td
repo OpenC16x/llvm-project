@@ -629,6 +629,19 @@ def CoIDX : RegisterClass<"C166", [i16], 16, (add IDX0, IDX1)> {
 // What CoSTORE can name.  These are addressed by a five bit code of their own
 // rather than by a short address, so this class exists to say which registers
 // the code covers; the encoder maps each to its code.
+// The MAC unit's offset registers, which live in the extended space but belong
+// to the coprocessor rather than to any one part's peripheral map.  They are a
+// class of their own so that they can be gated on the unit being there instead
+// of on whose map is selected: the ST10F269 datasheet puts QX0 at F000H, QX1 at
+// F002H, QR0 at F004H and QR1 at F006H, which is where the XC164CM User's
+// Manual puts them too, so an ST10 with a MAC has the same four at the same
+// addresses.  IDX0 and IDX1 are the same kind of register and need no class
+// because they are in the ordinary space, which every part shares.
+def CoOFFS : RegisterClass<"C166", [i16], 16, (add QX0, QX1, QR0, QR1)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
 def CoREG : RegisterClass<"C166", [i16], 16,
   (add MSW, MAH, MAS, MAL, MCW, MRW)> {
   let isAllocatable = 0;

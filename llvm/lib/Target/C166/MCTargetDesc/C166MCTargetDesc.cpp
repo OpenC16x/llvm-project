@@ -141,11 +141,19 @@ bool C166::isSFRInSelectedMap(MCRegister Reg, const MCSubtargetInfo &STI) {
     return STI.hasFeature(C166::FeatureSFRXC164);
   if (getC166MCRegisterClass(C166::SFRC167RegClassID).contains(Reg))
     return STI.hasFeature(C166::FeatureSFRC167);
-  // The extended and X-peripheral registers are the XC164CM's entire, so they
-  // go the same way as its own short-address ones.  They are reachable by
-  // address rather than through a "reg" field, which makes them harmless to
-  // encode and not at all harmless to name: the address would be written, and
-  // would mean something else on a part that has something else there.
+  // Except for the coprocessor's four offset registers, which are the MAC
+  // unit's rather than a part's: the ST10F269 datasheet gives QX0 F000H, QX1
+  // F002H, QR0 F004H and QR1 F006H, the same four at the same addresses the
+  // XC164CM User's Manual gives, so what decides whether they can be named is
+  // whether there is a unit to own them.
+  if (getC166MCRegisterClass(C166::CoOFFSRegClassID).contains(Reg))
+    return STI.hasFeature(C166::FeatureMAC);
+  // The rest of the extended and X-peripheral registers are the XC164CM's
+  // entire, so they go the same way as its own short-address ones.  They are
+  // reachable by address rather than through a "reg" field, which makes them
+  // harmless to encode and not at all harmless to name: the address would be
+  // written, and would mean something else on a part that has something else
+  // there.
   if (getC166MCRegisterClass(C166::ESFRRegClassID).contains(Reg) ||
       getC166MCRegisterClass(C166::XSFRRegClassID).contains(Reg))
     return STI.hasFeature(C166::FeatureSFRXC164);

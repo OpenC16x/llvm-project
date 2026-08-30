@@ -35,3 +35,22 @@
 ;; The shifter's count, at the largest value the manual defines.
 ; CHECK: coshl #8         ; encoding: [0xa3,0x00,0x82,0x08]
         coshl   #8
+
+;; The unit's four offset registers, which are the unit's and not any one
+;; part's.  The ST10F269 datasheet puts QX0 at F000H, QX1 at F002H, QR0 at
+;; F004H and QR1 at F006H - the same four at the same addresses the XC164CM
+;; User's Manual gives - so an ST10 with a MAC has them, and what decides
+;; whether they can be named is whether there is a unit to own them.  They sit
+;; in the extended space and are reached by address, which is why the encoding
+;; carries F000H rather than a short address.
+; CHECK: mov r2, qx0      ; encoding: [0xf2,0xf2,0x00,0xf0]
+; NOMAC: [[@LINE+1]]:{{[0-9]+}}: error: 'qx0' is a register of the multiply-accumulate unit
+        mov     r2, qx0
+; CHECK: mov qr1, r3      ; encoding: [0xf6,0xf3,0x06,0xf0]
+        mov     qr1, r3
+
+;; IDX0 needs no such gate: it is the same kind of register in the ordinary
+;; space, which every part shares.
+; CHECK: mov r2, idx0     ; encoding: [0xf2,0xf2,0x08,0xff]
+; NOMAC-NOT: 'idx0'
+        mov     r2, idx0
