@@ -20,12 +20,12 @@
         mov     r2, #sof(\start)
         mov     r3, #sof(\end)
 1:      cmp     r2, r3
-        jmpa    cc_z, 2f
+        jmpr    cc_z, 2f
         mov     r4, [r1+]
         exts    #seg(\start), #1
         mov     [r2], r4
         add     r2, #2
-        jmpa    cc_UC, 1b
+        jmpr    cc_UC, 1b
 2:
 .endm
 
@@ -96,10 +96,10 @@ _start:
 .Lpll_wait:
         mov     r4, sysstat
         and     r4, #0x4000
-        jmpa    cc_nz, .Lpll_locked
+        jmpr    cc_nz, .Lpll_locked
         sub     r5, #1
-        jmpa    cc_nz, .Lpll_wait
-        jmpa    cc_UC, __pll_lock_failed
+        jmpr    cc_nz, .Lpll_wait
+        jmpr    cc_UC, __pll_lock_failed
 .Lpll_locked:
 
         // Switch the CPU onto the PLL: the same word again with PLLCTRL = 11B.
@@ -122,11 +122,11 @@ _start:
         mov     r3, #__data_end
 .Lcopy:
         cmp     r2, r3
-        jmpa    cc_z, .Lcopy_done
+        jmpr    cc_z, .Lcopy_done
         mov     r4, [r1+]
         mov     [r2], r4
         add     r2, #2
-        jmpa    cc_UC, .Lcopy
+        jmpr    cc_UC, .Lcopy
 .Lcopy_done:
 
         // Zero the uninitialised data, word aligned the same way.
@@ -135,10 +135,10 @@ _start:
         mov     r3, #0
 .Lzero:
         cmp     r1, r2
-        jmpa    cc_z, .Lzero_done
+        jmpr    cc_z, .Lzero_done
         mov     [r1], r3
         add     r1, #2
-        jmpa    cc_UC, .Lzero
+        jmpr    cc_UC, .Lzero
 .Lzero_done:
 
         // Copy what lives in the RAM the data page pointers do not reach:
@@ -158,11 +158,11 @@ _start:
         mov     r3, #0
 .Lfarzero:
         cmp     r1, r2
-        jmpa    cc_z, .Lfarzero_done
+        jmpr    cc_z, .Lfarzero_done
         exts    #seg(__farbss_start), #1
         mov     [r1], r3
         add     r1, #2
-        jmpa    cc_UC, .Lfarzero
+        jmpr    cc_UC, .Lfarzero
 .Lfarzero_done:
 
         // End of the initialisation phase.  After this DISWDT no longer works
@@ -177,7 +177,7 @@ _start:
         // running off the end of memory.
         .globl __c166_exit
 __c166_exit:
-        jmpa    cc_UC, __c166_exit
+        jmpr    cc_UC, __c166_exit
         .size _start, .-_start
 
         // Where the startup code goes when the PLL never locked.  There is
@@ -189,5 +189,5 @@ __c166_exit:
         .weak __pll_lock_failed
         .type __pll_lock_failed,@function
 __pll_lock_failed:
-        jmpa    cc_UC, __pll_lock_failed
+        jmpr    cc_UC, __pll_lock_failed
         .size __pll_lock_failed, .-__pll_lock_failed

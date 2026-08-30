@@ -161,6 +161,40 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   }
 }
 
+// There is no linker relaxation here, and it is not an omission.
+//
+// A branch or call whose target lands close after layout could be the two byte
+// relative form rather than the four byte absolute one, and lld has the
+// machinery for that: relaxOnce, finalizeRelax and RelaxAux delete bytes from a
+// section and move the symbols and relocations that follow.  What that
+// machinery needs from the object file is a relocation for every branch it
+// might have to fix up, because deleting bytes moves every target after the
+// deletion.
+//
+// This assembler does not leave one.  An intra-section branch is resolved at
+// assembly time and its displacement is baked into the bytes, so:
+//
+//     42: 3d 04    jmpr cc_NE, 0x4c   <- no relocation
+//     48: ea 00 00 00  jmpa cc_UC, 0
+//               4a: R_C166_CADDR16 __pll_lock_failed
+//     4c: ...
+//
+// shrinking the JMPA at 48 moves the instruction at 4c to 4a, and the JMPR at
+// 42 still says "forward four words" and lands in the middle of it.  This was
+// written, and that is what it did.
+//
+// Making it work means the assembler leaving a relocation for every branch
+// instead of resolving it - which also means it can no longer pick the short
+// form itself, since it would no longer know the distance, and would have to
+// emit the long form everywhere and rely on the linker to shrink it back.
+// That is a coherent design and it is how RISC-V works, but it is the opposite
+// of what this assembler does today.
+//
+// Measured before writing any of it, over the differential programs: after
+// crt0 stopped spelling its local branches JMPA, what was left for a linker to
+// win was four to eleven sites per program, eight to twenty two bytes.  That
+// is not enough to pay for inverting how branches are assembled.
+
 // JMPA and CALLA take their segment from CSP, so they reach the segment the
 // instruction is in and no other.  Nothing in the instruction says which one
 // that is, and a target somewhere else is not diagnosed by anything else: the
