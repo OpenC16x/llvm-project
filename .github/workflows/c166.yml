@@ -113,7 +113,8 @@ jobs:
             llvm/test/CodeGen/C166 \
             llvm/test/MC/C166 \
             llvm/test/DebugInfo/C166 \
-            llvm/test/tools/c166-sim
+            llvm/test/tools/c166-sim \
+            llvm/test/Analysis/CostModel/C166
 
       - name: lld tests for C166
         run: |
