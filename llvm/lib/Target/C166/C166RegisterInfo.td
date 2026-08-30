@@ -136,11 +136,95 @@ def SYSSP    : C166Reg<0x09, "sp">, DwarfRegNum<[36]>; // FE12H
 def STKOV    : C166Reg<0x0A, "stkov">, DwarfRegNum<[38]>; // FE14H
 def STKUN    : C166Reg<0x0B, "stkun">, DwarfRegNum<[39]>; // FE16H
 
-// External bus: the address windows and their bus configurations.
+
+// The XC164CM's own.  Every one of these is at a short address that the
+// older layout gives to something else, which is the whole reason the map
+// has to be chosen rather than assumed; the collisions are listed above.
+
 def CPUCON1  : C166Reg<0x0C, "cpucon1">; // FE18H
 def CPUCON2  : C166Reg<0x0D, "cpucon2">; // FE1AH
 def SPSEG    : C166Reg<0x86, "spseg">; // FF0CH
 def VECSEG   : C166Reg<0x89, "vecseg">; // FF12H
+def P9       : C166Reg<0x8B, "p9">; // FF16H
+def DP9      : C166Reg<0x8C, "dp9">; // FF18H
+def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
+
+// The C167's own: the external bus, CAPCOM1, the PWM unit and the ports the
+// XC164CM does not have.  Addresses are from the Keil C167CS device header,
+// which cites the Siemens C167CS User Manual V1.0 of 1999-05; the 91 names
+// this map shares with the one above agree with it on the short address of
+// every single one, which is the check that says both were read correctly.
+//
+// This is the C167CS's map and is named for that part rather than for the
+// family, for the same reason the one above is the XC164CM's.
+
+def ADDRSEL1 : C166Reg<0x0C, "addrsel1">; // FE18H
+def ADDRSEL2 : C166Reg<0x0D, "addrsel2">; // FE1AH
+def ADDRSEL3 : C166Reg<0x0E, "addrsel3">; // FE1CH
+def ADDRSEL4 : C166Reg<0x0F, "addrsel4">; // FE1EH
+def PW0      : C166Reg<0x18, "pw0">; // FE30H
+def PW1      : C166Reg<0x19, "pw1">; // FE32H
+def PW2      : C166Reg<0x1A, "pw2">; // FE34H
+def PW3      : C166Reg<0x1B, "pw3">; // FE36H
+def T0       : C166Reg<0x28, "t0">; // FE50H
+def T1       : C166Reg<0x29, "t1">; // FE52H
+def T0REL    : C166Reg<0x2A, "t0rel">; // FE54H
+def T1REL    : C166Reg<0x2B, "t1rel">; // FE56H
+def CC0      : C166Reg<0x40, "cc0">; // FE80H
+def CC1      : C166Reg<0x41, "cc1">; // FE82H
+def CC2      : C166Reg<0x42, "cc2">; // FE84H
+def CC3      : C166Reg<0x43, "cc3">; // FE86H
+def CC4      : C166Reg<0x44, "cc4">; // FE88H
+def CC5      : C166Reg<0x45, "cc5">; // FE8AH
+def CC6      : C166Reg<0x46, "cc6">; // FE8CH
+def CC7      : C166Reg<0x47, "cc7">; // FE8EH
+def CC8      : C166Reg<0x48, "cc8">; // FE90H
+def CC9      : C166Reg<0x49, "cc9">; // FE92H
+def CC10     : C166Reg<0x4A, "cc10">; // FE94H
+def CC11     : C166Reg<0x4B, "cc11">; // FE96H
+def CC12     : C166Reg<0x4C, "cc12">; // FE98H
+def CC13     : C166Reg<0x4D, "cc13">; // FE9AH
+def CC14     : C166Reg<0x4E, "cc14">; // FE9CH
+def CC15     : C166Reg<0x4F, "cc15">; // FE9EH
+def P1DIDIS  : C166Reg<0x52, "p1didis">; // FEA4H
+def WDT      : C166Reg<0x57, "wdt">; // FEAEH
+def P0L      : C166Reg<0x80, "p0l">; // FF00H
+def P0H      : C166Reg<0x81, "p0h">; // FF02H
+def BUSCON0  : C166Reg<0x86, "buscon0">; // FF0CH
+def SYSCON   : C166Reg<0x89, "syscon">; // FF12H
+def BUSCON1  : C166Reg<0x8A, "buscon1">; // FF14H
+def BUSCON2  : C166Reg<0x8B, "buscon2">; // FF16H
+def BUSCON3  : C166Reg<0x8C, "buscon3">; // FF18H
+def BUSCON4  : C166Reg<0x8D, "buscon4">; // FF1AH
+def PWMCON0  : C166Reg<0x98, "pwmcon0">; // FF30H
+def PWMCON1  : C166Reg<0x99, "pwmcon1">; // FF32H
+def T01CON   : C166Reg<0xA8, "t01con">; // FF50H
+def CCM0     : C166Reg<0xA9, "ccm0">; // FF52H
+def CCM1     : C166Reg<0xAA, "ccm1">; // FF54H
+def CCM2     : C166Reg<0xAB, "ccm2">; // FF56H
+def CCM3     : C166Reg<0xAC, "ccm3">; // FF58H
+def CC0IC    : C166Reg<0xBC, "cc0ic">; // FF78H
+def CC1IC    : C166Reg<0xBD, "cc1ic">; // FF7AH
+def CC2IC    : C166Reg<0xBE, "cc2ic">; // FF7CH
+def CC3IC    : C166Reg<0xBF, "cc3ic">; // FF7EH
+def CC4IC    : C166Reg<0xC0, "cc4ic">; // FF80H
+def CC5IC    : C166Reg<0xC1, "cc5ic">; // FF82H
+def CC6IC    : C166Reg<0xC2, "cc6ic">; // FF84H
+def CC7IC    : C166Reg<0xC3, "cc7ic">; // FF86H
+def CC14IC   : C166Reg<0xCA, "cc14ic">; // FF94H
+def CC15IC   : C166Reg<0xCB, "cc15ic">; // FF96H
+def T0IC     : C166Reg<0xCE, "t0ic">; // FF9CH
+def T1IC     : C166Reg<0xCF, "t1ic">; // FF9EH
+def P2       : C166Reg<0xE0, "p2">; // FFC0H
+def DP2      : C166Reg<0xE1, "dp2">; // FFC2H
+def P4       : C166Reg<0xE4, "p4">; // FFC8H
+def DP4      : C166Reg<0xE5, "dp4">; // FFCAH
+def P6       : C166Reg<0xE6, "p6">; // FFCCH
+def DP6      : C166Reg<0xE7, "dp6">; // FFCEH
+def P7       : C166Reg<0xE8, "p7">; // FFD0H
+def DP7      : C166Reg<0xE9, "dp7">; // FFD2H
+def P8       : C166Reg<0xEA, "p8">; // FFD4H
+def DP8      : C166Reg<0xEB, "dp8">; // FFD6H
 
 // The instruction pointer, which is not a register a program can name: it is
 // here because the debug information has to.  DWARF describes where a frame's
@@ -283,11 +367,6 @@ def P3       : C166Reg<0xE2, "p3">; // FFC4H
 def DP3      : C166Reg<0xE3, "dp3">; // FFC6H
 def P5       : C166Reg<0xD1, "p5">; // FFA2H
 def P5DIDIS  : C166Reg<0xD2, "p5didis">; // FFA4H
-// Port 9 sits in the block the external bus registers occupy on a part that
-// has an external bus; the XC164CM has none.
-def P9       : C166Reg<0x8B, "p9">; // FF16H
-def DP9      : C166Reg<0x8C, "dp9">; // FF18H
-def ODP9     : C166Reg<0x8D, "odp9">; // FF1AH
 def FOCON    : C166Reg<0xD5, "focon">; // FFAAH
 
 // The MAC unit's registers.  This part has a C166SV2 core, so it has a
@@ -437,22 +516,72 @@ def GR16 : RegisterClass<"C166", [i16], 16,
   (add R2, R3, R4, R5, R6, R7, R8, R9, R10, R11,
        R12, R13, R14, R15, R1, R0)>;
 
-// Non-allocatable special function registers.
-def SFR : RegisterClass<"C166", [i16], 16,
-  (add 
-      
-      DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN,
-      CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9, PSW, MDC, ZEROS,
-      ONES, TFR, T2, T3, T4, T5, T6, CAPREL, T2CON, T3CON, T4CON, T5CON,
-      T6CON, T78CON, CC16, CC17, CC18, CC19, CC20, CC21, CC22, CC23, CC24,
-      CC25, CC26, CC27, CC28, CC29, CC30, CC31, CCM4, CCM5, CCM6, CCM7,
-      ADDAT, ADCON, WDTCON, S0TBUF, S0RBUF, S0BG, S0CON, SSCCON, PECC0,
-      PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC, T3IC, T4IC,
-      T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC, SSCEIC,
-      CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC, P1L,
-      P1H, P3, DP3, P5, P5DIDIS, FOCON, IDX0, IDX1, MAL, MAH, MRW, MCW,
-      MSW
+// Non-allocatable special function registers, in three groups.
+//
+// The short address a register carries is its encoding, and the same short
+// address names different registers on different derivatives - so the map is
+// a property of the part rather than of the family, and one register file
+// cannot be right about all of them at once.  What it can do is say which
+// group each register belongs to and let the subtarget pick: the assembler
+// refuses a name outside the chosen map and the disassembler does not offer
+// it, which is what stops a listing for one part being read as another.
+//
+// The encodings are not part-specific and never were.  Only the names are, so
+// this is a naming layer over one set of instructions rather than a second
+// instruction set.
+
+// Registers both maps here agree about, name and short address alike.  That
+// is the classic C166 layout: the timers, the A/D converter, the serial
+// channels, the peripheral event controller, the interrupt control registers
+// and ports 1, 3 and 5, on top of the CPU core proper.  The coprocessor's
+// registers ride along here too - they belong to the MAC unit rather than to
+// a derivative, and HasMAC is what says whether that unit is there.
+def SFRCommon : RegisterClass<"C166", [i16], 16,
+  (add
+      DPP0, DPP1, DPP2, DPP3, CSP, MDH, MDL, CP, SYSSP, STKOV, STKUN, PSW,
+      MDC, ZEROS, ONES, TFR, T2, T3, T4, T5, T6, CAPREL, T2CON, T3CON,
+      T4CON, T5CON, T6CON, T78CON, CC16, CC17, CC18, CC19, CC20, CC21,
+      CC22, CC23, CC24, CC25, CC26, CC27, CC28, CC29, CC30, CC31, CCM4,
+      CCM5, CCM6, CCM7, ADDAT, ADCON, WDTCON, S0TBUF, S0RBUF, S0BG, S0CON,
+      SSCCON, PECC0, PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC,
+      T3IC, T4IC, T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC,
+      SSCEIC, CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC,
+      P1L, P1H, P3, DP3, P5, P5DIDIS, FOCON, IDX0, IDX1, MAL, MAH, MRW,
+      MCW, MSW
   )> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The XC164CM's, selected by FeatureSFRXC164.
+def SFRXC164 : RegisterClass<"C166", [i16], 16,
+  (add
+      CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9
+  )> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The C167CS's, selected by FeatureSFRC167.
+def SFRC167 : RegisterClass<"C166", [i16], 16,
+  (add
+      ADDRSEL1, ADDRSEL2, ADDRSEL3, ADDRSEL4, PW0, PW1, PW2, PW3, T0, T1,
+      T0REL, T1REL, CC0, CC1, CC2, CC3, CC4, CC5, CC6, CC7, CC8, CC9, CC10,
+      CC11, CC12, CC13, CC14, CC15, P1DIDIS, WDT, P0L, P0H, BUSCON0,
+      SYSCON, BUSCON1, BUSCON2, BUSCON3, BUSCON4, PWMCON0, PWMCON1, T01CON,
+      CCM0, CCM1, CCM2, CCM3, CC0IC, CC1IC, CC2IC, CC3IC, CC4IC, CC5IC,
+      CC6IC, CC7IC, CC14IC, CC15IC, T0IC, T1IC, P2, DP2, P4, DP4, P6, DP6,
+      P7, DP7, P8, DP8
+  )> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// Everything a "reg" field could name on some part.  This is what the operand
+// classes below are built from; which of it is live is the subtarget's answer,
+// asked at parse time and at decode time rather than baked in here.
+def SFR : RegisterClass<"C166", [i16], 16,
+  (add SFRCommon, SFRXC164, SFRC167)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

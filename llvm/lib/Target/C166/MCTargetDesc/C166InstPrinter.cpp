@@ -30,6 +30,7 @@ void C166InstPrinter::printRegName(raw_ostream &O, MCRegister Reg) {
 void C166InstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                 StringRef Annot, const MCSubtargetInfo &STI,
                                 raw_ostream &O) {
+  this->STI = &STI;
   printInstruction(MI, Address, O);
   printAnnotation(O, Annot);
 }
@@ -79,7 +80,7 @@ void C166InstPrinter::printAddr16Operand(const MCInst *MI, unsigned OpNo,
     // as the same address, so this still reassembles to the bytes it came
     // from, and "mov r2, mdl" says what it is doing.
     uint64_t Addr = static_cast<uint64_t>(Op.getImm()) & 0xffff;
-    if (StringRef Name = C166::getSFRName(MRI, Addr); !Name.empty())
+    if (StringRef Name = C166::getSFRName(MRI, Addr, STI); !Name.empty())
       O << Name;
     else
       O << Addr;
@@ -146,7 +147,8 @@ void C166InstPrinter::printBitOffOperand(const MCInst *MI, unsigned OpNo,
     return;
   }
   if (C166::isSFRBitAddressable(Off)) {
-    StringRef Name = C166::getSFRName(MRI, C166::getSFRAddressForShort(Off));
+    StringRef Name =
+        C166::getSFRName(MRI, C166::getSFRAddressForShort(Off), STI);
     if (!Name.empty()) {
       O << Name;
       return;

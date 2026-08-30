@@ -32,6 +32,14 @@ using namespace c166sim;
 static cl::opt<std::string> InputFile(cl::Positional, cl::Required,
                                       cl::desc("<c166 elf executable>"));
 static cl::opt<std::string>
+    MCPU("mcpu", cl::init("xc16x"),
+         cl::desc("The part being simulated, which the decoder needs: the same "
+                  "short address is a different special function register on "
+                  "different derivatives.  Defaults to the XC164CM, which is "
+                  "what this simulator models."),
+         cl::value_desc("cpu"));
+
+static cl::opt<std::string>
     ExitSymbol("exit-symbol", cl::init("__c166_exit"),
                cl::desc("halt when execution reaches this symbol "
                         "(default __c166_exit)"));
@@ -71,6 +79,10 @@ int main(int argc, char **argv) {
   LLVMInitializeC166TargetMC();
   LLVMInitializeC166Disassembler();
   cl::ParseCommandLineOptions(argc, argv, "C166 instruction set simulator\n");
+
+  // Before anything is decoded: the decoder is built once, on first use, and
+  // which derivative's special function registers it knows is part of it.
+  c166sim::setSimCPU(MCPU);
 
   auto Fail = [](const Twine &Msg) -> int {
     WithColor::error(errs(), "c166-sim") << Msg << "\n";

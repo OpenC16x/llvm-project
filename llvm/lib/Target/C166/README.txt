@@ -691,6 +691,55 @@ does unconditionally.
 Known limitations / things to do
 --------------------------------
 
+* Two parts' worth of board support is here rather than one.  c167.ld and
+  c167-crt0.S are the C167's, and -mmcu= picks the startup file while -T still
+  picks the script, because the map is the board's rather than the part's and
+  the scripts here are starting points.
+
+  Two things make the C167 simpler rather than harder.  Its program memory is
+  at the bottom of segment 0, so the data page pointers want the values they
+  already hold after reset; and it has no RAM outside them, so nothing has to
+  be copied or zeroed through an EXTS.  What it does not have is a PLL to
+  program - the clock comes from the CLKCFG pins - which is half the length of
+  the XC164CM's crt0.
+
+  The 48 KByte a near address reaches is the same on both, because that limit
+  is what the data page pointers cover rather than where the memory is.
+
+  vectors.ld serves both parts unchanged.  A C167 has no VECSEG and no
+  CPUCON1.VECSC, so its table is four bytes per vector at the bottom of segment
+  0 and it has no choice about it; c167.ld's rom region starts there, so
+  placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
+  c167-vectors.inc names that part's 56 interrupt sources and its four hardware
+  traps.  Both tables pass the self-check the XC164CM's does - the location is
+  four times the trap number in every row - and together they account for the
+  vector space completely: 00H to 0AH are the traps, 0BH to 0FH are reserved,
+  and 10H to 47H are the interrupts with none missing.
+
+  Trap number 08H is the one slot nothing claims.  It is in the trap table
+  neither as a trap nor among the reserved numbers, and it is where an XC164CM
+  has a software break trap that this part does not name, so the file leaves it
+  alone rather than guessing.  Its class B trap is raised by five conditions
+  where the XC164CM's is raised by four: an illegal instruction access and an
+  illegal external bus access are this part's own, and it has no Flash to raise
+  a PMI access error.
+
+  The C167's extension RAM is at 00'E000H, which the User's Manual gives - the
+  data sheet the part table was read from has the size and not the address, and
+  0800H of it is exactly the 2 KByte that sheet quotes.  Static data goes there
+  and the two stacks keep the internal RAM, which is the same split c166.ld
+  makes between the data SRAM and the dual-port RAM; a part with no extension
+  RAM puts its static data at the bottom of the internal RAM instead, with the
+  ABI stack coming down towards it.
+
+  It is an X-peripheral, so c167-crt0.S sets SYSCON.XPEN before writing
+  anything into it and before EINIT locks that register.  Whether to is the
+  linker script's answer rather than the startup file's, because it depends on
+  there being an extension RAM at all: the script defines __c166_enable_xper
+  and the startup branches on it.  SYSCON is bit addressable, so it is one
+  BSET and not a read-modify-write of a register whose other bits the reset
+  pins set.
+
 * The near addressing model is the XC164CM's: a near reference relocates as
   SOF16, the offset within a segment, and the data page pointers decide which
   page that offset lands in.  DPP0 to DPP2 cover the Flash and DPP3 the RAM and
@@ -763,10 +812,41 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
-* The SFR map is the XC164CM's, and only that part's: the same short address
-  names different registers on different derivatives, so nothing here is right
-  for another one and nothing selects between them.  C166RegisterInfo.td says
-  where the XC164CM departs from the older C167 layout.
+* Two SFR maps are modelled and the subtarget picks between them, because the
+  same short address names different registers on different derivatives.  What
+  the two agree about - 91 names at the same short address, which is the
+  classic C166 layout of timers, A/D converter, serial channels, peripheral
+  event controller, interrupt control registers and ports 1, 3 and 5 on top of
+  the CPU core - is always available.  What they do not is FeatureSFRXC164 and
+  FeatureSFRC167, which -mcpu=xc16x and -mcpu=c167 select.
+
+  They disagree about exactly seven short addresses, and the disagreement is
+  the external bus: the XC164CM has none, so it put CPUCON1, CPUCON2, SPSEG,
+  VECSEG and port 9 where a C167 has ADDRSEL1, ADDRSEL2, BUSCON0, SYSCON and
+  BUSCON2 to 4.  The C167 also has CAPCOM1, the PWM unit and ports 0, 2, 4, 6,
+  7 and 8, which the XC164CM does not have at all.
+
+  The encodings were never part-specific; only the names are.  So this is a
+  naming layer over one instruction set rather than a second instruction set,
+  and it applies in three places: the assembler refuses a name from another
+  part's map, the disassembler decodes a short address to the register this
+  part has there, and the printer names an address the same way.  The same
+  bytes therefore read back as "mov r2, cpucon1" for one part and
+  "mov r2, addrsel1" for another, which is what they mean.
+
+  The C167 map is the C167CS's and is named for that part rather than for the
+  family, for the reason the other one is the XC164CM's.  Its addresses are
+  from the Keil C167CS device header, which cites the Siemens C167CS User
+  Manual V1.0 of 1999-05.  The check that both were read correctly is that the
+  91 names the two maps share agree on the short address of every single one.
+
+  Two things this does not do.  -mcpu=st10 gets the shared set alone: an ST10
+  is a C167 derivative and very likely has its map, but very likely is not the
+  standard the rest of this is held to, so it waits for somebody with an ST10
+  manual.  And the extended and X-peripheral registers are the XC164CM's
+  entire, gated with the rest of its map rather than split into a shared part
+  and a per-derivative one, because there is no second ESFR map here to split
+  them against.
 * An extended special function register is reachable by address but not
   through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
   Getting at one that way needs an EXTR, and once encoded it is the same bytes
@@ -990,6 +1070,35 @@ One shape it does not catch: an unrolled loop whose adds have been
 reassociated no longer has a multiply feeding the accumulator, so nothing
 matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
 what the unit's CoMUL is for, and is not done.
+
+Rounding a fixed point product
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+"(a * b + 0x8000) >> 16" is a fixed point product rounded to its high word,
+and it is one instruction: the rounding forms add 00 0000 8000H to the
+accumulator and clear MAL, so MAH alone is the answer.  Two instructions
+against the six the accumulate onto a materialised constant used to be.
+
+The shape reaching the combiner is an accumulate whose accumulator is the
+constant pair 0x8000 and 0, with the low word of the sum thrown away, so it is
+recognised where the rest of the multiply-accumulate matching already happens
+rather than in a pass of its own.
+
+It is exactly the C answer and not merely close, because the addend cannot
+carry out of thirty two bits: a signed 16 by 16 product reaches 2^30 and an
+unsigned one 2^32 - 2^17, so neither wraps once 0x8000 is added.
+
+That argument is also what confines this to a bare product.  With a real
+accumulator in play the forty bit accumulator can hold a sum that a thirty two
+bit one would have wrapped, and reading MAH with no CoSTORE of MAL to truncate
+through would then differ from what the program asked for - so an accumulating
+round is left alone, and there is a test saying so.  The same goes for a low
+word that is wanted: the instruction clears MAL, so it can only stand in where
+that word is thrown away.
+
+The simulator implements the two rounding multiplies and still refuses the
+rounding accumulates, which is what it does with anything it does not model:
+it stops and names the instruction rather than guessing.
 
 The accumulator is loaded and stored the same way for all four.  CoLOAD sign
 extends into a forty bit accumulator and the two CoSTOREs truncate back to

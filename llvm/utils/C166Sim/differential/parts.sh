@@ -9,6 +9,12 @@
 # somewhere else, and a part with two segments of program memory has to keep
 # them in separate regions; both are derivatives in the table.
 #
+# The linker script is the core's rather than the part's, because the shape of
+# the memory map is: the one named on the command line is used for an XC16x
+# part and the one beside it for a C167.  Passing a board's own script means
+# passing one that suits every part in the table, which is a thing a board
+# script is not.
+#
 # Usage: parts.sh <build-bin-dir> <sysroot> <linker-script> [program.c]
 set -e
 BIN=${1:?usage: parts.sh <build-bin-dir> <sysroot> <linker-script> [program]}
@@ -30,14 +36,22 @@ ${CC:-cc} -O2 -w -o "$TMP/host" "$SRC"
 # message, so that this does not quietly test nothing if that wording changes.
 DEF=$(cd "$HERE/../../../include/llvm/TargetParser" && pwd)/C166TargetParser.def
 PARTS=$(sed -n 's/^C166_PART("\([^"]*\)".*/\1/p' "$DEF")
+CORES=$(sed -n 's/^C166_PART("[^"]*", *"\([^"]*\)".*/\1/p' "$DEF")
+C167_SCRIPT=$(dirname "$SCRIPT")/c167.ld
 if [ -z "$PARTS" ]; then
   echo "FAIL no parts found in $DEF"
   exit 1
 fi
 
+INDEX=0
 for PART in $PARTS; do
+  INDEX=$((INDEX + 1))
+  CORE=$(echo "$CORES" | sed -n "${INDEX}p")
+  PART_SCRIPT=$SCRIPT
+  [ "$CORE" = c167 ] && PART_SCRIPT=$C167_SCRIPT
+
   if ! "$BIN/clang" -target c166 -mmcu="$PART" -Os --sysroot="$SYSROOT" \
-      -T "$SCRIPT" "$SRC" -o "$TMP/$PART.elf" 2> "$TMP/$PART.build"; then
+      -T "$PART_SCRIPT" "$SRC" -o "$TMP/$PART.elf" 2> "$TMP/$PART.build"; then
     # A program too big for a small derivative is a fact about the part rather
     # than a wrong answer, and is reported and passed over.
     if grep -q "will not fit in region" "$TMP/$PART.build"; then

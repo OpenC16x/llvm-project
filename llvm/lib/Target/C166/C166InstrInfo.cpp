@@ -426,6 +426,19 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
     break;
   }
+  case C166::MULRND32rr: {
+    // One rounding CoMUL and the high word out.  The instruction adds
+    // 00 0000 8000H and clears MAL itself, so there is nothing to load
+    // beforehand and nothing but MAH to fetch afterwards.
+    Register Hi = MI.getOperand(0).getReg();
+    Register A = MI.getOperand(1).getReg();
+    Register B = MI.getOperand(2).getReg();
+    unsigned Kind = MI.getOperand(3).getImm();
+
+    Emit(C166::getMULRNDOpcode(Kind)).addReg(A).addReg(B);
+    Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
+    break;
+  }
   case C166::MAC32rr: {
     // The accumulator goes into the unit, the product is accumulated onto it,
     // and the two words come back out.  It does not stay: nothing saves the

@@ -15,28 +15,35 @@
 // was guessed from the name would be wrong in a way that only shows up when a
 // program overflows a region that is not there.  A new part needs its table.
 //
-// The sizes are what the manual's memory map gives, in bytes:
+// The sizes are what the manual gives, in bytes.  They are named for what each
+// memory is rather than for where it is, because where it is belongs to the
+// core: a C167 puts its program memory at the bottom of a segment and an XC16x
+// at C0'0000H, and the linker script - which is per core - is where that is
+// written down.
 //
-//   PROGRAM  the on-chip program memory at C0'0000H, Flash or ROM
-//   DSRAM    the data SRAM at 00'C000H, which some derivatives do not have
-//   DPRAM    the dual-port RAM at 00'F600H
-//   PSRAM    the program SRAM at E0'0000H, which only a far access reaches
+//   PROGRAM  the on-chip program memory, Flash or ROM
+//   XRAM     RAM outside the internal RAM window: the XC16x's data SRAM at
+//            00'C000H, a C167's extension RAM.  Zero where there is none
+//   IRAM     the internal RAM at 00'F600H, which every part here has there;
+//            the XC16x manuals call this the dual-port RAM
+//   PSRAM    the program SRAM at E0'0000H, which only a far access reaches.
+//            XC16x only
 //
-// CORE is the instruction set, which -mcpu= names: every part here has the
-// C166S V2 core, so every one of them has the multiply-accumulate unit.
+// CORE is the instruction set, which -mcpu= names, and with it the shape of
+// the memory map and which special function registers exist.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef C166_PART
-#define C166_PART(NAME, CORE, PROGRAM, DSRAM, DPRAM, PSRAM, ROMMED)
+#define C166_PART(NAME, CORE, PROGRAM, XRAM, IRAM, PSRAM, ROMMED)
 #endif
 
 // XC164CM System Units (Vol. 1 of 2), V1.2 2006-03, Table 1-1 "XC164xx
 // Derivative Map".  The six letter pairs differ only in how many TwinCAN, ADC
 // and CAPCOM6 modules they have; the memory is the suffix's.
 //
-//   XC164xx-8F   64 KByte Flash, 2 KByte DSRAM, 2 KByte PSRAM, 2 KByte DPRAM
-//   XC164xx-4F   32 KByte Flash, 0 KByte DSRAM, 2 KByte PSRAM, 2 KByte DPRAM
+//   XC164xx-8F   64 KByte Flash, 2 KByte XRAM, 2 KByte PSRAM, 2 KByte IRAM
+//   XC164xx-4F   32 KByte Flash, 0 KByte XRAM, 2 KByte PSRAM, 2 KByte IRAM
 
 C166_PART("xc164cm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
 C166_PART("xc164gm-8f", "xc16x", 65536, 2048, 2048, 2048, false)
@@ -65,5 +72,26 @@ C166_PART("xc164cs-16f", "xc16x", 131072, 2048, 2048, 2048, false)
 C166_PART("xc164cs-8f", "xc16x", 65536, 2048, 2048, 2048, false)
 C166_PART("xc164cs-16r", "xc16x", 131072, 2048, 2048, 2048, true)
 C166_PART("xc164cs-8r", "xc16x", 65536, 2048, 2048, 2048, true)
+
+// C167CR / C167SR Data Sheet, V3.2 2001-07, the ordering table on page 3 and
+// "On-Chip Memory Modules" on page 2.  Every one of these has 2 KByte of IRAM
+// and 2 KByte of XRAM; the ordering table's own columns are the program memory
+// and whether there is a CAN interface, which is not something this table
+// records.
+//
+//   C167SR-LM     romless          C167CR-4RM    32 KByte ROM
+//   C167CR-LM     romless          C167CR-16RM  128 KByte ROM
+//
+// A romless part fetches from external memory, which is the board's rather
+// than the part's, so its program memory is nothing and c167.ld's rom region
+// is whatever the board's script says it is.
+//
+// The lower 32 KByte of the on-chip ROM can be mapped to segment 0 or segment
+// 1, which SYSCON.ROMS1 chooses; c167.ld assumes segment 0, the reset value.
+
+C166_PART("c167sr-lm", "c167", 0, 2048, 2048, 0, false)
+C166_PART("c167cr-lm", "c167", 0, 2048, 2048, 0, false)
+C166_PART("c167cr-4rm", "c167", 32768, 2048, 2048, 0, true)
+C166_PART("c167cr-16rm", "c167", 131072, 2048, 2048, 0, true)
 
 #undef C166_PART

@@ -25,6 +25,7 @@ class MCInstrInfo;
 class MCObjectTargetWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
+class MCRegister;
 class MCTargetOptions;
 class Target;
 
@@ -46,6 +47,20 @@ namespace C166 {
 // encodes and, through the mapping below, the address every other instruction
 // reaches it by.  Deriving one from the other rather than keeping a second
 // table is what stops the assembler and the disassembler drifting apart.
+
+/// Whether \p Reg is a special function register the part being assembled for
+/// actually has.
+///
+/// The short address a register carries is its encoding, and the same short
+/// address names different registers on different derivatives, so the register
+/// file holds every map at once and this is what picks between them.  Both
+/// ends need the same answer: the assembler so that a name from another part's
+/// map is refused rather than quietly encoded, and the disassembler so that a
+/// short address comes back as the register this part has there.
+///
+/// Anything outside the two per-part groups is shared by every map here and is
+/// always available.
+bool isSFRInSelectedMap(MCRegister Reg, const MCSubtargetInfo &STI);
 
 /// Where the special function register with short address \p Short is mapped.
 /// The two halves of the space are laid out from different bases.
@@ -92,7 +107,13 @@ int64_t getSFRShortAddress(const MCRegisterInfo &MRI, StringRef Name);
 int64_t getSFRAddress(const MCRegisterInfo &MRI, StringRef Name);
 
 /// The name of the register mapped at \p Addr, or empty if nothing is.
-StringRef getSFRName(const MCRegisterInfo &MRI, uint64_t Addr);
+/// The name of the special function register mapped at \p Addr, or empty.
+///
+/// \p STI says which derivative's map to look in, because the same address
+/// can be two different registers.  Passing none looks in all of them, which
+/// is right where nothing is being assembled for a particular part.
+StringRef getSFRName(const MCRegisterInfo &MRI, uint64_t Addr,
+                     const MCSubtargetInfo *STI = nullptr);
 
 } // end namespace C166
 

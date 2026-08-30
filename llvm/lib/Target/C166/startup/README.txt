@@ -6,11 +6,30 @@ memory map to link against.  None of it is built by the LLVM build: it is code
 for the target, not for the machine doing the building, so it is here to be
 copied into a project and adjusted rather than installed.
 
-  crt0.S               the reset vector and the startup sequence
-  c166.ld              a linker script for a part with nothing attached
-  vectors.ld           the interrupt vector table, for a program with handlers
+  crt0.S               the reset vector and the startup sequence, XC164CM
+  c166.ld              a linker script for an XC164CM with nothing attached
+  c167-crt0.S          the same for a C167, which has no PLL to program and
+                       no RAM outside the data page pointers
+  c167.ld              a linker script for a C167
+  vectors.ld           the interrupt vector table, for a program with handlers;
+                       it serves both parts, since a C167 has the layout an
+                       XC164CM comes up with and no registers to change it
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
+  c167-vectors.inc     the same for a C167
+
+Which of each pair a program gets is the core's, and -mcpu= or -mmcu= decides:
+the driver puts c167-crt0.o first for the c167 core and crt0.o for the rest, in
+the order those two options already resolve the core in.
+The linker script is passed with -T and is not chosen for you, because the
+memory map is the board's rather than the part's; the two here are starting
+points for the two parts they name.
+
+crt0.S has to be assembled for its own part - "-mcpu=xc16x", or an -mmcu= that
+implies it - because it programs the XC164CM's PLL through that part's extended
+special function registers, and a name from one derivative's map is refused for
+another.  That is the whole point of the map being chosen rather than assumed;
+saying which part a file is for is how it gets past it.
   mem.c                memcpy, memmove, memset and memcmp
   unwind.c             the DWARF unwinder, for C++ exceptions
   unwind-asm.S         the register capture and restore it needs

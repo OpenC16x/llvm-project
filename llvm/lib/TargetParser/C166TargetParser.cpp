@@ -11,8 +11,8 @@
 using namespace llvm;
 
 static constexpr C166::Part Parts[] = {
-#define C166_PART(NAME, CORE, PROGRAM, DSRAM, DPRAM, PSRAM, ROMMED)             \
-  {NAME, CORE, PROGRAM, DSRAM, DPRAM, PSRAM, ROMMED},
+#define C166_PART(NAME, CORE, PROGRAM, XRAM, IRAM, PSRAM, ROMMED)               \
+  {NAME, CORE, PROGRAM, XRAM, IRAM, PSRAM, ROMMED},
 #include "llvm/TargetParser/C166TargetParser.def"
 };
 

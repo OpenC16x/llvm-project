@@ -114,11 +114,22 @@ enum class Op {
   X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
   X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
   X(CoLOAD_rr) X(CoMAC_rr) X(CoMACu_rr) X(CoMACN_rr) X(CoMACuN_rr)               \
-  X(CoMUL_rr) X(CoMULu_rr) X(CoSTORE_sr)
+  X(CoMUL_rr) X(CoMULu_rr) X(CoMUL_rr_rnd) X(CoMULu_rr_rnd)                    \
+  X(CoSTORE_sr)
 #define X(N) N,
   OPS(X)
 #undef X
 };
+
+/// Which part is being simulated, which the decoder needs because the same
+/// short address names different special function registers on different
+/// derivatives - so "mov cpucon1, #x" and "mov addrsel1, #x" are the same
+/// bytes and only the part says which was meant.
+///
+/// The default is the XC164CM, because that is the part this simulator models:
+/// CPUCON1's vector spacing, VECSEG, the PLL and the coprocessor are all its.
+/// A program for another derivative says so with --mcpu.
+static std::string SimCPU = "xc16x";
 
 /// Everything the decoder needs, set up once.
 struct Decoder {
@@ -145,7 +156,7 @@ struct Decoder {
     MCTargetOptions Options;
     MAI.reset(T->createMCAsmInfo(*MRI, TT, Options));
     MII.reset(T->createMCInstrInfo());
-    STI.reset(T->createMCSubtargetInfo(TT, "", ""));
+    STI.reset(T->createMCSubtargetInfo(TT, SimCPU, ""));
     Ctx = std::make_unique<MCContext>(TT, *MAI, *MRI, *STI);
     DisAsm.reset(T->createMCDisassembler(*STI, *Ctx));
     Printer.reset(T->createMCInstPrinter(TT, 0, *MAI, *MII, *MRI));
@@ -174,6 +185,8 @@ Decoder &decoder() {
 }
 
 } // namespace
+
+void c166sim::setSimCPU(StringRef CPU) { SimCPU = CPU.str(); }
 
 // ---------------------------------------------------------------------------
 // Flag helpers.  Each one names the manual's wording for the flag it sets.
@@ -465,6 +478,11 @@ static unsigned baseStateTime(Op O, bool Taken) {
   case Op::CoMACuN_rr:
   case Op::CoSTORE_sr:
     return 2;
+  // The same table gives the rounding forms two cycles rather than one, so
+  // these are four states where the plain ones are two.
+  case Op::CoMUL_rr_rnd:
+  case Op::CoMULu_rr_rnd:
+    return 4;
   default:
     return 2;
   }
@@ -1151,11 +1169,15 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   //   CoMACu Rwn, Rwm   the same two with an unsigned product, zero extended
   //   CoSTORE Rwn, creg the named MAC register into Rwn
   //
-  // Each of the arithmetic ones one-bit left shifts the product first
-  // when MCW.MP is set.  MCW resets to zero, so that does not happen unless a
-  // program asks for it, and nothing here asks.  The rounding forms are a
-  // different opcode - they add 00 0000 8000H and clear MAL - and are not
-  // implemented, so a program using one stops rather than quietly rounding.
+  // A form written ", rnd" does the same and then adds 00 0000 8000H and
+  // clears MAL, which rounds the accumulator to its high word.  CoMUL is the
+  // one the compiler selects; the rounding accumulates are still refused
+  // rather than guessed at, which is what the default below does with
+  // anything not listed.
+  //
+  // Each of the arithmetic ones one-bit left shifts the product first when
+  // MCW.MP is set.  MCW resets to zero, so that does not happen unless a
+  // program asks for it, and nothing here asks.
   case Op::CoLOAD_rr: {
     int64_t V = int64_t(int32_t((uint32_t(W(1)) << 16) | W(0)));
     M.setACC(V);
@@ -1163,6 +1185,8 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   }
   case Op::CoMUL_rr:
   case Op::CoMULu_rr:
+  case Op::CoMUL_rr_rnd:
+  case Op::CoMULu_rr_rnd:
   case Op::CoMAC_rr:
   case Op::CoMACu_rr:
   case Op::CoMACN_rr:
@@ -1171,15 +1195,24 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     // sign extend them first, which is the whole of the difference; the
     // product is 32 bits either way and the accumulator is 40.
     bool Unsigned = O == Op::CoMACu_rr || O == Op::CoMACuN_rr ||
-                    O == Op::CoMULu_rr;
+                    O == Op::CoMULu_rr || O == Op::CoMULu_rr_rnd;
     int64_t P = Unsigned
                     ? int64_t(uint32_t(W(0)) * uint32_t(W(1)))
                     : int64_t(int32_t(int16_t(W(0))) * int32_t(int16_t(W(1))));
     if ((M.MCW >> 10) & 1)
       P <<= 1;
     bool Negate = O == Op::CoMACN_rr || O == Op::CoMACuN_rr;
-    bool Replace = O == Op::CoMUL_rr || O == Op::CoMULu_rr;
-    M.setACC(Replace ? P : (Negate ? M.ACC - P : M.ACC + P));
+    bool Round = O == Op::CoMUL_rr_rnd || O == Op::CoMULu_rr_rnd;
+    bool Replace = O == Op::CoMUL_rr || O == Op::CoMULu_rr || Round;
+    int64_t R = Replace ? P : (Negate ? M.ACC - P : M.ACC + P);
+    if (Round) {
+      // Add half of the high word's least significant bit and drop what is
+      // below it, which is what leaves MAH holding the rounded answer.
+      M.setACC(R + 0x8000);
+      M.setACC(M.ACC & ~0xFFFFll);
+      break;
+    }
+    M.setACC(R);
     break;
   }
   case Op::CoSTORE_sr: {

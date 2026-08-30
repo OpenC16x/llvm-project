@@ -3,7 +3,8 @@
 # does not produce: they are code for the target rather than for the machine
 # doing the building.
 #
-#   crt0.o   the reset vector and the startup sequence
+#   crt0.o   the reset vector and the startup sequence, and c167-crt0.o
+#            which is the same for a part with that core
 #   libc.a   memcpy, memmove, memset and memcmp, what the headers promise and
 #            nothing else defines (errno, exit, abort and the assert handler),
 #            and the unwinder and C++ ABI that a thrown exception runs on
@@ -44,7 +45,18 @@ BIN=$(cd "$BUILD/bin" && pwd)
 
 cp "$STARTUP"/include/*.h "$SYSROOT/c166-elf/include/"
 
-"$BIN/clang" -target c166 -c "$STARTUP/crt0.S" -o "$SYSROOT/c166-elf/lib/crt0.o"
+# crt0.S is the XC164CM's - it programs that part's PLL through that part's
+# extended special function registers - so it is assembled for that part.  A
+# name from one derivative's map is refused for another, which is the point;
+# saying which part this file is for is how it gets past that.
+"$BIN/clang" -target c166 -mcpu=xc16x -c "$STARTUP/crt0.S" \
+    -o "$SYSROOT/c166-elf/lib/crt0.o"
+
+# The C167's, which the driver picks for a part with that core.  It is the
+# same startup less the PLL and less the far copies, because that part has
+# neither; see c167-crt0.S.
+"$BIN/clang" -target c166 -mcpu=c167 -c "$STARTUP/c167-crt0.S" \
+    -o "$SYSROOT/c166-elf/lib/c167-crt0.o"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

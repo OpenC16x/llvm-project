@@ -55,6 +55,12 @@ def SDT_C166MAC          : SDTypeProfile<2, 5, [SDTCisVT<0, i16>,
                                                 SDTCisVT<5, i16>,
                                                 SDTCisVT<6, i16>]>;
 
+// Two 16 bit operands of a multiply, giving the rounded high word alone.
+def SDT_C166MULRND       : SDTypeProfile<1, 3, [SDTCisVT<0, i16>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>,
+                                                SDTCisVT<3, i16>]>;
+
 // A 32 bit dividend as a low and a high word and a 16 bit divisor, giving the
 // two words of the quotient and the one word remainder.
 def SDT_C166DivL         : SDTypeProfile<3, 3, [SDTCisVT<0, i16>,
@@ -97,6 +103,7 @@ def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166udivl32  : SDNode<"C166ISD::UDIVREM32BY16", SDT_C166DivL>;
 def C166mac      : SDNode<"C166ISD::MAC", SDT_C166MAC>;
+def C166mulrnd   : SDNode<"C166ISD::MUL_RND", SDT_C166MULRND>;
 
 //===----------------------------------------------------------------------===//
 // Operand Definitions
@@ -846,6 +853,21 @@ def UMULMAC16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
                              [(set GR16:$lo, GR16:$hi,
                                    (umullohi GR16:$src1, GR16:$src2))]>;
 }
+
+// "(a * b + 0x8000) >> 16", the fixed point rounding idiom, which the unit
+// does in one instruction: the rounding forms add 00 0000 8000H to the
+// accumulator and clear MAL, so the high word alone is the whole answer and
+// only one CoSTORE is needed to fetch it.  Two instructions where the
+// accumulate this used to become is six.
+//
+// $kind is C166MAC::Kind again, and only its first two values: there is no
+// rounding subtract, because "acc - a * b" rounded is not an idiom anyone
+// writes and the shape below would not recognise it anyway.
+let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
+def MULRND32rr : Pseudo<(outs GR16:$hi), (ins GR16:$a, GR16:$b, i16imm:$kind),
+                        "#MULRND32rr",
+                        [(set GR16:$hi,
+                              (C166mulrnd GR16:$a, GR16:$b, timm:$kind))]>;
 
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
 def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),

@@ -1,8 +1,13 @@
 # REQUIRES: c166-registered-target
-# RUN: llvm-mc -filetype=obj -triple=c166 %s -o %t.o
+# RUN: llvm-mc -filetype=obj -triple=c166 -mcpu=xc16x %s -o %t.o
 # RUN: llvm-objcopy -O binary %t.o %t.bin
 # RUN: %c166_sim --binary --dump-state %t.bin 2>&1 | FileCheck %s
 
+## The PLL is the XC164CM's, and so are PLLCON and SYSSTAT, so this is
+## assembled for that part.  A register name from one derivative's map is
+## refused for another; saying which part a file is for is how it gets past
+## that, the same way crt0.S does.
+##
 ## SYSSTAT's PLLLOCK is what startup code waits on before it moves the CPU onto
 ## the PLL, so it has to come up clear and become set later.  A simulator that
 ## reported it set from the first instruction would let a wait loop that could

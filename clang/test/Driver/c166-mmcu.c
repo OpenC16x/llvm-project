@@ -46,8 +46,8 @@
 // RUN:   | FileCheck %s --check-prefix=DEFS
 // DEFS: "-D" "__XC164CS_16R__"
 // DEFS-SAME: "-D" "__C166_PROGRAM_SIZE__=131072"
-// DEFS-SAME: "-D" "__C166_DSRAM_SIZE__=2048"
-// DEFS-SAME: "-D" "__C166_DPRAM_SIZE__=2048"
+// DEFS-SAME: "-D" "__C166_XRAM_SIZE__=2048"
+// DEFS-SAME: "-D" "__C166_IRAM_SIZE__=2048"
 // DEFS-SAME: "-D" "__C166_PSRAM_SIZE__=2048"
 // DEFS-SAME: "-D" "__C166_PROGRAM_IS_ROM__"
 
@@ -59,3 +59,40 @@
 // UNKNOWN: unknown part 'xc164' for '-mmcu='; known parts are: {{.*}}xc164cm-8f{{.*}}xc164cs-8r
 
 int main(void) { return 0; }
+
+// A C167's map is a different shape, so it gets different symbols: its program
+// memory is at the bottom of a segment rather than in one of its own, and the
+// only RAM is the internal RAM window and the extension RAM.  The startup file
+// is the core's too - a C167 has no PLL to program.
+
+// RUN: %clang -### --target=c166 -mmcu=c167cr-16rm %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=C167CR16
+//
+// C167CR16: "-target-cpu" "c167"
+// C167CR16: "c167-crt0.o"
+// C167CR16: "--defsym=__c166_rom_length=131072"
+// C167CR16-SAME: "--defsym=__c166_iram_length=2048"
+// C167CR16-SAME: "--defsym=__c166_xram_length=2048"
+// C167CR16-NOT: "--defsym=__c166_psram_length
+// C167CR16-NOT: "--defsym=__c166_dsram_length
+
+// A romless part has no on-chip program memory at all; what is out there is
+// the board's, and its script says so.
+
+// RUN: %clang -### --target=c166 -mmcu=c167sr-lm %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=C167SR
+//
+// C167SR: "--defsym=__c166_rom_length=0"
+// C167SR-SAME: "--defsym=__c166_iram_length=2048"
+
+// An XC16x part keeps the startup file it had.
+// RUN: %clang -### --target=c166 -mmcu=xc164cm-8f %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=CM8FCRT
+// CM8FCRT: "{{[^"]*}}crt0.o"
+// CM8FCRT-NOT: c167-crt0.o
+
+// The startup file follows the core, so naming the core alone is enough - a
+// program built for a C167 with no part named is still built for a C167.
+// RUN: %clang -### --target=c166 -mcpu=c167 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=C167CPU
+// C167CPU: "c167-crt0.o"
