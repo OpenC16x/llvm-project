@@ -113,7 +113,8 @@ enum class Op {
   X(CMPD116ri4) X(CMPD116regi) X(CMPD116rega)                                    \
   X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
   X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
-  X(CoLOAD_rr) X(CoMAC_rr) X(CoMUL_rr) X(CoSTORE_sr)
+  X(CoLOAD_rr) X(CoMAC_rr) X(CoMACu_rr) X(CoMACN_rr) X(CoMACuN_rr)               \
+  X(CoMUL_rr) X(CoMULu_rr) X(CoSTORE_sr)
 #define X(N) N,
   OPS(X)
 #undef X
@@ -457,7 +458,11 @@ static unsigned baseStateTime(Op O, bool Taken) {
   // out loud rather than leaving to chance: the figure is read, not assumed.
   case Op::CoLOAD_rr:
   case Op::CoMUL_rr:
+  case Op::CoMULu_rr:
   case Op::CoMAC_rr:
+  case Op::CoMACu_rr:
+  case Op::CoMACN_rr:
+  case Op::CoMACuN_rr:
   case Op::CoSTORE_sr:
     return 2;
   default:
@@ -1142,9 +1147,11 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   //   CoLOAD Rwn, Rwm   ACC <- sign extended (Rwm || Rwn), Rwn the low word
   //   CoMUL  Rwn, Rwm   ACC <- the signed 32 bit product, sign extended
   //   CoMAC  Rwn, Rwm   ACC <- ACC + that product
+  //   CoMAC- Rwn, Rwm   ACC <- ACC - that product
+  //   CoMACu Rwn, Rwm   the same two with an unsigned product, zero extended
   //   CoSTORE Rwn, creg the named MAC register into Rwn
   //
-  // Each of the three arithmetic ones one-bit left shifts the product first
+  // Each of the arithmetic ones one-bit left shifts the product first
   // when MCW.MP is set.  MCW resets to zero, so that does not happen unless a
   // program asks for it, and nothing here asks.  The rounding forms are a
   // different opcode - they add 00 0000 8000H and clear MAL - and are not
@@ -1155,11 +1162,24 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     break;
   }
   case Op::CoMUL_rr:
-  case Op::CoMAC_rr: {
-    int64_t P = int64_t(int32_t(int16_t(W(0))) * int32_t(int16_t(W(1))));
+  case Op::CoMULu_rr:
+  case Op::CoMAC_rr:
+  case Op::CoMACu_rr:
+  case Op::CoMACN_rr:
+  case Op::CoMACuN_rr: {
+    // The unsigned forms multiply the words as they stand and the signed ones
+    // sign extend them first, which is the whole of the difference; the
+    // product is 32 bits either way and the accumulator is 40.
+    bool Unsigned = O == Op::CoMACu_rr || O == Op::CoMACuN_rr ||
+                    O == Op::CoMULu_rr;
+    int64_t P = Unsigned
+                    ? int64_t(uint32_t(W(0)) * uint32_t(W(1)))
+                    : int64_t(int32_t(int16_t(W(0))) * int32_t(int16_t(W(1))));
     if ((M.MCW >> 10) & 1)
       P <<= 1;
-    M.setACC(O == Op::CoMUL_rr ? P : M.ACC + P);
+    bool Negate = O == Op::CoMACN_rr || O == Op::CoMACuN_rr;
+    bool Replace = O == Op::CoMUL_rr || O == Op::CoMULu_rr;
+    M.setACC(Replace ? P : (Negate ? M.ACC - P : M.ACC + P));
     break;
   }
   case Op::CoSTORE_sr: {

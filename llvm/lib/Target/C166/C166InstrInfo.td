@@ -47,12 +47,13 @@ def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
 
 // A 32 bit accumulator as two words and the two 16 bit operands of a signed
 // multiply, giving the accumulated 32 bit result as two words.
-def SDT_C166MAC          : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
+def SDT_C166MAC          : SDTypeProfile<2, 5, [SDTCisVT<0, i16>,
                                                 SDTCisVT<1, i16>,
                                                 SDTCisVT<2, i16>,
                                                 SDTCisVT<3, i16>,
                                                 SDTCisVT<4, i16>,
-                                                SDTCisVT<5, i16>]>;
+                                                SDTCisVT<5, i16>,
+                                                SDTCisVT<6, i16>]>;
 
 // A 32 bit dividend as a low and a high word and a 16 bit divisor, giving the
 // two words of the quotient and the one word remainder.
@@ -785,11 +786,17 @@ def UDIVREM32by16 : Pseudo<(outs GR16:$qlo, GR16:$qhi, GR16:$rem),
 // The multiply-accumulate coprocessor, which only some of the family has.
 def HasMAC : Predicate<"Subtarget->hasMAC()">;
 
-// "acc += a * b" on the MAC unit, where acc is 32 bits and a and b are signed
-// words.  MUL alone is ten states and CoMAC is two, so this wins even with
+// "acc += a * b" and "acc -= a * b" on the MAC unit, where acc is 32 bits and
+// a and b are words - signed for CoMAC and CoMAC-, unsigned for CoMACu and
+// CoMACu-.  MUL alone is ten states and CoMAC is two, so this wins even with
 // the accumulator loaded and stored around every one: eight states against
 // the eighteen of a multiply, the two reads out of MDL and MDH, and the add
 // and add-with-carry.
+//
+// All four are one pseudo because they differ only in the middle instruction
+// the expansion emits; $kind says which, and C166MAC::Kind names the values.
+// Keeping them together is not only brevity - C166MACChain has to reason about
+// the accumulator's lifetime, and there is one lifetime rather than four.
 //
 // The accumulator never leaves the pseudo, which is what keeps this simple:
 // it is one piece of state shared with everything else on the part, so holding
@@ -798,13 +805,56 @@ def HasMAC : Predicate<"Subtarget->hasMAC()">;
 // of a summing loop, where the total is worth keeping in the unit across the
 // whole of it; what is left here is every accumulate that pass does not
 // recognise.
+// The same product without an accumulate.  MUL is ten states and leaves the
+// answer in MDL and MDH, so a multiply is that plus a move out of one of them,
+// and a widening multiply is that plus two: twelve states in six bytes, or
+// fourteen in ten.  CoMUL is two states and the answer comes out with
+// CoSTOREs, which is four states in eight bytes, or six in twelve.
+//
+// Eight states for two bytes is worth taking wherever the two bytes are not
+// what is scarce, so these stand down at -Os and the MUL forms above are
+// selected there instead.  A 32 bit multiply is three of these and is where it
+// shows: forty two states become eighteen.
+//
+// They also leave two things alone that MUL does not.  PSW is untouched, so a
+// comparison can survive a multiply; and so is the multiply/divide unit, which
+// the C166 interrupts part way through and which an interrupt handler that
+// reaches it therefore has to save and put back.
+def NotOptForSize : Predicate<"!MF->getFunction().hasOptSize()">;
+
+let Predicates = [HasMAC, NotOptForSize], Defs = [MAL, MAH, MSW],
+    AddedComplexity = 10 in {
+// The low word of a product is the same whether the operands were signed or
+// not, so there is one of these rather than two.
+def MULMAC16rr   : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+                          "#MULMAC16rr",
+                          [(set GR16:$dst, (mul GR16:$src1, GR16:$src2))]>;
+def MULMACHS16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+                          "#MULMACHS16rr",
+                          [(set GR16:$dst, (mulhs GR16:$src1, GR16:$src2))]>;
+def MULMACHU16rr : Pseudo<(outs GR16:$dst), (ins GR16:$src1, GR16:$src2),
+                          "#MULMACHU16rr",
+                          [(set GR16:$dst, (mulhu GR16:$src1, GR16:$src2))]>;
+def SMULMAC16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                             (ins GR16:$src1, GR16:$src2),
+                             "#SMULMAC16rrLOHI",
+                             [(set GR16:$lo, GR16:$hi,
+                                   (smullohi GR16:$src1, GR16:$src2))]>;
+def UMULMAC16rrLOHI : Pseudo<(outs GR16:$lo, GR16:$hi),
+                             (ins GR16:$src1, GR16:$src2),
+                             "#UMULMAC16rrLOHI",
+                             [(set GR16:$lo, GR16:$hi,
+                                   (umullohi GR16:$src1, GR16:$src2))]>;
+}
+
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
 def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
-                     (ins GR16:$acclo, GR16:$acchi, GR16:$a, GR16:$b),
+                     (ins GR16:$acclo, GR16:$acchi, GR16:$a, GR16:$b,
+                      i16imm:$kind),
                      "#MAC32rr",
                      [(set GR16:$lo, GR16:$hi,
                            (C166mac GR16:$acclo, GR16:$acchi,
-                                    GR16:$a, GR16:$b))]>;
+                                    GR16:$a, GR16:$b, timm:$kind))]>;
 
 //===----------------------------------------------------------------------===//
 // Move Instructions
@@ -1947,8 +1997,19 @@ def JNBS : BitBranch<0xBA, "jnbs", 1>;
 // an explicit segment (EXTS).  Code crosses segments with JMPS and CALLS,
 // which name the target segment directly, and returns with RETS.
 //
-// These are MC level only for now: nothing generates them yet.
+// These arrived with the second generation of the family, so everything below
+// carries HasExtInstr: on a first generation part they are undefined opcodes
+// and the assembler should say so rather than emit a trap.
 //===----------------------------------------------------------------------===//
+
+// The instruction set extension the second generation brought.  It gates the
+// assembler and the disassembler as well as selection, because an EXTS in a
+// listing for an 80C166 is not an EXTS, it is whatever that part does with an
+// opcode it has never heard of.
+def HasExtInstr : Predicate<"Subtarget->hasExtInstr()">,
+                  AssemblerPredicate<(all_of FeatureExtInstr), "ext-instr">;
+
+let Predicates = [HasExtInstr] in {
 
 // EXTS/EXTP and their combined-with-EXTR forms taking the page or segment
 // from a register.  Bits 7-6 select which of the four it is.
@@ -2018,6 +2079,8 @@ def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
   let Inst{11-8} = 0;
 }
 }
+
+} // Predicates = [HasExtInstr]
 
 // Inter-segment control flow.
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in

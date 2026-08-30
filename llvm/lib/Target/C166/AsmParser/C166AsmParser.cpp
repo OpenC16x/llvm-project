@@ -843,6 +843,12 @@ bool C166AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_InvalidOperand:
     return reportOperandError(IDLoc, Operands, ErrorInfo,
                               "invalid operand for instruction");
+  case Match_MissingFeature:
+    // The mnemonic exists but not on the part being assembled for.  Naming the
+    // feature rather than the part is what the -mattr= spelling wants, and the
+    // processor list in C166.td says which processors have it.
+    return Error(IDLoc, "instruction requires a feature the selected processor "
+                        "does not have");
   default:
     // Anything else is one of the per-operand diagnostics TableGen generated
     // from a DiagnosticString.

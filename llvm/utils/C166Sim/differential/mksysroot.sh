@@ -26,6 +26,13 @@ SYSROOT=${2:?}
 HERE=$(dirname "$0")
 STARTUP=$(cd "$HERE/../../../lib/Target/C166/startup" && pwd)
 
+# The builtins are C and assembly, but compiler-rt's project() names C++ too,
+# so cmake probes for a working host C++ compiler.  In a tree configured for
+# this target and nothing else there is none - the just-built clang++ has no
+# back end for the machine doing the building - and the probe fails on a
+# language nothing here compiles.  Hence CMAKE_CXX_COMPILER_WORKS below,
+# alongside the two the same reasoning already covered.
+#
 # cmake rejects a relative CMAKE_C_COMPILER or CMAKE_ASM_COMPILER outright -
 # it looks the name up in PATH and does not find it - and it configures the
 # builtins in a directory of its own, where a relative sysroot would land
@@ -75,6 +82,7 @@ cmake -S "$HERE/../../../../compiler-rt/lib/builtins" -B "$TMP/crt" -GNinja \
     -DCOMPILER_RT_INSTALL_PATH="$VERSION" \
     -DCMAKE_C_COMPILER_WORKS=1 \
     -DCMAKE_ASM_COMPILER_WORKS=1 \
+    -DCMAKE_CXX_COMPILER_WORKS=1 \
     -DLLVM_CONFIG_PATH="$BIN/llvm-config" > "$TMP/cmake.log" 2>&1 ||
   { echo "configuring compiler-rt failed:"; tail -20 "$TMP/cmake.log"; exit 1; }
 

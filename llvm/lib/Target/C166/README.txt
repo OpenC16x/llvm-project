@@ -76,7 +76,8 @@ pseudos at the same point.
 One MUL leaves both halves of the product behind, so SMUL_LOHI and UMUL_LOHI
 are kept whole rather than expanded: a widening multiply is one MUL and two
 moves.  Splitting them would make mul and mulhs separate nodes again, and each
-would issue a MUL of its own.
+would issue a MUL of its own.  On a part with the coprocessor it is a CoMUL
+and two CoSTOREs instead; see below.
 
 The carry is different, and the difference is what makes wide arithmetic
 cheap.  MOV, MOVB, MOVBZ, MOVBS, PUSH and POP are all documented as leaving V
@@ -273,12 +274,25 @@ small case needs, computed once and used twice.
 Which half ends up where is then two selects on bit 4 of the amount.  A 32 bit
 division is still a call.
 
-EXTS does not exist on the SAB 8XC166(W) devices, and no subtarget feature
-guards that yet.  Inside a class A or class B trap handler the EXTend
-instructions do nothing while a class B trap flag is set, so a far access in
-one will read the wrong place.  There is also only one instruction counter, so
-inline assembly must not wrap a far access in an ATOMIC or EXTend sequence of
-its own.
+EXTS does not exist on the first generation of the family - the SAB 80C166 and
+83C166 - and neither does ATOMIC.  FeatureExtInstr is what says so; -mcpu=c166
+is that generation by name and clears it, and everything else in the processor
+list has it, "generic" included, because every part -mmcu= knows is second
+generation and so are the linker script and startup code here.  A far access
+without it is a diagnostic, since nothing stands in for an EXTS: rewriting a
+data page pointer would reach the object and also redirect every near address
+sharing that pointer, an interrupt handler's included.  A read-modify-write
+without it goes round the compare and exchange loop, which holds together by
+clearing PSW.IEN rather than by counting instructions.
+
+The predicate gates the assembler and the disassembler as well, which is the
+point rather than a side effect: an EXTS in a listing for a part that has no
+EXTS is not an EXTS.
+
+Inside a class A or class B trap handler the EXTend instructions do nothing
+while a class B trap flag is set, so a far access in one will read the wrong
+place.  There is also only one instruction counter, so inline assembly must
+not wrap a far access in an ATOMIC or EXTend sequence of its own.
 
 Switches
 --------
@@ -926,8 +940,12 @@ wrong, and why the simulator counts states.
 Multiply-accumulate
 -------------------
 
-"acc += a * b", with a and b signed words and acc 32 bits, is CoMAC on a part
-that has the coprocessor.  MUL is ten states and CoMAC is two, so this wins
+"acc += a * b", with a and b words and acc 32 bits, is CoMAC on a part that
+has the coprocessor.  "acc -= a * b" is CoMAC-, and an unsigned product picks
+CoMACu or CoMACu- instead - four instructions behind one pseudo, whose $kind
+operand says which, because they differ only in the middle instruction the
+expansion emits and share one accumulator lifetime for C166MACChain to reason
+about.  MUL is ten states and CoMAC is two, so this wins
 even with the accumulator loaded and stored around each one: eight states
 against the eighteen of a multiply, the two reads out of MDL and MDH, and the
 add and the add with carry.
@@ -938,14 +956,26 @@ and MDH, and unlike them saved by nothing - so a MAC left live across a call
 or an interrupt would have to be saved somewhere.  Holding it only between the
 CoLOAD and the CoSTOREs of a single accumulate means it never is.
 
-By the time the combine runs the widening multiply is an SMUL_LOHI and the 32
-bit add is the ADDC and ADDE pair that carries between the words, so what is
-matched is the ADDE.  Three things have to hold: the carry comes from the ADDC
-of the other half, both halves are the two results of the same multiply, and
-that multiply feeds nothing else - a product wanted twice would have to be
-computed twice.  An ADDE whose own carry is used is part of something wider
-than 32 bits and is left alone, because the MAC produces no carry to continue
-with.
+By the time the combine runs the widening multiply is an SMUL_LOHI or a
+UMUL_LOHI and the 32 bit add is the ADDC and ADDE pair that carries between the
+words, so what is matched is the ADDE.  Three things have to hold: the carry
+comes from the ADDC of the other half, both halves are the two results of the
+same multiply, and that multiply feeds nothing else - a product wanted twice
+would have to be computed twice.  An ADDE whose own carry is used is part of
+something wider than 32 bits and is left alone, because the MAC produces no
+carry to continue with.
+
+A subtraction is the same shape in SUBC and SUBE.  What differs is that
+subtraction does not commute, so there the product has to be the right hand
+operand of both halves rather than either one: "a * b - acc" is not a
+multiply-accumulate and is left as a multiply.
+
+Which of the two multiply nodes the type legalizer built is what says whether
+the product is signed.  There is no node for a mixed sign widening multiply and
+the legalizer does not make one either - its check for a signed pair wants
+seventeen sign bits and a value zero extended from a word has sixteen - so
+CoMACsu and CoMACus have no shape here to match and are left to hand written
+assembly.
 
 Measured on a dot product of 32 elements run eight times: 9584 states without
 and 7024 with, which is 1.36 times.  The difference is exactly ten states per
@@ -961,8 +991,45 @@ reassociated no longer has a multiply feeding the accumulator, so nothing
 matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
 what the unit's CoMUL is for, and is not done.
 
+The accumulator is loaded and stored the same way for all four.  CoLOAD sign
+extends into a forty bit accumulator and the two CoSTOREs truncate back to
+thirty two on the way out, and 2^32 divides 2^40, so what the top eight bits
+hold never reaches the answer - which is why an unsigned accumulate needs no
+unsigned load.
+
 Only the XC16x has the unit.  -mcpu=xc16x is what turns it on, and defines
 __C166_MAC__ so that code can ask.
+
+Multiplying without the multiply unit
+-------------------------------------
+
+The same coprocessor does a plain multiply, and it is not close.  MUL is ten
+states and leaves the answer in MDL and MDH, so a multiply is that plus a move
+out of one of them and a widening multiply is that plus two: twelve states in
+six bytes, or fourteen in ten.  CoMUL is two states and the answer comes out
+with CoSTOREs, which is four states in eight bytes, or six in twelve.
+
+Nothing loads the accumulator first.  CoMUL replaces what is in it rather than
+adding to it, so the accumulator is dead going in, which is what keeps this to
+three instructions where an accumulate needs four.
+
+A 32 bit multiply is where it shows, because it is three of these rather than
+a library call: both widening multiply nodes are legal here, so "long * long"
+is expanded inline into two low multiplies and one widening one, and __mulsi3
+is never reached.  Forty two states become eighteen.
+
+Eight states for two bytes is the trade, and it is not free on a part whose
+near addresses reach 48 KByte, so these stand down where a function asks to be
+small and the MUL forms are selected there instead.  That is the only place in
+this backend where -Os changes which instruction is chosen rather than how many
+of them there are.
+
+Two things the coprocessor leaves alone that MUL does not.  PSW is untouched,
+so a comparison can survive a multiply - which matters here, where nearly every
+instruction writes the zero and negative flags and the fused compare-and-branch
+pseudos exist because of it.  And the multiply/divide unit is untouched, which
+is state the C166 interrupts MUL and DIV part way through and that a handler
+reaching it therefore has to save and put back.
 
 Compares the flags already answer
 ---------------------------------

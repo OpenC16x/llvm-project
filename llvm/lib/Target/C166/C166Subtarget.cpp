@@ -27,9 +27,12 @@ void C166Subtarget::anchor() {}
 
 C166Subtarget &C166Subtarget::initializeSubtargetDependencies(StringRef CPU,
                                                               StringRef FS) {
+  // Not "c166": that name is the first generation part, which has neither the
+  // EXTend instructions nor ATOMIC.  See the processor list in C166.td for why
+  // the default is the generation after it.
   StringRef CPUName = CPU;
   if (CPUName.empty())
-    CPUName = "c166";
+    CPUName = "generic";
 
   ParseSubtargetFeatures(CPUName, /*TuneCPU=*/CPUName, FS);
   return *this;

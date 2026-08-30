@@ -78,6 +78,7 @@ public:
 private:
   std::string CPU = "generic";
   bool HasMAC = false;
+  bool HasExtInstr = false;
 
 public:
 
@@ -88,7 +89,8 @@ public:
   bool allowsLargerPreferedTypeAlignment() const override { return false; }
 
   bool hasFeature(StringRef Feature) const override {
-    return Feature == "c166" || (Feature == "mac" && HasMAC);
+    return Feature == "c166" || (Feature == "mac" && HasMAC) ||
+           (Feature == "ext-instr" && HasExtInstr);
   }
 
   /// The processors the backend knows, which is what -mcpu names.
@@ -117,15 +119,19 @@ public:
   /// Which features each processor has.  Only the XC16x has the
   /// multiply-accumulate coprocessor; the rest of the family does not, so
   /// nothing may be selected for it unless the CPU says it is there.
+  ///
+  /// ATOMIC and the EXTend instructions are the second generation's, so every
+  /// processor here has them except the one named for the first: "c166" is the
+  /// SAB 80C166 and 83C166.  "generic" is second generation for the reason the
+  /// backend's processor list gives - every part -mmcu= knows is, and so is
+  /// the startup code and linker script that come with this toolchain.
   bool initFeatureMap(llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags,
                       StringRef CPUName,
                       const std::vector<std::string> &FeatureVec) const override {
-    if (CPUName == "xc16x") {
+    if (CPUName == "xc16x")
       Features["mac"] = true;
+    if (CPUName != "c166")
       Features["ext-instr"] = true;
-    } else if (CPUName == "c167" || CPUName == "st10") {
-      Features["ext-instr"] = true;
-    }
     return TargetInfo::initFeatureMap(Features, Diags, CPUName, FeatureVec);
   }
 
@@ -136,6 +142,10 @@ public:
         HasMAC = true;
       else if (F == "-mac")
         HasMAC = false;
+      else if (F == "+ext-instr")
+        HasExtInstr = true;
+      else if (F == "-ext-instr")
+        HasExtInstr = false;
     }
     return true;
   }

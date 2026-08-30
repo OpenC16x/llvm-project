@@ -22,6 +22,12 @@ def FeatureExtInstr
     : SubtargetFeature<"ext-instr", "HasExtInstr", "true",
                        "Enable the EXTR/EXTP/EXTS addressing extensions">;
 
+// ATOMIC and the EXTend instructions arrived with the second generation of the
+// family.  The first generation - the SAB 80C166 and 83C166 - does not decode
+// them, so a program built for one of those parts has to reach a far object
+// some other way and make a read-modify-write indivisible some other way.
+// Both of those are what FeatureExtInstr being absent means.
+
 def FeatureMAC
     : SubtargetFeature<"mac", "HasMAC", "true",
                        "Enable the C166S v2 multiply-accumulate unit">;
@@ -33,7 +39,13 @@ def FeatureMAC
 class Proc<string Name, list<SubtargetFeature> Features>
     : Processor<Name, NoItineraries, Features>;
 
-def : Proc<"generic", []>;
+// "generic" is the second generation core rather than the oldest one the
+// family ever had.  Every part still sold, every part -mmcu= knows, and the
+// linker script and startup code in this tree are all second generation; a
+// default that could not reach a far object would refuse to build its own
+// runtime.  So the first generation is what -mcpu=c166 asks for by name, which
+// is what naming a part that old ought to mean.
+def : Proc<"generic", [FeatureExtInstr]>;
 def : Proc<"c166",    []>;
 def : Proc<"c167",    [FeatureExtInstr]>;
 def : Proc<"st10",    [FeatureExtInstr]>;
