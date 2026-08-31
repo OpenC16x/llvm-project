@@ -888,6 +888,45 @@ Known limitations / things to do
   does not model, so two statements expecting it to survive between them stay
   adjacent at -O0 and do not at -O2.
 
+  Writing macrepeat.c is also what said the constraint set was too thin.  Its
+  sequences put a pointer in IDX0 by writing "mov idx0, %2" inside the asm
+  string, which works and says nothing: the compiler does not know the
+  register was written, so it cannot know it was read back either, and the
+  value the instruction leaves there - the pointer stepped past the last
+  element - has to be thrown away.  The unit's registers are names clang knows
+  now, so a value can be pinned to one with register ... __asm__("idx0") and
+  the compiler makes the moves.  Which of the two pointers an instruction uses
+  is in its encoding rather than in an operand, so naming the register is the
+  only thing that makes sense here; there is nothing for a register class
+  constraint to choose between.
+
+  A special function register is a memory location with a name, so the copy
+  the code generator makes for one is the absolute addressed MOV rather than a
+  register to register move - the same instruction with the same address in it
+  that the assembler emits for "mov r2, idx0", which is why the two agree by
+  construction.  Nothing selects a copy like this, and copyPhysReg aborted the
+  compiler on one until the names were published and made it reachable.  Two
+  cases it still cannot do it says so about, rather than writing an address
+  that means something else: MAS, which has no address at all because CoSTORE
+  names it by a five bit code, and a register the selected part does not have.
+  A byte value is the third: a byte write to a word wide special function
+  register writes the whole word with 00H in the half that was not addressed,
+  which is not what register unsigned char x __asm__("mal") asks for, so that
+  is refused rather than quietly losing MAL's high half.  All three are still
+  fine in a clobber list, which asks for no move.
+
+  The other half is the "q" constraint, which is R0 to R3: the pointer field
+  of an indirect form is two bits wide, so "add Rwn, [Rwm]" cannot name a
+  higher register, and asking for one with "r" assembles only by luck.  Two
+  things the roadmap wanted here turned out not to be needed and not to be
+  possible: a byte register is already what "r" gives a byte sized value, and
+  there is no register pair class to constrain to, because nothing in this
+  backend has one.
+
+  differential/macasm.c is the whole of it run in the simulator and checked
+  against the host: both pointers, an offset register set by name, and the
+  accumulator read back out of MAL and MAH.
+
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines

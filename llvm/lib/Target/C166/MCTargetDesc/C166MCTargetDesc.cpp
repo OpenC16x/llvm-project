@@ -233,6 +233,23 @@ int64_t C166::getSFRAddress(const MCRegisterInfo &MRI, StringRef Name) {
   return -1;
 }
 
+int64_t C166::getSFRAddressForReg(const MCRegisterInfo &MRI, MCRegister Reg) {
+  // The three spaces are laid out from different bases, and a register's
+  // encoding means a different thing in each: a short address in the ordinary
+  // and extended spaces, and the whole address for an X-peripheral register
+  // that has no short one.  Asking which class the register is in is what
+  // picks the right reading - MAS encodes as zero and is in none of them, so
+  // it answers -1 here rather than FE00H.
+  if (MRI.getRegClass(C166::SFRRegClassID).contains(Reg))
+    return getSFRAddressForShort(MRI.getEncodingValue(Reg));
+  for (unsigned ClassID : {C166::ESFRRegClassID, C166::ESFRST10RegClassID})
+    if (MRI.getRegClass(ClassID).contains(Reg))
+      return getESFRAddressForShort(MRI.getEncodingValue(Reg));
+  if (MRI.getRegClass(C166::XSFRRegClassID).contains(Reg))
+    return MRI.getEncodingValue(Reg);
+  return -1;
+}
+
 StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr,
                            const MCSubtargetInfo *STI) {
   for (MCPhysReg Reg : MRI.getRegClass(C166::SFRRegClassID))

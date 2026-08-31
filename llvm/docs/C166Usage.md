@@ -135,6 +135,102 @@ toolchains.
 Both attributes are described in Clang's attribute reference alongside every
 other target's.
 
+## Inline assembly
+
+Two constraints name a register class:
+
+| Constraint | Registers | Why |
+|---|---|---|
+| `r` | R0 to R15 | The general purpose registers. |
+| `q` | R0 to R3 | The pointer field of an indirect form is two bits wide, so `add Rwn, [Rwm]` can only name these four. `r` would hand back whichever register was spare, and the result assembles only by luck. |
+
+A byte operand needs no constraint of its own: give `r` a byte-sized value and
+it gets a byte register, because R0 to R7 have byte halves and the compiler
+picks one.
+
+```c
+unsigned char swapped(unsigned char v) {
+  unsigned char r;
+  __asm__("movb %0, %1" : "=r"(r) : "r"(v));   /* movb rl2, rl2 */
+  return r;
+}
+```
+
+There is no constraint for a register *pair*. A 32-bit value in an asm
+statement arrives as two operands in two registers that need not be adjacent,
+so an instruction that wants a pair — the divides, which read MDL and MDH —
+has to be written with the registers named.
+
+### Register names
+
+An asm statement can name a register in a clobber list, or pin a value to one
+with `register ... __asm__("name")`:
+
+- `r0` to `r15`, and the byte halves `rl0`/`rh0` through `rl7`/`rh7`
+- `psw`, `mdl`, `mdh`, `mdc`, `sp`, `cp`
+- the multiply-accumulate unit's: `idx0`, `idx1`, `qx0`, `qx1`, `qr0`, `qr1`,
+  `mal`, `mah`, `mas`, `mcw`, `msw`, `mrw`
+
+GCC's `"{name}"` constraint syntax is not a thing clang implements, for this
+target or any other; `register ... __asm__("name")` is the spelling that
+works.
+
+Everything from `psw` down in that list is a special function register, which
+is to say a memory location with a name rather than a register the machine can
+move to and from. Pinning a value to one is still written the ordinary way,
+and the compiler emits the absolute addressed `MOV` that reaches it — the same
+instruction the assembler emits for `mov r2, idx0`.
+
+Three things cannot be pinned to one, and say so rather than producing
+something that only looks right:
+
+- `mas`, which is the saturated view of the accumulator's high word and has no
+  address of its own. `CoSTORE` names it by a five-bit code, and no move takes
+  one.
+- a register the selected part does not have — `qx0` without `+mac`, say. The
+  name list is flat, as a GCC register list is, so it does not know which part
+  is selected; the refusal comes from the code generator, which does.
+- a byte value. A byte write to a word-wide special function register writes
+  the whole word, with `00H` in the half that was not addressed, so
+  `register unsigned char x __asm__("mal")` would quietly throw away the other
+  half of MAL.
+
+All three are still fine in a clobber list, which asks for no move.
+
+### Reaching the coprocessor
+
+Nothing selects the coprocessor's repeatable forms, so an asm statement is how
+they are used. Which of the two pointers an instruction runs on is in the
+encoding rather than in an operand, so naming the register is the only way to
+say it:
+
+```c
+long dot(const short *x, const short *y, unsigned short n) {
+  register const short *p __asm__("idx0") = x;
+  register unsigned short rep __asm__("mrw") = n - 1;
+  register unsigned short lo __asm__("mal");
+  register unsigned short hi __asm__("mah");
+  const short *q = y;
+  unsigned short zero = 0;
+  __asm__ volatile("coload %5, %5\n\t"
+                   "repeat mrw times comac [idx0+], [%1+]"
+                   : "+r"(p), "+q"(q), "=r"(lo), "=r"(hi), "+r"(rep)
+                   : "r"(zero)
+                   : "msw", "memory");
+  return ((long)hi << 16) | lo;
+}
+```
+
+The pointers are read-write because the instruction steps them: told they were
+inputs, the compiler would go on using a register holding a value that is no
+longer there. The accumulator is cleared from a register holding zero rather
+than with `coload r0, r0`, which would load the ABI stack pointer. `repeat mrw
+times` takes the count from the MAC repeat word, which the manual gives as
+`MRW[12:0] + 1` — hence the `n - 1` — and a literal count is `repeat 8 times`.
+
+`llvm/utils/C166Sim/differential/macasm.c` is this worked through, run in the
+simulator and checked against the host.
+
 ## Predefined macros
 
 | Macro | When |
@@ -198,7 +294,8 @@ Enough to be worth saying plainly:
   `llvm-dwarfdump` reads it; nothing puts a source-level front end on it.
 - **Four of the coprocessor's instructions are selected.** The other 176
   assemble and disassemble but nothing generates them, and there are no
-  builtins or inline-asm constraints to reach them from C. Written by hand
+  builtins: reaching them from C means an asm statement, which the register
+  names above make workable but do not make pleasant. Written by hand
   they take the repeat prefix — `repeat 3 times comac r2, [r3+]`, or
   `repeat mrw times` to take the count from the MAC repeat word — on the 89
   forms the manual marks repeatable, and the simulator runs those 89. The

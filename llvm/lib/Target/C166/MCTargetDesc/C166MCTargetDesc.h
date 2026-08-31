@@ -106,6 +106,17 @@ int64_t getSFRShortAddress(const MCRegisterInfo &MRI, StringRef Name);
 /// This does cover the extended registers, which are reachable by address.
 int64_t getSFRAddress(const MCRegisterInfo &MRI, StringRef Name);
 
+/// The address \p Reg is mapped at, or -1 if it is not a memory mapped
+/// register.  This is the same question getSFRAddress answers, asked with the
+/// register rather than its name, which is what the code generator has: it
+/// reaches a special function register through an absolute address, and the
+/// address has to come from the same place the assembler's comes from.
+///
+/// MAS is the one register in the coprocessor's set that answers -1.  It is
+/// the saturated view of the accumulator's high word and has no address of its
+/// own - CoSTORE names it by a code - so there is no move that can reach it.
+int64_t getSFRAddressForReg(const MCRegisterInfo &MRI, MCRegister Reg);
+
 /// The name of the register mapped at \p Addr, or empty if nothing is.
 /// The name of the special function register mapped at \p Addr, or empty.
 ///

@@ -13,12 +13,16 @@
 #include "C166InstrInfo.h"
 #include "C166.h"
 #include "C166Subtarget.h"
+#include "MCTargetDesc/C166InstPrinter.h"
+#include "MCTargetDesc/C166MCTargetDesc.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -32,21 +36,119 @@ C166InstrInfo::C166InstrInfo(const C166Subtarget &STI)
     : C166GenInstrInfo(STI, RI, C166::ADJCALLSTACKDOWN, C166::ADJCALLSTACKUP),
       RI() {}
 
+// Refuse a copy the machine cannot make, saying which register was asked for
+// rather than aborting.  Everything that reaches here past the two register to
+// register moves came from an asm statement naming a register by hand, so this
+// is a user error to report and not an internal one to assert on.
+//
+// The name is the one the asm statement wrote, which is the printer's rather
+// than the register file's: the record is called SYSSP where the assembly says
+// "sp", and quoting a name back that the user cannot have written would send
+// them looking for it.
+//
+// A NOP goes in where the copy would have been.  Compilation stops on the
+// diagnostic, but not before this pass finishes, and the pass expects
+// copyPhysReg to have left an instruction behind to carry on from.
+void C166InstrInfo::reportImpossibleCopy(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator I,
+                                         const DebugLoc &DL, Register Reg,
+                                         const Twine &Why) const {
+  const Function &F = MBB.getParent()->getFunction();
+  F.getContext().diagnose(DiagnosticInfoUnsupported(
+      F, "cannot copy " + Twine(C166InstPrinter::getRegisterName(Reg)) + ": " +
+             Why,
+      DL));
+  BuildMI(MBB, I, DL, get(C166::NOP));
+}
+
 void C166InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I,
                                 const DebugLoc &DL, Register DestReg,
                                 Register SrcReg, bool KillSrc,
                                 bool RenamableDest, bool RenamableSrc) const {
-  unsigned Opc;
-  if (C166::GR16RegClass.contains(DestReg, SrcReg))
-    Opc = C166::MOV16rr;
-  else if (C166::GR8RegClass.contains(DestReg, SrcReg))
-    Opc = C166::MOVB8rr;
-  else
-    llvm_unreachable("Impossible register-to-register copy");
+  if (C166::GR16RegClass.contains(DestReg, SrcReg)) {
+    BuildMI(MBB, I, DL, get(C166::MOV16rr), DestReg)
+        .addReg(SrcReg, getKillRegState(KillSrc));
+    return;
+  }
+  if (C166::GR8RegClass.contains(DestReg, SrcReg)) {
+    BuildMI(MBB, I, DL, get(C166::MOVB8rr), DestReg)
+        .addReg(SrcReg, getKillRegState(KillSrc));
+    return;
+  }
 
-  BuildMI(MBB, I, DL, get(Opc), DestReg)
-      .addReg(SrcReg, getKillRegState(KillSrc));
+  // Everything else is a special function register at one end, which is not a
+  // register the machine can move to or from: it is a memory location with a
+  // name, and the move that reaches it is the absolute addressed one.  That is
+  // exactly what the assembler emits for "mov r4, idx0" - the same two opcodes
+  // with the same address in them - so the two agree by construction rather
+  // than by both being written out.
+  //
+  // Nothing selects a copy like this; the only way to ask for one is an asm
+  // statement that pins a value to a named register, which is the only way to
+  // reach the multiply-accumulate unit's pointers and accumulator from C at
+  // all.  Both directions write E, Z and N, which the two opcodes below say
+  // and the register to register move above says too, so a copy has always
+  // cost the flags here.
+  bool DestIsWord = C166::GR16RegClass.contains(DestReg);
+  bool SrcIsWord = C166::GR16RegClass.contains(SrcReg);
+  bool DestIsByte = C166::GR8RegClass.contains(DestReg);
+  bool SrcIsByte = C166::GR8RegClass.contains(SrcReg);
+  bool DestIsSFR = !DestIsWord && !DestIsByte;
+  bool SrcIsSFR = !SrcIsWord && !SrcIsByte;
+
+  if (DestIsSFR && SrcIsSFR) {
+    reportImpossibleCopy(MBB, I, DL, DestReg,
+                         "a move between two special function registers has to "
+                         "go through a general purpose register");
+    return;
+  }
+  if (!DestIsSFR && !SrcIsSFR) {
+    reportImpossibleCopy(MBB, I, DL, DestReg,
+                         "a byte register and a word register are different "
+                         "widths");
+    return;
+  }
+
+  Register Mapped = DestIsSFR ? DestReg : SrcReg;
+
+  // A byte access to one of these is a real instruction and not a half of it:
+  // writing a byte to a word wide special function register writes the whole
+  // word, with 00H in the half that was not addressed.  Silently throwing away
+  // the other half of MAL is not what "register unsigned char x
+  // __asm__(\"mal\")" asks for, so it is refused instead.
+  if (DestIsByte || SrcIsByte) {
+    reportImpossibleCopy(MBB, I, DL, Mapped,
+                         "a byte access to a special function register writes "
+                         "the whole word, so only a word value can be pinned "
+                         "to one");
+    return;
+  }
+
+  int64_t Addr = C166::getSFRAddressForReg(RI, Mapped);
+  if (Addr < 0) {
+    reportImpossibleCopy(MBB, I, DL, Mapped,
+                         "it has no address, so no move can reach it");
+    return;
+  }
+  // The name is in the register file whatever part is selected, because one
+  // file holds every map at once.  Whether the selected part has the register
+  // is a different question, and one worth asking here: unlike hand written
+  // assembly this never passes the assembler, so an address that means
+  // something else on this part would be written without a word said.
+  if (!C166::isSFRInSelectedMap(Mapped,
+                                MBB.getParent()->getSubtarget<C166Subtarget>())) {
+    reportImpossibleCopy(MBB, I, DL, Mapped,
+                         "the selected processor does not have it");
+    return;
+  }
+
+  if (DestIsSFR)
+    BuildMI(MBB, I, DL, get(C166::MOV16ar))
+        .addImm(Addr)
+        .addReg(SrcReg, getKillRegState(KillSrc));
+  else
+    BuildMI(MBB, I, DL, get(C166::MOV16ra), DestReg).addImm(Addr);
 }
 
 void C166InstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
