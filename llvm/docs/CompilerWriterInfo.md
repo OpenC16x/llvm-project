@@ -32,6 +32,22 @@ welcome.
 
 * [Itanium documentation](http://developer.intel.com/design/itanium2/documentation.htm)
 
+### C166
+
+The family is Infineon's, and the parts derived from it are Infineon's and
+STMicroelectronics'. The instruction set is common to all of them; what the
+individual manuals and data sheets add is which peripheral registers a
+derivative has and where its memory is.
+
+* [C166 Family Instruction Set Manual](https://www.infineon.com/dgdl/Infineon-C166_ISM-UM-v02_00-EN.pdf) — the instruction set, which every part here shares
+* [XC164CM System Units, User's Manual](https://www.infineon.com/dgdl/Infineon-XC164CM_Vol1-UM-v01_02-EN.pdf) — the second-generation core, its peripheral registers and its derivative table
+* [ST10 Family Programming Manual (PM0036)](https://www.st.com/resource/en/programming_manual/pm0036-st10-family-programming-manual-stmicroelectronics.pdf) — the multiply-accumulate coprocessor, whose function codes are the XC16x's
+* [ST10F269 data sheet](https://www.st.com/resource/en/datasheet/st10f269.pdf) — an ST10's special function registers and memory map
+* [ST10F272B/ST10F272E data sheet](https://www.st.com/resource/en/datasheet/st10f272e.pdf) — a second ST10 memory map, which differs from the first
+
+The ELF relocations are this backend's own and are not documented outside
+`llvm/lib/Target/C166/README.txt`; there is no vendor psABI for them.
+
 ### Lanai
 
 * [Lanai Instruction Set Architecture](http://g.co/lanai/isa)

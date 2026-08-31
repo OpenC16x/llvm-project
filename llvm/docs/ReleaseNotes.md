@@ -96,6 +96,20 @@ Makes programs 10x faster by doing Special New Thing.
 
 ### Changes to the AVR Backend
 
+### Changes to the C166 Backend
+
+* A backend for the Infineon C166 family of 16-bit microcontrollers, and the
+  C167, ST10 and XC16x parts derived from it. It compiles C and C++, assembles
+  and disassembles, and emits DWARF. See {doc}`C166Usage`.
+* `-mcpu=` selects a core and with it a peripheral register map: `generic`,
+  `c166`, `c167`, `st10` and `xc16x`. `-mmcu=` selects one of 23 parts and
+  supplies its memory sizes to the linker script, so that moving between
+  derivatives does not mean editing a memory map by hand.
+* Four of the multiply-accumulate coprocessor's instructions are selected and
+  all 180 forms assemble and disassemble.
+* There is no default linker script, because the memory map belongs to the
+  board. Three to start from are in `llvm/lib/Target/C166/startup`.
+
 ### Changes to the DirectX Backend
 
 ### Changes to the Hexagon Backend

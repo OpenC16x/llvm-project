@@ -41,6 +41,10 @@ def warn_drv_invalid_arch_name_with_suggestion : Warning<
 def err_drv_c166_unknown_mcu : Error<
   "unknown part '%0' for '-mmcu='; known parts are: %1">;
 
+def err_drv_c166_mcu_cpu_mismatch : Error<
+  "part '%0' named by '-mmcu=' has the '%1' core, which '-mcpu=%2' contradicts; "
+  "the two would select a startup file and a memory map from different parts">;
+
 def warn_drv_avr_mcu_not_specified : Warning<
   "no target microcontroller specified, please pass -mmcu=<mcu name>">,
   InGroup<AVRRtlibLinkingQuirks>;

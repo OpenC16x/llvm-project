@@ -287,8 +287,21 @@ void c166::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // to fall back on; llvm/lib/Target/C166/startup has one to start from.  What
   // -mmcu= supplies is the sizes that script asks for, so that a part is a
   // name rather than a map somebody has edited.
-  if (const llvm::C166::Part *P = getPart(Args))
+  if (const llvm::C166::Part *P = getPart(Args)) {
+    // Naming a part and then a core the part does not have is refused here
+    // and not when compiling, because it is only a link that has to reconcile
+    // them: the startup file above follows -mcpu= and the map below follows
+    // the part, so a disagreement builds one part's startup against another
+    // part's memory.  That links and does not run.  Compiling for a core
+    // while knowing a part's sizes is a different thing and stays allowed.
+    if (const Arg *C = Args.getLastArg(options::OPT_mcpu_EQ))
+      if (P->Core != C->getValue()) {
+        D.Diag(diag::err_drv_c166_mcu_cpu_mismatch)
+            << P->Name << P->Core << C->getValue();
+        return;
+      }
     addPartMemoryMap(*P, CmdArgs, Args);
+  }
 
   Args.AddAllArgs(CmdArgs, options::OPT_T);
 

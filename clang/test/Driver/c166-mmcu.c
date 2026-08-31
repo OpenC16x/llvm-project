@@ -164,3 +164,33 @@ int main(void) { return 0; }
 // C167XPER: "--defsym=__c166_enable_xper=1"
 // C167XPER-NOT: "--defsym=__c166_xpercon
 // C167XPER-NOT: "--defsym=__c166_write_xpercon
+
+// Naming a part and then a core the part does not have is refused when
+// linking, because only a link has to reconcile the two: the startup file
+// follows -mcpu= and the memory map follows the part, so a disagreement
+// builds one part's startup against another part's memory.  That links and
+// does not run, which is the same reason an unknown part is an error rather
+// than a part with no memory.
+//
+// Compiling stays allowed - see CPUWINS above, which is that case and uses
+// -c.  Asking for a core while knowing a part's sizes is a different thing
+// from asking to link a program for two parts at once.
+// RUN: not %clang -### --target=c166 -mmcu=st10f269 -mcpu=xc16x %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=MISMATCH
+// MISMATCH: error: part 'st10f269' named by '-mmcu=' has the 'st10' core, which '-mcpu=xc16x' contradicts
+
+// Agreeing is fine, and so is either option on its own.
+// RUN: %clang -### --target=c166 -mmcu=st10f269 -mcpu=st10 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=AGREE
+// AGREE-NOT: error:
+// AGREE: "-target-cpu" "st10"
+// RUN: %clang -### --target=c166 -mmcu=c167cr-4rm -mcpu=c167 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=AGREE167
+// AGREE167-NOT: error:
+// AGREE167: "-target-cpu" "c167"
+
+// And the same pair compiles, which is what keeps CPUWINS meaningful.
+// RUN: %clang -### --target=c166 -mmcu=st10f269 -mcpu=xc16x -c %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=MISMATCHC
+// MISMATCHC-NOT: error:
+// MISMATCHC: "-target-cpu" "xc16x"

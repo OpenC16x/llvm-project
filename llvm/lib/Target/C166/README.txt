@@ -858,9 +858,9 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
-* Two SFR maps are modelled and the subtarget picks between them, because the
-  same short address names different registers on different derivatives.  What
-  the two agree about - 91 names at the same short address, which is the
+* Three SFR maps are modelled and the subtarget picks between them, because
+  the same short address names different registers on different derivatives.
+  What they all agree about - 97 names at the same short address, which is the
   classic C166 layout of timers, A/D converter, serial channels, peripheral
   event controller, interrupt control registers and ports 1, 3 and 5 on top of
   the CPU core - is always available.  What they do not is FeatureSFRXC164,

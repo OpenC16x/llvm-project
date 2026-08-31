@@ -58,6 +58,7 @@ HowToCrossCompileBuiltinsOnArm
 BigEndianNEON
 AArch64SME
 CompileCudaWithLLVM
+C166Usage
 NVPTXUsage
 AMDGPUUsage
 AMDGPUAsyncOperations
@@ -331,6 +332,11 @@ yaml2obj
 - {doc}`CompileCudaWithLLVM`
 
   LLVM support for CUDA.
+
+- {doc}`C166Usage`
+
+  This document describes using the C166 target to compile for Infineon C166,
+  C167, ST10 and XC16x microcontrollers.
 
 - {doc}`NVPTXUsage`
 
