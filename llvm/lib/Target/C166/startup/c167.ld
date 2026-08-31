@@ -129,6 +129,12 @@ MEMORY
                          ? __c166_xram_length
                          : __system_stack_limit - 0x0000F600
 
+  /* The bit-addressable RAM: the 128 words from FD00H to FDFEH, which is what
+   * a bit instruction can name and the only memory that is.  It sits above the
+   * register bank at FC00H, in the part of this memory nothing else here uses,
+   * so it is a region of its own rather than a slice of one above. */
+  bitram (rw) : ORIGIN = 0x0000FD00, LENGTH = 256
+
   /* The internal RAM under the system stack.  This is the dual-port RAM, which
    * is the only memory the multiply-accumulate unit's IDX pointers reach, so it
    * is where __dpram places things as well as where the ABI stack lives.  On a
@@ -269,6 +275,30 @@ SECTIONS
     . = ALIGN(2);
     __dprambss_end = .;
   } > iram
+
+  /* What __bitaddr places: the bit-addressable RAM, which is the 128 words
+   * from FD00H to FDFEH and nothing else.  A bit instruction takes an 8 bit
+   * word number of that space rather than an address, so an object anywhere
+   * else has no bit address for one to name - the linker says so rather than
+   * writing a byte that names some other word.
+   *
+   * It is above the register bank at FC00H and below the top of this memory,
+   * which is the part of the dual-port RAM nothing else here uses.
+   */
+  .bitdata 0x0000FD00 : ALIGN(2) {
+    __bitdata_start = .;
+    *(.bitdata .bitdata.*)
+    . = ALIGN(2);
+    __bitdata_end = .;
+  } > bitram AT > rom
+  __bitdata_load = LOADADDR(.bitdata);
+
+  .bitbss (NOLOAD) : ALIGN(2) {
+    __bitbss_start = .;
+    *(.bitbss .bitbss.*)
+    . = ALIGN(2);
+    __bitbss_end = .;
+  } > bitram
 
   /* This part has no RAM that a near address cannot reach, so there is nothing
    * for __far data to live in and these are empty rather than absent: the

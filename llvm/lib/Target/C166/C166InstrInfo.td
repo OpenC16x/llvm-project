@@ -293,6 +293,7 @@ def reg8b : RegisterOperand<GR8orSFR> {
 // can feed both instruction fields.
 def bitoff : Operand<i16> {
   let PrintMethod = "printBitOffOperand";
+  let EncoderMethod = "getBitOffOpValue";
   let DecoderMethod = "decodeBitOffOperand";
   let ParserMatchClass = BitOffAsmOperand;
 }

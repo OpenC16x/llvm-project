@@ -44,6 +44,18 @@ void C166TargetCodeGenInfo::setTargetAttributes(
     if (auto *Var = dyn_cast<llvm::GlobalVariable>(GV))
       Var->addAttribute("c166-dpram");
 
+  // A variable in the bit-addressable RAM.  It is aligned to a word here
+  // rather than left at its natural alignment because a bit instruction names
+  // a word: the bitoff is a word number, so an object at an odd address has no
+  // bit address at all.
+  if (const auto *VD = dyn_cast_or_null<VarDecl>(D);
+      VD && VD->hasAttr<C166BitAddrAttr>())
+    if (auto *Var = dyn_cast<llvm::GlobalVariable>(GV)) {
+      Var->addAttribute("c166-bitaddr");
+      if (Var->getAlign().valueOrOne() < llvm::Align(2))
+        Var->setAlignment(llvm::Align(2));
+    }
+
   const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
   if (!FD)
     return;

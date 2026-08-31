@@ -342,9 +342,48 @@ relocation is left behind.  A disassembly names the target address, but only
 llvm-objdump asks for that; left to itself the printer gives the distance,
 which is what can be handed back to the assembler.
 
-Nothing generates any of these: whether an address is bit addressable is not
-something the compiler can see from the IR, so it would take an intrinsic or
-an address space to express it.
+What the compiler generates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Three shapes reach a bit instruction.  A single bit set or cleared in a value
+the register allocator has placed is BSETr/BCLRr, because bitoff F0H + n names
+R0 to R15, and a branch on one bit of a register is JBr/JNBr.  A constant
+address in one of the two windows - which is how a peripheral register with no
+name in the map gets written - is matched from the address itself.  And a
+variable declared __bitaddr is matched from the symbol.
+
+That last one is the reason for R_C166_BITOFF8.  A global's address is not
+known when the instruction is selected, and the byte the instruction carries
+is not the address anyway: it is the 8 bit word number of the bit-addressable
+space, which is FD00H upwards in one window and FF00H upwards in another, so
+no ABS8 of anything produces it.  The linker computes it, and refuses an
+address in neither window rather than writing a byte that names some other
+word - which is worth having, because putting a bit variable somewhere it
+cannot live is otherwise a silent mistake.
+
+Two details of the selection are worth writing down.
+
+A word only one byte of which is looked at arrives at the branch matcher as a
+byte load and a byte AND, because that is what the combiner narrows it to.  The
+bit instruction still names the word, so the low byte is the same word and the
+same bit and the high byte is the same word eight bits up - which is where the
+odd address the byte load carries goes.  __bitaddr forces word alignment on
+what it places, which is what makes an odd offset from one mean "the high
+byte" rather than "some other variable".
+
+The branch form needs the load to fold into it, and that needs the branch to
+be the next thing on the load's chain.  A volatile word is: nothing may be
+moved across it.  A plain one may have been scheduled away from the branch, in
+which case the load stays and the compare and jump it would have been is what
+comes out.  Volatile is how a word an interrupt also touches is spelled, so
+the case that wants the instruction is the case that gets it.  The read,
+change, write forms have no such condition - they match a load and a store on
+one chain - so BSET and BCLR are selected either way.
+
+Placing them is llvm/lib/Target/C166/startup/*.ld: 128 words at FD00H, in the
+part of the dual-port RAM above the register bank that nothing else uses.  The
+section is a region of its own, so a program with more than 256 bytes of bit
+variables is told at the link rather than one relocation at a time.
 
 Short encodings
 ---------------

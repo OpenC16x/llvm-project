@@ -120,6 +120,47 @@ tells a caller in another translation unit which call sequence to use.
 `-mcpu=c166` has no `EXTend` instructions, so far addressing is unavailable
 on the first-generation core.
 
+## Bit variables
+
+Setting, clearing or testing one bit of a variable is a single two-byte
+instruction if the variable is in the bit-addressable RAM, which `__bitaddr`
+places it in:
+
+```c
+__bitaddr volatile unsigned short flags;
+
+void arm(void)    { flags |= 8; }             /* bset flags.3     */
+void disarm(void) { flags &= ~8; }            /* bclr flags.3     */
+void poll(void)   { if (flags & 8) act(); }   /* jnb  flags.3, .. */
+```
+
+Without it those are a load, a mask and a store — eight bytes against two, and
+with a gap between the read and the write in which an interrupt touching the
+same word loses what it set. The bit instruction does the whole thing as one
+bus operation, which is the reason to want it beyond the size.
+
+Some limits, all of them the machine's:
+
+- **The bit has to be a constant.** `flags |= 8` names one; `flags |= 1u << n`
+  does not, and stays a shift and an `OR`.
+- **The space is 128 words**, `FD00H` to `FDFEH`. That is all the RAM the
+  instructions can name. Overflowing it is a link error, not a silent
+  truncation.
+- **The branch form needs the load to fold into it**, which it does for a
+  `volatile` variable — the spelling a word an interrupt also touches wants
+  anyway. Without `volatile` the compiler may have moved the load away from the
+  branch, and then a compare and jump is what comes out. `bset` and `bclr` are
+  selected either way.
+
+Reading or writing the whole word is an ordinary access, and a pointer to one
+of these is an ordinary `unsigned short *`: the instruction needs the address
+in itself rather than in a register, so going through a pointer is an ordinary
+load or store.
+
+Registers are bit-addressable too, and need no attribute — bitoff `F0H + n`
+names `R0` to `R15`, so `x |= 8` on a local is `bset` on whichever register the
+allocator picked.
+
 ## Interrupt handlers
 
 ```c

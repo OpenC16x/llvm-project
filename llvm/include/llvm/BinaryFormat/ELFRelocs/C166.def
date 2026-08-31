@@ -49,3 +49,17 @@ ELF_RELOC(R_C166_POF14,    11)
 // a target in another segment is not reached at all, and nothing in the
 // instruction or in a plain SOF16 would say so.
 ELF_RELOC(R_C166_CADDR16,  13)
+
+// The 8 bit "bitoff" word address naming the word that holds a bit, which the
+// bit instructions take instead of an address.  The mapping is not linear, so
+// this cannot be an ABS8 of anything: 00H to 7FH is the internal RAM from
+// FD00H in steps of a word, 80H to EFH is the special function registers from
+// FF00H in steps of a word, and F0H to FFH is R0 to R15.  So the value written
+// is
+//
+//   bitoff(S + A)  =  ((S + A) - FD00H) / 2          for FD00H..FDFEH
+//                     80H + ((S + A) - FF00H) / 2    for FF00H..FFDEH
+//
+// and an address that is odd or in neither window names no bit-addressable
+// word at all, which the linker is expected to say rather than truncate.
+ELF_RELOC(R_C166_BITOFF8,  14)

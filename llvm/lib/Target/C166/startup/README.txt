@@ -231,7 +231,16 @@ at the top of the script.  crt0 copies and zeroes the two halves of it the way
 it does .data and .bss, so a script of your own has to define
 __dpramdata_load, __dpramdata_start, __dpramdata_end, __dprambss_start and
 __dprambss_end - an empty pair is fine, and is what a part with no coprocessor
-ends up with anyway.
+ends up with anyway.  The same goes for __bitdata_load, __bitdata_start,
+__bitdata_end, __bitbss_start and __bitbss_end, which are the bit-addressable
+RAM's.
+
+Above the register bank, from 00'FD00H to 00'FDFEH, is the bit-addressable RAM
+- the 128 words a bit instruction can name, and the only memory it can.  That
+is where __bitaddr places a variable, and it is a region of its own in the
+script, so a program with more than 256 bytes of them is told at the link
+rather than one relocation at a time.  Nothing else here uses that part of the
+memory: the two stacks and the register bank are all below it.
 
 The variant of this part with 32 KByte of Flash has no DSRAM, and the script
 handles that without an edit: the dsram region becomes the dual-port RAM, and

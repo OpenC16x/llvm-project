@@ -35,6 +35,8 @@ private:
   MCSectionELF *FarTextSection = nullptr;
   MCSectionELF *DPRamDataSection = nullptr;
   MCSectionELF *DPRamBSSSection = nullptr;
+  MCSectionELF *BitDataSection = nullptr;
+  MCSectionELF *BitBSSSection = nullptr;
 };
 
 } // end namespace llvm

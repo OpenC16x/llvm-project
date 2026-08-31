@@ -618,6 +618,9 @@ features cannot lower the translation-unit ABI level;
 - `__dpram` places a variable in the internal dual-port RAM, which is the only
   memory the multiply-accumulate coprocessor's `IDX0` and `IDX1` can address,
   so an array one of its instructions walks through has to be there.
+- `__bitaddr` places a variable in the bit-addressable RAM, so that setting,
+  clearing or testing one of its bits is a single indivisible instruction
+  rather than a read, a change and a write.
 - `__C166_MAC__` and `__C166_EXT_INSTR__` say whether the multiply-accumulate
   coprocessor and the `EXTend` instructions are available, so that code can
   ask rather than infer them from a part number.

@@ -171,6 +171,33 @@ _start:
         jmpr    cc_UC, .Ldpzero
 .Ldpzero_done:
 
+        // And again for what __bitaddr placed in the bit-addressable RAM,
+        // which is near like the rest of it.  A third pair rather than a wider
+        // range for the same reason as the second: FD00H is not adjacent to
+        // either of the other two areas.
+        mov     r1, #__bitdata_load
+        mov     r2, #__bitdata_start
+        mov     r3, #__bitdata_end
+.Lbitcopy:
+        cmp     r2, r3
+        jmpr    cc_z, .Lbitcopy_done
+        mov     r4, [r1+]
+        mov     [r2], r4
+        add     r2, #2
+        jmpr    cc_UC, .Lbitcopy
+.Lbitcopy_done:
+
+        mov     r1, #__bitbss_start
+        mov     r2, #__bitbss_end
+        mov     r3, #0
+.Lbitzero:
+        cmp     r1, r2
+        jmpr    cc_z, .Lbitzero_done
+        mov     [r1], r3
+        add     r1, #2
+        jmpr    cc_UC, .Lbitzero
+.Lbitzero_done:
+
         // Copy what lives in the RAM the data page pointers do not reach:
         // the code that runs from the PSRAM, and anything declared __far.
         // That RAM being outside every page they select is the whole point of

@@ -156,6 +156,32 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     // The offset within the page, in the low fourteen bits of the word.
     write16le(loc, (read16le(loc) & 0xc000) | (val & 0x3fff));
     break;
+  case R_C166_BITOFF8: {
+    // Not an address: the 8 bit word number of the bit-addressable space.  The
+    // mapping has two windows counted from two bases, and an address in
+    // neither is not a value that has been truncated - there is no bit
+    // instruction that reaches it at all, so say that rather than write a byte
+    // that names some other word.
+    uint64_t addr = val & 0xffffffff;
+    int off = -1;
+    if (addr <= 0xFFFF && !(addr & 1)) {
+      if (addr >= 0xFD00 && addr <= 0xFDFE)
+        off = int((addr - 0xFD00) / 2);
+      else if (addr >= 0xFF00 && addr <= 0xFFDE)
+        off = int(0x80 + (addr - 0xFF00) / 2);
+    }
+    if (off < 0) {
+      Err(ctx) << getErrorLoc(ctx, loc) << "bit variable "
+               << (rel.sym ? rel.sym->getName() : StringRef("target"))
+               << " is at " << utohexstr(addr, /*LowerCase=*/true)
+               << ", which is not in the bit-addressable space: a bit "
+                  "instruction reaches an even address in fd00-fdfe or "
+                  "ff00-ffde and nothing else";
+      return;
+    }
+    *loc = uint8_t(off);
+    break;
+  }
   default:
     Err(ctx) << getErrorLoc(ctx, loc) << "unrecognized relocation " << rel.type;
   }

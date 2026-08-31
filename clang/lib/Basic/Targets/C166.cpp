@@ -69,6 +69,12 @@ void C166TargetInfo::getTargetDefines(const LangOptions &Opts,
   // cannot collide with anything the user wrote.
   Builder.defineMacro("__dpram", "__attribute__((c166_dpram))");
 
+  // The bit-addressable RAM, where setting or testing one bit of a variable is
+  // a single indivisible instruction.  A placement like __dpram and for the
+  // same reason: the address is an ordinary near one, and what matters is
+  // which memory the object is in.
+  Builder.defineMacro("__bitaddr", "__attribute__((c166_bitaddr))");
+
   // Far data lives in address space 1.  Spell it the way the vendor
   // toolchains do; the name is in the reserved identifier space, so it cannot
   // collide with anything the user wrote.

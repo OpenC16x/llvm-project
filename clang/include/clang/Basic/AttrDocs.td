@@ -3322,6 +3322,42 @@ hand written vector, exactly as it is for the vendor toolchains.
   }];
 }
 
+def C166BitAddrDocs : Documentation {
+  let Category = DocCatVariable;
+  let Heading = "c166_bitaddr (C166)";
+  let Content = [{
+Places a variable in the C166's bit-addressable RAM, so that setting, clearing
+or testing one of its bits is a single instruction. ``__bitaddr`` is predefined
+as a shorthand::
+
+  __bitaddr unsigned short flags;
+
+  void arm(void)   { flags |= 8; }          // bset flags.3
+  void disarm(void){ flags &= ~8; }         // bclr flags.3
+  void poll(void)  { if (flags & 8) act(); }// jnb flags.3, ...
+
+Two things make that worth asking for. The bit instructions are two bytes where
+the read, change and write they replace is eight; and they are one indivisible
+bus operation, so an interrupt cannot arrive between the read and the write and
+lose what it set in the same word.
+
+Only 128 words are bit-addressable -- ``FD00H`` to ``FDFEH`` -- and the linker
+script places this section there. Each variable is aligned to a word, because a
+bit instruction names a word. A program that puts more than 256 bytes here
+fails to link rather than losing the bits that did not fit.
+
+The compiler emits a bit instruction only when it can see which bit is meant:
+``flags |= 8`` names one, ``flags |= n`` does not and stays an ``OR``. Reading
+or writing the whole word is an ordinary access, so the variable is an ordinary
+variable in every other respect.
+
+The attribute is a placement and not a type qualifier: a pointer to one of
+these is an ordinary ``unsigned short *``, and going through it is an ordinary
+access, because the instruction needs the address in itself rather than in a
+register.
+  }];
+}
+
 def C166DPRamDocs : Documentation {
   let Category = DocCatVariable;
   let Heading = "c166_dpram (C166)";

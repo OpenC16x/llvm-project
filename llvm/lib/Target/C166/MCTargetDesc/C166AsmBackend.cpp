@@ -43,6 +43,7 @@ public:
         {"fixup_c166_rel8w", 0, 8, 0},
         {"fixup_c166_rel8w_short", 0, 8, 0},
         {"fixup_c166_caddr", 0, 16, 0},
+        {"fixup_c166_bitoff", 0, 8, 0},
     };
     static_assert(std::size(Infos) == C166::NumTargetFixupKinds,
                   "Not all fixup kinds added to Infos array");
@@ -155,6 +156,25 @@ void C166AsmBackend::applyFixup(const MCFragment &F, const MCFixup &Fixup,
     if (Offset < -128 || Offset > 127)
       getContext().reportError(Fixup.getLoc(), "branch target out of range");
     Value = static_cast<uint64_t>(Offset) & 0xff;
+  }
+
+  if (Fixup.getKind() == C166::fixup_c166_bitoff) {
+    // The bit instructions do not take an address; they take the 8 bit word
+    // number of the bit-addressable space, which is two windows counted from
+    // two bases.  A symbol the linker places has to be turned into that here,
+    // and an address in neither window is not a truncation to report as one -
+    // there is no bit instruction that reaches it at all.
+    if (!IsResolved)
+      return;
+    int BitOff = C166::getBitOffForAddress(static_cast<uint16_t>(Value));
+    if (Value > 0xFFFF || BitOff < 0) {
+      getContext().reportError(
+          Fixup.getLoc(),
+          "not in the bit-addressable space: a bit variable has to be an even "
+          "address in FD00H-FDFEH or FF00H-FFDEH");
+      return;
+    }
+    Value = static_cast<uint64_t>(BitOff);
   }
 
   if (!Value)

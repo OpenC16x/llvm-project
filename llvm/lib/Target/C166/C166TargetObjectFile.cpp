@@ -58,6 +58,13 @@ void C166TargetObjectFile::Initialize(MCContext &Ctx, const TargetMachine &TM) {
                                        ELF::SHF_ALLOC | ELF::SHF_WRITE);
   DPRamBSSSection = Ctx.getELFSection(".dprambss", ELF::SHT_NOBITS,
                                       ELF::SHF_ALLOC | ELF::SHF_WRITE);
+
+  // The bit-addressable RAM, which is 128 words and the only memory a bit
+  // instruction can name.  Split the same way and for the same reason.
+  BitDataSection = Ctx.getELFSection(".bitdata", ELF::SHT_PROGBITS,
+                                     ELF::SHF_ALLOC | ELF::SHF_WRITE);
+  BitBSSSection = Ctx.getELFSection(".bitbss", ELF::SHT_NOBITS,
+                                    ELF::SHF_ALLOC | ELF::SHF_WRITE);
 }
 
 MCSection *C166TargetObjectFile::SelectSectionForGlobal(
@@ -75,6 +82,14 @@ MCSection *C166TargetObjectFile::SelectSectionForGlobal(
   if (const auto *GV = dyn_cast<GlobalVariable>(GO);
       GV && GV->hasAttribute("c166-dpram"))
     return Kind.isBSS() ? DPRamBSSSection : DPRamDataSection;
+
+  // __bitaddr puts an object in the bit-addressable RAM, which is FD00H to
+  // FDFEH and nothing else: a bit instruction takes an 8 bit word number of
+  // that space rather than an address, so an object anywhere else has no bit
+  // address for one to name.
+  if (const auto *GV = dyn_cast<GlobalVariable>(GO);
+      GV && GV->hasAttribute("c166-bitaddr"))
+    return Kind.isBSS() ? BitBSSSection : BitDataSection;
 
   // A far function is entered with CALLS and left with RETS, which is only
   // worth the extra stack word if it can end up in another segment.
