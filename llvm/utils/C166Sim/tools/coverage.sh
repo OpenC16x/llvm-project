@@ -25,7 +25,8 @@ OK=0
 try() {
   COUNT=$((COUNT + 1))
   printf '\t%s\n' "$1" > "$TMP/one.s"
-  if "$BIN/llvm-mc" -triple=c166 -filetype=obj "$TMP/one.s" -o /dev/null 2>/dev/null
+  if "$BIN/llvm-mc" -triple=c166 -mcpu=xc16x -filetype=obj "$TMP/one.s" \
+       -o /dev/null 2>/dev/null
   then
     OK=$((OK + 1))
   else

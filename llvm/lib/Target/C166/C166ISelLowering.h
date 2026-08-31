@@ -68,6 +68,7 @@ public:
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerXMULO(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
@@ -106,6 +107,8 @@ public:
 
   AtomicExpansionKind shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
 
+  MachineBasicBlock *emitMulOverflow(MachineInstr &MI,
+                                    MachineBasicBlock *BB) const;
   MachineBasicBlock *emitCmpXchg(MachineInstr &MI,
                                  MachineBasicBlock *BB) const;
 

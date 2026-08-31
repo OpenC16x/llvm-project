@@ -1,0 +1,12 @@
+# The lit directories this target has tests in, one per line.
+#
+# There are two readers and they must not drift apart: the workflow runs lit
+# over these, and checktools.sh reads the RUN lines in them to work out which
+# tools the build has to produce.  Adding a directory to one and not the other
+# is what let a test needing "opt" reach CI - the checker written to catch that
+# was not looking at the directory the test was in.
+llvm/test/CodeGen/C166
+llvm/test/MC/C166
+llvm/test/DebugInfo/C166
+llvm/test/tools/c166-sim
+llvm/test/Analysis/CostModel/C166

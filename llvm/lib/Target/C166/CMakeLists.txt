@@ -32,6 +32,7 @@ add_llvm_target(C166CodeGen
   C166Subtarget.cpp
   C166TargetMachine.cpp
   C166TargetObjectFile.cpp
+  C166TargetTransformInfo.cpp
 
   LINK_COMPONENTS
   Analysis

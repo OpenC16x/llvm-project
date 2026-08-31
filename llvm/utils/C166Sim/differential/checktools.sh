@@ -17,7 +17,11 @@ STATUS=0
 # they were rather than to the root of the tree.
 BIN=$(cd "$BIN" && pwd)
 
-TESTS="llvm/test/CodeGen/C166 llvm/test/MC/C166 llvm/test/DebugInfo/C166 llvm/test/tools/c166-sim"
+# The directories to read, from the list the workflow runs lit over.  Keeping
+# one list rather than two is the point: this script exists to notice a test
+# that needs a tool the build does not make, and it can only notice one in a
+# directory it was told about.
+TESTS=$(grep -v '^#' "$HERE/testdirs.txt")
 
 # Every test file, which is what gets read for the tool names.  The directories
 # are listed one at a time on purpose: "$TESTS/*" would attach the glob to the

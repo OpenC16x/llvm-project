@@ -145,7 +145,9 @@ public:
 
   bool isImm3() const { return isImmInRange(0, 7, /*AllowSymbol=*/false); }
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
-  bool isImm5() const { return isImmInRange(0, 31, /*AllowSymbol=*/false); }
+  // The MAC shifter's count.  Five bits are encoded and only 0 to 8 are
+  // defined; see "coshift" in C166InstrInfo.td.
+  bool isCoShift() const { return isImmInRange(0, 8, /*AllowSymbol=*/false); }
   bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
@@ -359,8 +361,16 @@ class C166AsmParser : public MCTargetAsmParser {
   /// reaching none of them is not an error here at all, so this returns an
   /// empty message for anything it does not recognise.
   std::string reportRegisterNotInMap(SMLoc S, StringRef Name) const {
-    if (!MatchRegisterName(Name.lower()) || matchRegisterInMap(Name))
+    MCRegister Reg = MatchRegisterName(Name.lower());
+    if (!Reg || matchRegisterInMap(Name))
       return std::string();
+    // The coprocessor's offset registers are missing for a different reason
+    // than the rest: they are not another part's, they are the MAC unit's, and
+    // what is absent is the unit.
+    if (getC166MCRegisterClass(C166::CoOFFSRegClassID).contains(Reg))
+      return ("'" + Name.lower() +
+              "' is a register of the multiply-accumulate unit, which the "
+              "selected processor does not have");
     return ("'" + Name.lower() +
             "' is not a register on the selected processor; it is another "
             "derivative's special function register");

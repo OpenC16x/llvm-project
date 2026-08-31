@@ -80,7 +80,7 @@ _start:
         // defines __c166_enable_xper itself.
         mov     r1, #__c166_enable_xper
         cmp     r1, #0
-        jmpa    cc_z, .Lno_xper
+        jmpr    cc_z, .Lno_xper
         bset    syscon.2
 .Lno_xper:
 
@@ -100,11 +100,11 @@ _start:
         mov     r3, #__data_end
 .Lcopy:
         cmp     r2, r3
-        jmpa    cc_z, .Lcopy_done
+        jmpr    cc_z, .Lcopy_done
         mov     r4, [r1+]
         mov     [r2], r4
         add     r2, #2
-        jmpa    cc_UC, .Lcopy
+        jmpr    cc_UC, .Lcopy
 .Lcopy_done:
 
         // Zero the uninitialised data, word aligned the same way.
@@ -113,10 +113,10 @@ _start:
         mov     r3, #0
 .Lzero:
         cmp     r1, r2
-        jmpa    cc_z, .Lzero_done
+        jmpr    cc_z, .Lzero_done
         mov     [r1], r3
         add     r1, #2
-        jmpa    cc_UC, .Lzero
+        jmpr    cc_UC, .Lzero
 .Lzero_done:
 
         // End of the initialisation phase.  After this DISWDT no longer works
@@ -132,5 +132,5 @@ _start:
         // running off the end of memory.
         .globl __c166_exit
 __c166_exit:
-        jmpa    cc_UC, __c166_exit
+        jmpr    cc_UC, __c166_exit
         .size _start, .-_start
