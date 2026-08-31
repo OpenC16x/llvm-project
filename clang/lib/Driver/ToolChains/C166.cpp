@@ -155,15 +155,58 @@ static void addPartMemoryMap(const llvm::C166::Part &P, ArgStringList &CmdArgs,
         Args.MakeArgString("--defsym=" + Name + "=" + Twine(Value)));
   };
 
-  if (P.Core == "c167") {
+  if (P.Core == "c167" || P.Core == "st10") {
     // A C167 addresses 16 MByte the same way, but its on-chip program memory
     // is at the bottom of a segment rather than in one of its own, so the
     // whole of it is under a data page pointer and there is no near/far split
     // to make.  A romless part has none of it and the board's script says
     // what is out there instead.
+    //
+    // An ST10 is a C167 derivative and takes the same three, but its Flash is
+    // not one run and its extension RAM is not always at the C167's address,
+    // so st10.ld divides the length up by its data sheet's block table and
+    // takes the addresses below rather than knowing them.  Passing a length
+    // and letting the script place it is what keeps this function from having
+    // to know either map.
     def("__c166_rom_length", P.ProgramSize);
     def("__c166_iram_length", P.IRAMSize);
     def("__c166_xram_length", P.XRAMSize);
+    if (P.XRAMOrigin)
+      def("__c166_xram_origin", P.XRAMOrigin);
+    if (P.XRAM2Size) {
+      def("__c166_xram2_length", P.XRAM2Size);
+      def("__c166_xram2_origin", P.XRAM2Origin);
+    }
+
+    // The three the startup code reads at run time are decided here rather
+    // than left to the script, and that is not a matter of taste.  A script
+    // symbol written "X = DEFINED(X) ? X : default" reads as its default to
+    // every later expression in the same script, even where --defsym gave it
+    // another value - the symbol itself ends up right and anything derived
+    // from it does not.  Region lengths survive that, because MEMORY is
+    // evaluated where the override is visible; a symbol an instruction
+    // relocates against does not.
+    //
+    // So a script deriving __c166_enable_xper from __c166_xram_length would
+    // answer for the part the script defaults to, and c167.ld's did: a board
+    // passing --defsym=__c166_xram_length=0 got SYSCON.XPEN set anyway.
+    // Deciding here, where the part is known, is the fix and the reason these
+    // are not simply left to the defaults that already exist.
+    bool HasXRAM = P.XRAMSize || P.XRAM2Size;
+    def("__c166_enable_xper", HasXRAM ? 1 : 0);
+
+    if (P.Core == "st10") {
+      // XPERCON comes up as 05H, which is CAN1 and the 2 KByte XRAM1, and
+      // cannot be written once SYSCON.XPEN is set - so the second extension
+      // RAM is off unless startup sets bit 3 in the one window there is.
+      //
+      // Both shapes of second RAM count.  An ST10F272's is a region and shows
+      // up as XRAM2Size; an ST10F269's adjoins XRAM1 inside the near region
+      // and shows up only as that region being larger than XRAM1's 2 KByte.
+      bool UsesXRAM2 = P.XRAM2Size || P.XRAMSize > 2 * 1024;
+      def("__c166_xpercon", UsesXRAM2 ? 0x0D : 0x05);
+      def("__c166_write_xpercon", UsesXRAM2 ? 1 : 0);
+    }
     return;
   }
 
@@ -215,8 +258,14 @@ void c166::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // same one with branches in it.
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_r,
                    options::OPT_nostartfiles)) {
+    // An ST10 takes the C167's startup: it has no PLL of the kind crt0.S
+    // programs, its data page pointers come up holding what its script wants,
+    // and the one thing it needs beyond a C167 - XPERCON written before
+    // SYSCON.XPEN - is in that file already, driven by symbols its own script
+    // defines.
+    StringRef Core = getCore(Args);
     const char *Crt0 =
-        getCore(Args) == "c167" ? "c167-crt0.o" : "crt0.o";
+        (Core == "c167" || Core == "st10") ? "c167-crt0.o" : "crt0.o";
     CmdArgs.push_back(Args.MakeArgString(TC.GetFilePath(Crt0)));
   }
 

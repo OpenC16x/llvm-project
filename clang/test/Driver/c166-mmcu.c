@@ -96,3 +96,71 @@ int main(void) { return 0; }
 // RUN: %clang -### --target=c166 -mcpu=c167 %s 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=C167CPU
 // C167CPU: "c167-crt0.o"
+
+// The ST10 parts, where the extension RAM is the one memory whose address the
+// row carries rather than the core.  Two of these have the same core and the
+// same 256 KByte of Flash and put that RAM in different places, which is why
+// the table can say.
+
+// RUN: %clang -### --target=c166 -mmcu=st10f269 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ST10F269
+//
+// An ST10F269's XRAM2 runs up to 00'DFFFH and its XRAM1 starts at 00'E000H, so
+// the two adjoin: 10 KByte in one region at 00'C000H, and no second one.
+// ST10F269: "-target-cpu" "st10"
+// ST10F269: "c167-crt0.o"
+// ST10F269: "--defsym=__c166_rom_length=262144"
+// ST10F269-SAME: "--defsym=__c166_iram_length=2048"
+// ST10F269-SAME: "--defsym=__c166_xram_length=10240"
+// ST10F269-SAME: "--defsym=__c166_xram_origin=49152"
+// ST10F269-NOT: "--defsym=__c166_xram2_length
+// ST10F269-NOT: "--defsym=__c166_psram_length
+//
+// Its 10 KByte is XRAM1's 2 and XRAM2's 8, and XRAM2 is off at reset - so
+// startup has to write XPERCON, in the one window before SYSCON.XPEN.  0DH is
+// the reset value 05H with XRAM2EN added.  A region larger than XRAM1's 2
+// KByte is the only sign this part gives that XRAM2 is in use, which is why
+// the test is here: get it wrong and 8 of its 10 KByte stay switched off, and
+// nothing else would notice.
+// RUN: %clang -### --target=c166 -mmcu=st10f269 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ST10F269X
+// ST10F269X: "--defsym=__c166_enable_xper=1"
+// ST10F269X-SAME: "--defsym=__c166_xpercon=13"
+// ST10F269X-SAME: "--defsym=__c166_write_xpercon=1"
+
+// RUN: %clang -### --target=c166 -mmcu=st10f272e %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ST10F272E
+//
+// An ST10F272E has the C167's 2 KByte at 00'E000H and a second 16 KByte at
+// 09'0000H, which no data page pointer here holds - so that one is a far
+// region rather than more of the same region.
+// ST10F272E: "--defsym=__c166_rom_length=262144"
+// ST10F272E-SAME: "--defsym=__c166_xram_length=2048"
+// ST10F272E-SAME: "--defsym=__c166_xram_origin=57344"
+// ST10F272E-SAME: "--defsym=__c166_xram2_length=16384"
+// ST10F272E-SAME: "--defsym=__c166_xram2_origin=589824"
+// ST10F272E-SAME: "--defsym=__c166_enable_xper=1"
+// ST10F272E-SAME: "--defsym=__c166_xpercon=13"
+// ST10F272E-SAME: "--defsym=__c166_write_xpercon=1"
+
+// The B has the same map with half the second RAM, which is the whole of the
+// difference between the two.
+// RUN: %clang -### --target=c166 -mmcu=st10f272b %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ST10F272B
+// ST10F272B: "--defsym=__c166_xram_length=2048"
+// ST10F272B-SAME: "--defsym=__c166_xram_origin=57344"
+// ST10F272B-SAME: "--defsym=__c166_xram2_length=8192"
+// ST10F272B-SAME: "--defsym=__c166_xram2_origin=589824"
+
+// An ST10 takes the C167's startup, and naming the core alone is enough.
+// RUN: %clang -### --target=c166 -mcpu=st10 %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ST10CPU
+// ST10CPU: "c167-crt0.o"
+
+// A C167 writes no XPERCON: its one extension RAM is already selected at
+// reset, so the shared startup branches over that write.
+// RUN: %clang -### --target=c166 -mmcu=c167cr-16rm %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=C167XPER
+// C167XPER: "--defsym=__c166_enable_xper=1"
+// C167XPER-NOT: "--defsym=__c166_xpercon
+// C167XPER-NOT: "--defsym=__c166_write_xpercon

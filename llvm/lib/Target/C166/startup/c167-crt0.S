@@ -78,6 +78,31 @@ _start:
         // The linker script says whether to: there is nothing to enable on a
         // part with no extension RAM, and a board that knows its own answer
         // defines __c166_enable_xper itself.
+        //
+        // XPERCON comes first where it is written at all, because this is the
+        // only window there is: an ST10 data sheet says XPERCON cannot be
+        // changed after the global enable, and its second extension RAM is
+        // off until bit 3 of it is set.  A C167 has nothing to select - its
+        // XPERCON comes up with the one XRAM it has - so its script leaves
+        // __c166_write_xpercon at zero and these four instructions are a
+        // branch not taken.
+        //
+        // XPERCON is an extended register, which a "reg" field cannot name;
+        // this reaches it by its address, which needs no EXTR.  The address
+        // comes from the linker script rather than from the name, because
+        // this file is assembled once for both parts and -mcpu=c167 does not
+        // know the name: the tree has the XC164CM's extended map and the
+        // ST10F269's, and no C167 one.  A C167 does have XPERCON - c167.ld
+        // cites its manual for the reset behaviour - so what is missing is
+        // that map rather than the register, and inventing the name here
+        // would be asserting a map nobody has read.
+        mov     r1, #__c166_write_xpercon
+        cmp     r1, #0
+        jmpr    cc_z, .Lno_xpercon
+        mov     r1, #__c166_xpercon
+        mov     __c166_xpercon_addr, r1
+.Lno_xpercon:
+
         mov     r1, #__c166_enable_xper
         cmp     r1, #0
         jmpr    cc_z, .Lno_xper

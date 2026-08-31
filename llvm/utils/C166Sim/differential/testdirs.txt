@@ -1,4 +1,6 @@
-# The lit directories this target has tests in, one per line.
+# The lit targets this target has tests in, one per line.  A line is a
+# directory or a single test file; the clang driver tests are files because
+# the directory they live in is the whole clang driver suite.
 #
 # There are two readers and they must not drift apart: the workflow runs lit
 # over these, and checktools.sh reads the RUN lines in them to work out which
@@ -10,3 +12,5 @@ llvm/test/MC/C166
 llvm/test/DebugInfo/C166
 llvm/test/tools/c166-sim
 llvm/test/Analysis/CostModel/C166
+clang/test/Driver/c166-mmcu.c
+clang/test/Driver/c166-toolchain.c

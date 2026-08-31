@@ -691,10 +691,10 @@ does unconditionally.
 Known limitations / things to do
 --------------------------------
 
-* Two parts' worth of board support is here rather than one.  c167.ld and
-  c167-crt0.S are the C167's, and -mmcu= picks the startup file while -T still
-  picks the script, because the map is the board's rather than the part's and
-  the scripts here are starting points.
+* Three parts' worth of board support is here rather than one.  c167.ld and
+  c167-crt0.S are the C167's, st10.ld is the ST10's, and -mmcu= picks the
+  startup file while -T still picks the script, because the map is the board's
+  rather than the part's and the scripts here are starting points.
 
   Two things make the C167 simpler rather than harder.  Its program memory is
   at the bottom of segment 0, so the data page pointers want the values they
@@ -739,6 +739,52 @@ Known limitations / things to do
   and the startup branches on it.  SYSCON is bit addressable, so it is one
   BSET and not a read-modify-write of a register whose other bits the reset
   pins set.
+
+* An ST10 takes that same startup file and needs a script of its own, which is
+  the opposite way round from the C167 and is what its data sheets say.  Two
+  things about its memory are the part's rather than the core's.
+
+  Its Flash is not one run.  256 KByte arrives as 32 KByte at 00'0000H, then
+  nothing from 00'8000H to 01'7FFFH, then 32 KByte at 01'8000H and 64 KByte
+  each at 02'0000H, 03'0000H and 04'0000H - which the ST10F269 and ST10F272
+  data sheets give identically.  c167.ld computes its regions by dividing one
+  length up from zero and would put code in that hole, so st10.ld has a region
+  per block instead, one per segment because a far access carries one segment
+  and a near branch cannot leave one.
+
+  Its extension RAM is somewhere else, and not the same somewhere else on
+  every ST10.  An ST10F269 has XRAM2's 8 KByte at 00'C000H running up to
+  00'DFFFH and XRAM1's 2 KByte at 00'E000H, so the two adjoin and are 10 KByte
+  in one region, all of it in page 3 and near.  An ST10F272 has the same
+  XRAM1 and puts XRAM2 at 09'0000H, which no pointer here holds - so that one
+  is a far region and the near RAM is 2 KByte.  Two parts, one core, one Flash
+  size, two maps: that is why a part table row can name its own extension RAM
+  address, and why every ST10 row does rather than leaving it to a default
+  that would be the other part's.
+
+  XPERCON is what makes the second one exist, and it is the reason that write
+  is in the shared startup at all.  Its reset value is 05H - CAN1 and XRAM1 -
+  so XRAM2 is off until bit 3 is set, and the data sheet says XPERCON cannot
+  be changed after SYSCON.XPEN.  There is one window, before the enable, and
+  c167-crt0.S uses it under a flag the script sets: an ST10 writes 0DH and a
+  C167, whose one XRAM is already selected at reset, branches over it.
+
+  That write names XPERCON by address rather than by name.  The file is
+  assembled once for both cores and -mcpu=c167 does not know the name: this
+  tree has the XC164CM's extended register map and the ST10F269's and no C167
+  one, and a C167 does have the register.  What is missing is the map, so the
+  address comes from the linker script - which is per part - rather than from
+  a name asserting a map nobody has read.
+
+  Which ST10s are rows, and which are not.  The ST10F269, ST10F272B and
+  ST10F272E have their maps read and are here.  The ST10F276E and ST10F296E
+  have 832 KByte and it is two Flash modules on two buses - 512 KByte of
+  IFLASH and 320 KByte of XFLASH at 09'0000H - of which the data sheet says
+  "the XFLASH is seen as external memory" and tabulates the modes it cannot be
+  fetched from.  How much of that is program memory is a question about fetch
+  modes rather than a size, so there is no row: a table whose header forbids
+  inferring a map from a part number should not infer one from a headline
+  figure either.
 
 * The near addressing model is the XC164CM's: a near reference relocates as
   SOF16, the offset within a segment, and the data page pointers decide which

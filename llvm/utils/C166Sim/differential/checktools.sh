@@ -30,10 +30,17 @@ TESTS=$(grep -v '^#' "$HERE/testdirs.txt")
 # to find.
 cd "$ROOT"
 FILES=""
-for DIR in $TESTS; do
-  for F in "$DIR"/*; do
-    [ -f "$F" ] && FILES="$FILES $F"
-  done
+for T in $TESTS; do
+  if [ -d "$T" ]; then
+    for F in "$T"/*; do
+      [ -f "$F" ] && FILES="$FILES $F"
+    done
+  elif [ -f "$T" ]; then
+    FILES="$FILES $T"
+  else
+    echo "checktools.sh: $T is in testdirs.txt and does not exist"
+    STATUS=1
+  fi
 done
 FILES="$FILES $(git ls-files 'lld/test/ELF/*c166*')"
 

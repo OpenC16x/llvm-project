@@ -46,13 +46,44 @@ __c166_rom_length    = DEFINED(__c166_rom_length)    ? __c166_rom_length    : 12
 __c166_iram_length   = DEFINED(__c166_iram_length)   ? __c166_iram_length   : 2K;
 __c166_xram_length   = DEFINED(__c166_xram_length)   ? __c166_xram_length   : 2K;
 
+/* A warning about the idiom above, which cost a real bug.  A symbol written
+ * "X = DEFINED(X) ? X : default" ends up with the right value, but every later
+ * expression in this script that reads X sees the default instead - so a
+ * symbol derived from one of these answers for the part this file defaults to
+ * rather than for the part on the command line.  Region lengths are safe,
+ * because MEMORY is evaluated where the override is visible; a symbol the
+ * startup code relocates against is not.
+ *
+ * The three the startup code reads at run time - __c166_enable_xper, and on
+ * an ST10 __c166_write_xpercon and __c166_xpercon - are therefore decided by
+ * the driver, which knows the part, and the defaults below apply only when
+ * this script is used on its own with nothing overridden.  Deriving a fourth
+ * one here would reintroduce it. */
+
 /* Whether crt0 sets SYSCON.XPEN, which is what turns the X-peripherals on and
  * with them the XRAM.  The C167CS manual documents that bit as the enable and
  * says XPERCON comes up selecting the 2 KByte XRAM, so setting it is what
- * makes the region below exist.  A board that knows its part needs otherwise
- * defines this as 0; there is nothing to enable where there is no XRAM. */
-__c166_enable_xper = DEFINED(__c166_enable_xper) ? __c166_enable_xper
-                                                 : (__c166_xram_length ? 1 : 0);
+ * makes the region below exist.  The default is a C167CR-16RM's, like the
+ * rest here, and that part has the extension RAM; a board with none defines
+ * this as 0.  It is a constant rather than a test on __c166_xram_length for
+ * the reason above - a test would read that symbol's default and answer 1 for
+ * a part that had been given none, which is what it used to do. */
+__c166_enable_xper = DEFINED(__c166_enable_xper) ? __c166_enable_xper : 1;
+
+/* Whether crt0 writes XPERCON before that.  A C167 does not need to: its
+ * XPERCON comes up selecting the one 2 KByte XRAM it has, which is the whole
+ * of its extension RAM.  An ST10 has a second one that is off at reset and a
+ * register that cannot be written after XPEN, which is why crt0 has the
+ * sequence at all; see st10.ld.  A board with X-peripherals of its own to
+ * select defines these two and gets the same window. */
+__c166_write_xpercon = DEFINED(__c166_write_xpercon) ? __c166_write_xpercon : 0;
+__c166_xpercon = DEFINED(__c166_xpercon) ? __c166_xpercon : 0;
+
+/* Where XPERCON is, for the write above.  It is an extended register, which
+ * a "reg" field cannot name, and this file's crt0 is assembled once for the
+ * C167 and the ST10 - so the address comes from here rather than from a name
+ * that only one of the two -mcpu= values knows. */
+__c166_xpercon_addr = DEFINED(__c166_xpercon_addr) ? __c166_xpercon_addr : 0x0000F024;
 
 /* How much of the program memory a near address reaches, and what is left.
  * This is the same 48 KByte the XC164CM script has, and for the same reason:
