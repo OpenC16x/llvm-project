@@ -115,11 +115,210 @@ enum class Op {
   X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
   X(CoLOAD_rr) X(CoMAC_rr) X(CoMACu_rr) X(CoMACN_rr) X(CoMACuN_rr)               \
   X(CoMUL_rr) X(CoMULu_rr) X(CoMUL_rr_rnd) X(CoMULu_rr_rnd)                    \
-  X(CoSTORE_sr)
+  X(CoSTORE_sr)                                                                \
+  /* The 89 forms the ST10 Family Programming Manual's Rep column marks     */\
+  /* repeatable, which are the ones a filter is written with.               */\
+  X(CoADD2_rp) X(CoADD2_xp) X(CoADD_rp) X(CoADD_xp) X(CoASHR_p)               \
+  X(CoASHR_p_rnd) X(CoASHR_r) X(CoASHR_r_rnd) X(CoMACMN_xp) X(CoMACMR_xp)     \
+  X(CoMACMR_xp_rnd) X(CoMACMRsu_xp) X(CoMACMRsu_xp_rnd) X(CoMACMRu_xp)        \
+  X(CoMACMRu_xp_rnd) X(CoMACMRus_xp) X(CoMACMRus_xp_rnd) X(CoMACM_xp)         \
+  X(CoMACM_xp_rnd) X(CoMACMsuN_xp) X(CoMACMsu_xp) X(CoMACMsu_xp_rnd)          \
+  X(CoMACMuN_xp) X(CoMACMu_xp) X(CoMACMu_xp_rnd) X(CoMACMusN_xp)              \
+  X(CoMACMus_xp) X(CoMACMus_xp_rnd) X(CoMACN_rp) X(CoMACN_xp) X(CoMACR_rp)    \
+  X(CoMACR_rp_rnd) X(CoMACR_xp) X(CoMACR_xp_rnd) X(CoMACRsu_rp)               \
+  X(CoMACRsu_rp_rnd) X(CoMACRsu_xp) X(CoMACRsu_xp_rnd) X(CoMACRu_rp)          \
+  X(CoMACRu_rp_rnd) X(CoMACRu_xp) X(CoMACRu_xp_rnd) X(CoMACRus_rp)            \
+  X(CoMACRus_rp_rnd) X(CoMACRus_xp) X(CoMACRus_xp_rnd) X(CoMAC_rp)            \
+  X(CoMAC_rp_rnd) X(CoMAC_xp) X(CoMAC_xp_rnd) X(CoMACsuN_rp) X(CoMACsuN_xp)   \
+  X(CoMACsu_rp) X(CoMACsu_rp_rnd) X(CoMACsu_xp) X(CoMACsu_xp_rnd)             \
+  X(CoMACuN_rp) X(CoMACuN_xp) X(CoMACu_rp) X(CoMACu_rp_rnd) X(CoMACu_xp)      \
+  X(CoMACu_xp_rnd) X(CoMACusN_rp) X(CoMACusN_xp) X(CoMACus_rp)                \
+  X(CoMACus_rp_rnd) X(CoMACus_xp) X(CoMACus_xp_rnd) X(CoMAX_rp) X(CoMAX_xp)   \
+  X(CoMIN_rp) X(CoMIN_xp) X(CoMOV_xp) X(CoNOP_q) X(CoNOP_x) X(CoNOP_xp)       \
+  X(CoSHL_p) X(CoSHL_r) X(CoSHR_p) X(CoSHR_r) X(CoSTORE_sp) X(CoSUB2R_rp)     \
+  X(CoSUB2R_xp) X(CoSUB2_rp) X(CoSUB2_xp) X(CoSUBR_rp) X(CoSUBR_xp)           \
+  X(CoSUB_rp) X(CoSUB_xp)
+
 #define X(N) N,
   OPS(X)
 #undef X
 };
+
+/// How a repeatable coprocessor form is put together.
+///
+/// Shape is where its operands come from, Kind what it does with them, and
+/// Sign how the two words of a product are read.  The rest are the options
+/// the mnemonic spells: "M" writes the delay line back, "R" negates the
+/// accumulator rather than the product, "-" negates the product, "rnd" rounds
+/// to the high word, and "2" doubles the operand.
+namespace Sh {
+enum Shape {
+  RP, ///< Rwn, [Rwm]
+  XP, ///< [IDXi], [Rwm]
+  P,  ///< [Rwm] alone
+  R,  ///< Rwn alone
+  Q,  ///< [Rwm] alone, in the two pointer encoding
+  X,  ///< [IDXi] alone
+  SP  ///< [Rwn], CoReg
+};
+}
+namespace K {
+enum Kind { ADD, SUB, MIN, MAX, MAC, MOV, NOP, STORE, SHL, SHR, ASHR };
+}
+namespace Sg {
+enum Sign {
+  SS, ///< both signed
+  UU, ///< both unsigned, and the product zero extended
+  SU, ///< op1 signed, op2 unsigned
+  US  ///< op1 unsigned, op2 signed
+};
+}
+enum CoFlag { Move = 1, Rev = 2, Neg = 4, Rnd = 8, Dbl = 16 };
+
+struct CoForm {
+  Op O;
+  Sh::Shape Shape;
+  K::Kind Kind;
+  Sg::Sign Sign;
+  unsigned Flags;
+};
+
+/// Every form the manual marks repeatable, with what the mnemonic says about
+/// it.  Read off that manual's instruction tables rather than derived here:
+/// the naming is regular, but a table that can be checked against the page is
+/// worth more than a rule that cannot.
+static const CoForm CoForms[] = {
+    {Op::CoADD2_rp,        Sh::RP,  K::ADD,   Sg::SS, Dbl},
+    {Op::CoADD2_xp,        Sh::XP,  K::ADD,   Sg::SS, Dbl},
+    {Op::CoADD_rp,         Sh::RP,  K::ADD,   Sg::SS, 0},
+    {Op::CoADD_xp,         Sh::XP,  K::ADD,   Sg::SS, 0},
+    {Op::CoASHR_p,         Sh::P,   K::ASHR,  Sg::SS, 0},
+    {Op::CoASHR_p_rnd,     Sh::P,   K::ASHR,  Sg::SS, Rnd},
+    {Op::CoASHR_r,         Sh::R,   K::ASHR,  Sg::SS, 0},
+    {Op::CoASHR_r_rnd,     Sh::R,   K::ASHR,  Sg::SS, Rnd},
+    {Op::CoMACMN_xp,       Sh::XP,  K::MAC,   Sg::SS, Move|Neg},
+    {Op::CoMACMR_xp,       Sh::XP,  K::MAC,   Sg::SS, Move|Rev},
+    {Op::CoMACMR_xp_rnd,   Sh::XP,  K::MAC,   Sg::SS, Move|Rev|Rnd},
+    {Op::CoMACMRsu_xp,     Sh::XP,  K::MAC,   Sg::SU, Move|Rev},
+    {Op::CoMACMRsu_xp_rnd, Sh::XP,  K::MAC,   Sg::SU, Move|Rev|Rnd},
+    {Op::CoMACMRu_xp,      Sh::XP,  K::MAC,   Sg::UU, Move|Rev},
+    {Op::CoMACMRu_xp_rnd,  Sh::XP,  K::MAC,   Sg::UU, Move|Rev|Rnd},
+    {Op::CoMACMRus_xp,     Sh::XP,  K::MAC,   Sg::US, Move|Rev},
+    {Op::CoMACMRus_xp_rnd, Sh::XP,  K::MAC,   Sg::US, Move|Rev|Rnd},
+    {Op::CoMACM_xp,        Sh::XP,  K::MAC,   Sg::SS, Move},
+    {Op::CoMACM_xp_rnd,    Sh::XP,  K::MAC,   Sg::SS, Move|Rnd},
+    {Op::CoMACMsuN_xp,     Sh::XP,  K::MAC,   Sg::SU, Move|Neg},
+    {Op::CoMACMsu_xp,      Sh::XP,  K::MAC,   Sg::SU, Move},
+    {Op::CoMACMsu_xp_rnd,  Sh::XP,  K::MAC,   Sg::SU, Move|Rnd},
+    {Op::CoMACMuN_xp,      Sh::XP,  K::MAC,   Sg::UU, Move|Neg},
+    {Op::CoMACMu_xp,       Sh::XP,  K::MAC,   Sg::UU, Move},
+    {Op::CoMACMu_xp_rnd,   Sh::XP,  K::MAC,   Sg::UU, Move|Rnd},
+    {Op::CoMACMusN_xp,     Sh::XP,  K::MAC,   Sg::US, Move|Neg},
+    {Op::CoMACMus_xp,      Sh::XP,  K::MAC,   Sg::US, Move},
+    {Op::CoMACMus_xp_rnd,  Sh::XP,  K::MAC,   Sg::US, Move|Rnd},
+    {Op::CoMACN_rp,        Sh::RP,  K::MAC,   Sg::SS, Neg},
+    {Op::CoMACN_xp,        Sh::XP,  K::MAC,   Sg::SS, Neg},
+    {Op::CoMACR_rp,        Sh::RP,  K::MAC,   Sg::SS, Rev},
+    {Op::CoMACR_rp_rnd,    Sh::RP,  K::MAC,   Sg::SS, Rev|Rnd},
+    {Op::CoMACR_xp,        Sh::XP,  K::MAC,   Sg::SS, Rev},
+    {Op::CoMACR_xp_rnd,    Sh::XP,  K::MAC,   Sg::SS, Rev|Rnd},
+    {Op::CoMACRsu_rp,      Sh::RP,  K::MAC,   Sg::SU, Rev},
+    {Op::CoMACRsu_rp_rnd,  Sh::RP,  K::MAC,   Sg::SU, Rev|Rnd},
+    {Op::CoMACRsu_xp,      Sh::XP,  K::MAC,   Sg::SU, Rev},
+    {Op::CoMACRsu_xp_rnd,  Sh::XP,  K::MAC,   Sg::SU, Rev|Rnd},
+    {Op::CoMACRu_rp,       Sh::RP,  K::MAC,   Sg::UU, Rev},
+    {Op::CoMACRu_rp_rnd,   Sh::RP,  K::MAC,   Sg::UU, Rev|Rnd},
+    {Op::CoMACRu_xp,       Sh::XP,  K::MAC,   Sg::UU, Rev},
+    {Op::CoMACRu_xp_rnd,   Sh::XP,  K::MAC,   Sg::UU, Rev|Rnd},
+    {Op::CoMACRus_rp,      Sh::RP,  K::MAC,   Sg::US, Rev},
+    {Op::CoMACRus_rp_rnd,  Sh::RP,  K::MAC,   Sg::US, Rev|Rnd},
+    {Op::CoMACRus_xp,      Sh::XP,  K::MAC,   Sg::US, Rev},
+    {Op::CoMACRus_xp_rnd,  Sh::XP,  K::MAC,   Sg::US, Rev|Rnd},
+    {Op::CoMAC_rp,         Sh::RP,  K::MAC,   Sg::SS, 0},
+    {Op::CoMAC_rp_rnd,     Sh::RP,  K::MAC,   Sg::SS, Rnd},
+    {Op::CoMAC_xp,         Sh::XP,  K::MAC,   Sg::SS, 0},
+    {Op::CoMAC_xp_rnd,     Sh::XP,  K::MAC,   Sg::SS, Rnd},
+    {Op::CoMACsuN_rp,      Sh::RP,  K::MAC,   Sg::SU, Neg},
+    {Op::CoMACsuN_xp,      Sh::XP,  K::MAC,   Sg::SU, Neg},
+    {Op::CoMACsu_rp,       Sh::RP,  K::MAC,   Sg::SU, 0},
+    {Op::CoMACsu_rp_rnd,   Sh::RP,  K::MAC,   Sg::SU, Rnd},
+    {Op::CoMACsu_xp,       Sh::XP,  K::MAC,   Sg::SU, 0},
+    {Op::CoMACsu_xp_rnd,   Sh::XP,  K::MAC,   Sg::SU, Rnd},
+    {Op::CoMACuN_rp,       Sh::RP,  K::MAC,   Sg::UU, Neg},
+    {Op::CoMACuN_xp,       Sh::XP,  K::MAC,   Sg::UU, Neg},
+    {Op::CoMACu_rp,        Sh::RP,  K::MAC,   Sg::UU, 0},
+    {Op::CoMACu_rp_rnd,    Sh::RP,  K::MAC,   Sg::UU, Rnd},
+    {Op::CoMACu_xp,        Sh::XP,  K::MAC,   Sg::UU, 0},
+    {Op::CoMACu_xp_rnd,    Sh::XP,  K::MAC,   Sg::UU, Rnd},
+    {Op::CoMACusN_rp,      Sh::RP,  K::MAC,   Sg::US, Neg},
+    {Op::CoMACusN_xp,      Sh::XP,  K::MAC,   Sg::US, Neg},
+    {Op::CoMACus_rp,       Sh::RP,  K::MAC,   Sg::US, 0},
+    {Op::CoMACus_rp_rnd,   Sh::RP,  K::MAC,   Sg::US, Rnd},
+    {Op::CoMACus_xp,       Sh::XP,  K::MAC,   Sg::US, 0},
+    {Op::CoMACus_xp_rnd,   Sh::XP,  K::MAC,   Sg::US, Rnd},
+    {Op::CoMAX_rp,         Sh::RP,  K::MAX,   Sg::SS, 0},
+    {Op::CoMAX_xp,         Sh::XP,  K::MAX,   Sg::SS, 0},
+    {Op::CoMIN_rp,         Sh::RP,  K::MIN,   Sg::SS, 0},
+    {Op::CoMIN_xp,         Sh::XP,  K::MIN,   Sg::SS, 0},
+    {Op::CoMOV_xp,         Sh::XP,  K::MOV,   Sg::SS, 0},
+    {Op::CoNOP_q,          Sh::Q,   K::NOP,   Sg::SS, 0},
+    {Op::CoNOP_x,          Sh::X,   K::NOP,   Sg::SS, 0},
+    {Op::CoNOP_xp,         Sh::XP,  K::NOP,   Sg::SS, 0},
+    {Op::CoSHL_p,          Sh::P,   K::SHL,   Sg::SS, 0},
+    {Op::CoSHL_r,          Sh::R,   K::SHL,   Sg::SS, 0},
+    {Op::CoSHR_p,          Sh::P,   K::SHR,   Sg::SS, 0},
+    {Op::CoSHR_r,          Sh::R,   K::SHR,   Sg::SS, 0},
+    {Op::CoSTORE_sp,       Sh::SP,  K::STORE, Sg::SS, 0},
+    {Op::CoSUB2R_rp,       Sh::RP,  K::SUB,   Sg::SS, Rev|Dbl},
+    {Op::CoSUB2R_xp,       Sh::XP,  K::SUB,   Sg::SS, Rev|Dbl},
+    {Op::CoSUB2_rp,        Sh::RP,  K::SUB,   Sg::SS, Dbl},
+    {Op::CoSUB2_xp,        Sh::XP,  K::SUB,   Sg::SS, Dbl},
+    {Op::CoSUBR_rp,        Sh::RP,  K::SUB,   Sg::SS, Rev},
+    {Op::CoSUBR_xp,        Sh::XP,  K::SUB,   Sg::SS, Rev},
+    {Op::CoSUB_rp,         Sh::RP,  K::SUB,   Sg::SS, 0},
+    {Op::CoSUB_xp,         Sh::XP,  K::SUB,   Sg::SS, 0},
+};
+
+static const CoForm *coFormFor(Op O) {
+  for (const CoForm &F : CoForms)
+    if (F.O == O)
+      return &F;
+  return nullptr;
+}
+
+/// How many times a repeatable coprocessor form runs.
+///
+/// The repeat field is five bits: zero is the plain form and runs once, one
+/// means take the count from MRW - which the manual gives as (MRW[12:0]) + 1,
+/// so up to 8192 - and anything else is the count itself.  MRW is storage at
+/// FFDAH here, like every other register the simulator gives no behaviour to,
+/// which is all a program setting it and the unit reading it needs.
+uint64_t coRepeatCount(Machine &M, const MCInst &MI, unsigned RepOp) {
+  if (RepOp >= MI.getNumOperands() || !MI.getOperand(RepOp).isImm())
+    return 1;
+  int64_t Field = MI.getOperand(RepOp).getImm();
+  if (Field == 1)
+    return (M.read16(0xFFDA) & 0x1FFF) + 1;
+  return Field > 1 ? uint64_t(Field) : 1;
+}
+
+/// Where the repeat count sits for each shape, which is always last.
+unsigned coRepeatOperand(Sh::Shape Shape) {
+  switch (Shape) {
+  case Sh::RP:
+  case Sh::SP:
+    return 3;
+  case Sh::XP:
+    return 4;
+  case Sh::P:
+  case Sh::Q:
+  case Sh::X:
+    return 2;
+  case Sh::R:
+    return 1;
+  }
+  return 0;
+}
 
 /// Which part is being simulated, which the decoder needs because the same
 /// short address names different special function registers on different
@@ -612,6 +811,14 @@ bool Machine::step() {
   bool Taken = IP != FallThroughIP || CSP != CSPBefore;
   unsigned Cost = baseStateTime(O, Taken);
 
+  // A repeated coprocessor instruction is fetched once and executed as many
+  // times as its count says, so it costs that many.  Charging it as one would
+  // make --count-states report a filter as free, which is the opposite of the
+  // thing that measurement exists to show.  The repetitions do not refetch,
+  // so this is the same lower bound the rest of this is: two states each.
+  if (const CoForm *F = coFormFor(O))
+    Cost *= coRepeatCount(*this, MI, coRepeatOperand(F->Shape));
+
   // Section 7.3 adds to that in a handful of cases.  Two of them are charged
   // here, both about PSW, because they are the ones this can decide exactly:
   // a conditional branch pays a state when the instruction before it wrote
@@ -643,6 +850,47 @@ bool Machine::step() {
 }
 
 namespace {
+
+/// Where a special function register lives, from the short address it
+/// encodes: the ordinary space runs from FE00H, two bytes per short address.
+/// IDX0 and IDX1 are reached this way rather than modelled as fields, because
+/// on the part they are special function registers and a program sets them by
+/// writing to them.
+uint32_t sfrAddress(const MCRegisterInfo &MRI, MCRegister R) {
+  return 0xFE00u + 2 * MRI.getEncodingValue(R);
+}
+
+/// The coprocessor's four offset registers, which are in the extended space
+/// at F000H and are the same four on every part that has the unit - see the
+/// ST10F269 data sheet's register table, which agrees with the XC164CM's.
+/// Storage here, like everything else the simulator does not give behaviour
+/// to, which is all a program setting one and the unit reading it needs.
+enum { CoQX0 = 0xF000, CoQX1 = 0xF002, CoQR0 = 0xF004, CoQR1 = 0xF006 };
+
+/// What a pointer does to itself after the access, from the update code the
+/// operand carries.  The codes are PM0036 Table 31's, and the same seven
+/// serve both pointer kinds - only which pair of offset registers they name
+/// differs, QX for an IDX and QR for a general purpose register.
+int32_t coPointerStep(Machine &M, unsigned Update, bool IsIdx) {
+  switch (Update) {
+  case 1:
+    return 0; // [Rw], which leaves the pointer alone
+  case 2:
+    return 2; // [Rw+], a word forward
+  case 3:
+    return -2; // [Rw-]
+  case 4:
+    return int16_t(M.read16(IsIdx ? CoQX0 : CoQR0));
+  case 5:
+    return -int32_t(int16_t(M.read16(IsIdx ? CoQX0 : CoQR0)));
+  case 6:
+    return int16_t(M.read16(IsIdx ? CoQX1 : CoQR1));
+  case 7:
+    return -int32_t(int16_t(M.read16(IsIdx ? CoQX1 : CoQR1)));
+  default:
+    return 0;
+  }
+}
 
 /// The GPR index of a word register operand, or ~0 when it is not one.
 unsigned wordRegIndex(const MCRegisterInfo &MRI, MCRegister R) {
@@ -722,6 +970,210 @@ static bool breaksExtendSequence(Op O) {
   default:
     return false;
   }
+}
+
+/// One of the 89 repeatable coprocessor forms, run as many times as its
+/// repeat field says.
+///
+/// The field is five bits: zero is the plain form and runs once, one means
+/// take the count from MRW - the manual gives that as (MRW[12:0]) + 1 - and
+/// anything else is the count itself.  The pointers step between repetitions,
+/// which is the whole point of repeating: each pass reads the next word.
+void executeCoRepeatable(Machine &M, const MCInst &MI, Op O) {
+  const CoForm *F = coFormFor(O);
+  if (!F) {
+    M.Stop = StopReason::Unsupported;
+    M.StopDetail = "a coprocessor form with no entry in CoForms";
+    return;
+  }
+  const MCRegisterInfo &MRI = *decoder().MRI;
+
+  // Where each shape keeps its operands.  A pointer is two operands, the
+  // register and the update code; the repeat count is always last.
+  unsigned IdxOp = ~0u, PtrOp = ~0u, RegOp = ~0u, CoRegOp = ~0u;
+  unsigned RepOp = coRepeatOperand(F->Shape);
+  switch (F->Shape) {
+  case Sh::RP:
+    RegOp = 0; PtrOp = 1;
+    break;
+  case Sh::XP:
+    IdxOp = 0; PtrOp = 2;
+    break;
+  case Sh::P:
+  case Sh::Q:
+    PtrOp = 0;
+    break;
+  case Sh::R:
+    RegOp = 0;
+    break;
+  case Sh::X:
+    IdxOp = 0;
+    break;
+  case Sh::SP:
+    PtrOp = 0; CoRegOp = 2;
+    break;
+  }
+
+  uint64_t Count = coRepeatCount(M, MI, RepOp);
+
+  // The pointers are read once and written back once, because a repetition
+  // steps the value this instruction holds rather than re-reading a register
+  // a previous repetition wrote.
+  uint32_t IdxAddr = 0, PtrAddr = 0;
+  uint16_t IdxVal = 0, PtrVal = 0;
+  int32_t IdxStep = 0, PtrStep = 0;
+  if (IdxOp != ~0u) {
+    IdxAddr = sfrAddress(MRI, MI.getOperand(IdxOp).getReg());
+    IdxVal = M.read16(IdxAddr);
+    IdxStep = coPointerStep(M, MI.getOperand(IdxOp + 1).getImm(), true);
+  }
+  if (PtrOp != ~0u) {
+    unsigned N = wordRegIndex(MRI, MI.getOperand(PtrOp).getReg());
+    if (N == ~0u) {
+      M.Stop = StopReason::Unsupported;
+      M.StopDetail = "a coprocessor pointer that is not a word register";
+      return;
+    }
+    PtrAddr = N;
+    PtrVal = M.getWordReg(N);
+    PtrStep = coPointerStep(M, MI.getOperand(PtrOp + 1).getImm(), false);
+  }
+
+  for (uint64_t I = 0; I != Count && M.Stop == StopReason::Running; ++I) {
+    // op1 and op2, in the manual's numbering.  Which of them is a memory word
+    // and which a register is the shape's business.
+    uint16_t Op1 = 0, Op2 = 0;
+    switch (F->Shape) {
+    case Sh::RP:
+      Op1 = M.getWordReg(wordRegIndex(MRI, MI.getOperand(RegOp).getReg()));
+      Op2 = M.read16(M.mapData(PtrVal));
+      break;
+    case Sh::XP:
+      Op1 = M.read16(M.mapData(IdxVal));
+      Op2 = M.read16(M.mapData(PtrVal));
+      break;
+    case Sh::P:
+    case Sh::Q:
+      Op1 = M.read16(M.mapData(PtrVal));
+      break;
+    case Sh::R:
+      Op1 = M.getWordReg(wordRegIndex(MRI, MI.getOperand(RegOp).getReg()));
+      break;
+    case Sh::X:
+      Op1 = M.read16(M.mapData(IdxVal));
+      break;
+    case Sh::SP:
+      break;
+    }
+
+    switch (F->Kind) {
+    case K::ADD:
+    case K::SUB:
+    case K::MIN:
+    case K::MAX: {
+      // "(op2)\\(op1)": op2 is the high word.
+      int64_t T = int64_t(int32_t((uint32_t(Op2) << 16) | Op1));
+      if (F->Flags & Dbl)
+        T *= 2;
+      if (F->Kind == K::ADD)
+        M.setACC(M.ACC + T);
+      else if (F->Kind == K::SUB)
+        M.setACC((F->Flags & Rev) ? T - M.ACC : M.ACC - T);
+      else if (F->Kind == K::MIN)
+        M.setACC(std::min(M.ACC, T));
+      else
+        M.setACC(std::max(M.ACC, T));
+      break;
+    }
+    case K::MAC: {
+      int64_t P;
+      switch (F->Sign) {
+      case Sg::UU:
+        P = int64_t(uint32_t(Op1) * uint32_t(Op2));
+        break;
+      case Sg::SU:
+        P = int64_t(int32_t(int16_t(Op1)) * int32_t(uint16_t(Op2)));
+        break;
+      case Sg::US:
+        P = int64_t(int32_t(uint16_t(Op1)) * int32_t(int16_t(Op2)));
+        break;
+      default:
+        P = int64_t(int32_t(int16_t(Op1)) * int32_t(int16_t(Op2)));
+        // Only the signed by signed forms are doubled by MP; the others say
+        // "the result is never affected by the MP mode flag".
+        if ((M.MCW >> 10) & 1)
+          P <<= 1;
+        break;
+      }
+      int64_t R = (F->Flags & Rev)    ? P - M.ACC
+                  : (F->Flags & Neg) ? M.ACC - P
+                                     : M.ACC + P;
+      if (F->Flags & Rnd) {
+        M.setACC(R + 0x8000);
+        M.setACC(M.ACC & ~INT64_C(0xFFFF));
+      } else {
+        M.setACC(R);
+      }
+      // "M" moves the delay line: the word just read through IDXi is written
+      // back one step behind where it came from, so that the next pass over
+      // the same buffer sees it shifted.
+      if (F->Flags & Move)
+        M.write16(M.mapData(uint16_t(IdxVal - IdxStep)), Op1);
+      break;
+    }
+    case K::MOV:
+      M.write16(M.mapData(IdxVal), Op2);
+      break;
+    case K::NOP:
+      break;
+    case K::STORE: {
+      StringRef Name = MRI.getName(MI.getOperand(CoRegOp).getReg());
+      uint16_t V;
+      if (Name.equals_insensitive("mal"))
+        V = uint16_t(uint64_t(M.ACC) & 0xFFFF);
+      else if (Name.equals_insensitive("mah"))
+        V = uint16_t((uint64_t(M.ACC) >> 16) & 0xFFFF);
+      else if (Name.equals_insensitive("mcw"))
+        V = M.MCW;
+      else {
+        M.Stop = StopReason::Unsupported;
+        M.StopDetail = "costore from a MAC register that is not modelled";
+        return;
+      }
+      M.write16(M.mapData(PtrVal), V);
+      break;
+    }
+    case K::SHL:
+    case K::SHR:
+    case K::ASHR: {
+      // The count is the low five bits of the operand, and the accumulator is
+      // forty bits wide.  MSW's carry is not modelled here, as it is not
+      // anywhere else in this file.
+      unsigned N = Op1 & 0x1F;
+      uint64_t Bits = uint64_t(M.ACC) & 0xFFFFFFFFFFull;
+      if (F->Kind == K::SHL)
+        Bits <<= N;
+      else if (F->Kind == K::SHR)
+        Bits >>= N;
+      else
+        Bits = uint64_t(M.ACC >> std::min(N, 39u));
+      M.setACC(int64_t(Bits));
+      if (F->Flags & Rnd) {
+        M.setACC(M.ACC + 0x8000);
+        M.setACC(M.ACC & ~INT64_C(0xFFFF));
+      }
+      break;
+    }
+    }
+
+    IdxVal = uint16_t(IdxVal + IdxStep);
+    PtrVal = uint16_t(PtrVal + PtrStep);
+  }
+
+  if (IdxOp != ~0u)
+    M.write16(IdxAddr, IdxVal);
+  if (PtrOp != ~0u)
+    M.setWordReg(PtrAddr, PtrVal);
 }
 
 void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
@@ -1234,6 +1686,137 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     SetW(0, V);
     break;
   }
+// The sixty multiply-accumulate forms, which differ only in the flags the
+// table below gives them.  One case per line so that the set is readable
+// as the list it is.
+#define COREP_MAC_CASES \
+  case Op::CoMACMN_xp: \
+  case Op::CoMACMR_xp: \
+  case Op::CoMACMR_xp_rnd: \
+  case Op::CoMACMRsu_xp: \
+  case Op::CoMACMRsu_xp_rnd: \
+  case Op::CoMACMRu_xp: \
+  case Op::CoMACMRu_xp_rnd: \
+  case Op::CoMACMRus_xp: \
+  case Op::CoMACMRus_xp_rnd: \
+  case Op::CoMACM_xp: \
+  case Op::CoMACM_xp_rnd: \
+  case Op::CoMACMsuN_xp: \
+  case Op::CoMACMsu_xp: \
+  case Op::CoMACMsu_xp_rnd: \
+  case Op::CoMACMuN_xp: \
+  case Op::CoMACMu_xp: \
+  case Op::CoMACMu_xp_rnd: \
+  case Op::CoMACMusN_xp: \
+  case Op::CoMACMus_xp: \
+  case Op::CoMACMus_xp_rnd: \
+  case Op::CoMACN_rp: \
+  case Op::CoMACN_xp: \
+  case Op::CoMACR_rp: \
+  case Op::CoMACR_rp_rnd: \
+  case Op::CoMACR_xp: \
+  case Op::CoMACR_xp_rnd: \
+  case Op::CoMACRsu_rp: \
+  case Op::CoMACRsu_rp_rnd: \
+  case Op::CoMACRsu_xp: \
+  case Op::CoMACRsu_xp_rnd: \
+  case Op::CoMACRu_rp: \
+  case Op::CoMACRu_rp_rnd: \
+  case Op::CoMACRu_xp: \
+  case Op::CoMACRu_xp_rnd: \
+  case Op::CoMACRus_rp: \
+  case Op::CoMACRus_rp_rnd: \
+  case Op::CoMACRus_xp: \
+  case Op::CoMACRus_xp_rnd: \
+  case Op::CoMAC_rp: \
+  case Op::CoMAC_rp_rnd: \
+  case Op::CoMAC_xp: \
+  case Op::CoMAC_xp_rnd: \
+  case Op::CoMACsuN_rp: \
+  case Op::CoMACsuN_xp: \
+  case Op::CoMACsu_rp: \
+  case Op::CoMACsu_rp_rnd: \
+  case Op::CoMACsu_xp: \
+  case Op::CoMACsu_xp_rnd: \
+  case Op::CoMACuN_rp: \
+  case Op::CoMACuN_xp: \
+  case Op::CoMACu_rp: \
+  case Op::CoMACu_rp_rnd: \
+  case Op::CoMACu_xp: \
+  case Op::CoMACu_xp_rnd: \
+  case Op::CoMACusN_rp: \
+  case Op::CoMACusN_xp: \
+  case Op::CoMACus_rp: \
+  case Op::CoMACus_rp_rnd: \
+  case Op::CoMACus_xp: \
+  case Op::CoMACus_xp_rnd:
+
+  // -- the coprocessor's repeatable forms ---------------------------------
+  //
+  // The 89 the ST10 Family Programming Manual's Rep column marks yes, which
+  // are the ones written with a repeat prefix and so the ones a filter is
+  // made of.  What they have in common is that at least one operand arrives
+  // through a pointer that steps, which is what makes repeating them do
+  // anything: the plain register forms above cannot, because a repetition
+  // would read the same two registers again.
+  //
+  // Semantics are that manual's, from the Operation box of each instruction's
+  // detailed description.  The pieces:
+  //
+  //   "(op2)\\(op1)"   op2 is the high word and op1 the low, making a 32 bit
+  //                   value that is sign extended into the 40 bit ACC
+  //   CoADD/CoSUB     ACC +/- that; "2" doubles it; "R" reverses the
+  //                   subtraction to tmp - ACC
+  //   CoMIN/CoMAX     ACC <- min/max(ACC, that)
+  //   CoMAC           tmp <- op1 * op2, then ACC + tmp; "-" negates the
+  //                   product and "R" negates the accumulator instead
+  //   CoMACM          the same, and additionally writes the word read through
+  //                   IDXi back one step behind it, which is what moves a
+  //                   delay line along while the taps are being summed
+  //   CoMOV           ((IDXi)) <- ((Rwm)), a memory to memory word move
+  //   CoNOP           nothing but the pointer steps
+  //   CoSTORE         ((Rwn)) <- the named MAC register
+  //   CoSHL/SHR/ASHR  shift ACC by the low five bits of the operand
+  //
+  // Signedness follows the mnemonic: none is signed by signed, "u" unsigned
+  // by unsigned with the product zero extended, and "su" and "us" are op1 and
+  // op2 respectively - the manual says "the two signed and unsigned 16-bit
+  // source operands op1 and op2, respectively" of CoMACsu and the mirror of
+  // CoMACus.  MP doubling applies to the signed by signed forms alone; the
+  // others say "the result is never affected by the MP mode flag".
+  case Op::CoADD_rp:
+  case Op::CoADD_xp:
+  case Op::CoADD2_rp:
+  case Op::CoADD2_xp:
+  case Op::CoSUB_rp:
+  case Op::CoSUB_xp:
+  case Op::CoSUB2_rp:
+  case Op::CoSUB2_xp:
+  case Op::CoSUBR_rp:
+  case Op::CoSUBR_xp:
+  case Op::CoSUB2R_rp:
+  case Op::CoSUB2R_xp:
+  case Op::CoMIN_rp:
+  case Op::CoMIN_xp:
+  case Op::CoMAX_rp:
+  case Op::CoMAX_xp:
+  case Op::CoMOV_xp:
+  case Op::CoNOP_q:
+  case Op::CoNOP_x:
+  case Op::CoNOP_xp:
+  case Op::CoSTORE_sp:
+  case Op::CoSHL_r:
+  case Op::CoSHL_p:
+  case Op::CoSHR_r:
+  case Op::CoSHR_p:
+  case Op::CoASHR_r:
+  case Op::CoASHR_r_rnd:
+  case Op::CoASHR_p:
+  case Op::CoASHR_p_rnd:
+  COREP_MAC_CASES
+    executeCoRepeatable(M, MI, O);
+    break;
+
   case Op::MOVfromMDL:
     SetW(0, M.MDL);
     break;

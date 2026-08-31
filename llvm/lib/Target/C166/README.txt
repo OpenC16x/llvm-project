@@ -862,9 +862,31 @@ Known limitations / things to do
   0 and 1 are refused rather than encoded, which puts the one thing that would
   have been a guess out of reach in either direction.
 
-  The simulator models only the four instructions that are selected, stopping
-  and naming any of the others rather than executing it, which is what it does
-  with anything it does not know.  A repeated instruction is one of those.
+  The simulator runs them.  It used to model only the instructions the
+  compiler selects, which made a repeated one assemble, link and then stop it
+  - so the prefix could be written and not tried.  All 89 repeatable forms
+  execute now, with both addressing modes, the seven pointer steps of PM0036
+  Table 31, and the count from either the field or MRW.  What is still refused
+  is the rest: the register-only forms of operations nothing selects, and
+  CoABS, CoCMP, CoLOAD and CoMUL through a pointer, none of which the Rep
+  column marks and none of which a repeat can therefore reach.
+
+  differential/macrepeat.c is what says they are right, and it is the reason
+  for doing this at all: 37 values from signed, unsigned and both mixed dot
+  products, the negating and reversing forms, pointers stepped forwards,
+  backwards and by QR0, a count from MRW, CoADD, CoSUB2, CoMAX, CoMOV,
+  CoSTORE, a repeated shift, and CoMACM moving a delay line along while it
+  sums the taps - each computed twice and required to agree.  Getting the
+  su/us operand order backwards, dropping CoMACM's write, or reading MRW as
+  the count rather than one less than it all fail it.
+
+  Two things that program has to do that are worth knowing before writing any
+  of this by hand.  R0 is the ABI stack pointer, so "coload r0, r0" loads that
+  rather than clearing the accumulator, which is the obvious way to write it
+  and wrong.  And each sequence has to be one asm statement with the pointers
+  as read-write operands: the accumulator is a machine resource the compiler
+  does not model, so two statements expecting it to survive between them stay
+  adjacent at -O0 and do not at -O2.
 
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
