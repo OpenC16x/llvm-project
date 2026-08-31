@@ -106,7 +106,8 @@ Makes programs 10x faster by doing Special New Thing.
   supplies its memory sizes to the linker script, so that moving between
   derivatives does not mean editing a memory map by hand.
 * Four of the multiply-accumulate coprocessor's instructions are selected and
-  all 180 forms assemble and disassemble.
+  all 180 forms assemble and disassemble, including the repeat prefix on the
+  89 the manual marks repeatable: `repeat 3 times comac r2, [r3+]`.
 * There is no default linker script, because the memory map belongs to the
   board. Three to start from are in `llvm/lib/Target/C166/startup`.
 

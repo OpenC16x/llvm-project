@@ -822,14 +822,49 @@ Known limitations / things to do
   the C166S V2 manual gives each instruction rather than written out by hand -
   the same table read from the opcode list agrees with those lines on every row
   the two share.  Each one assembles to the bytes the manual specifies and
-  disassembles back to itself.
+  disassembles back to itself.  PM0036's own table was read the same way and
+  joined to these 180 records on the opcode and function byte: 180 of 180
+  matched, with no pair of its rows disagreeing about a record, and its Rep
+  column agrees with the presence of the repeat field in its Format line on
+  all 179 rows it prints.
 
-  Two things it does not do.  The repeat prefix, which the manual writes
-  "- USR0 CoXXX", is not accepted: it puts two tokens in front of the mnemonic
-  and the matcher keys on the mnemonic being first.  rrr is therefore always
-  000, the plain form.  And the simulator models only the four instructions
-  that are selected, stopping and naming any of the others rather than
-  executing it, which is what it does with anything it does not know.
+  The repeat prefix is accepted, in the spelling PM0036 section 2.4.7 gives:
+  "Repeat #data5 times CoXXX..." or "Repeat MRW times CoXXX...".  It puts two
+  tokens in front of the mnemonic and the matcher keys on the mnemonic being
+  first, so the parser takes it apart - the count is remembered, the real
+  mnemonic becomes the mnemonic, and the instruction is parsed as if it stood
+  alone with the count appended afterwards, which is where its operand is.
+  This paragraph used to say the prefix was written "- USR0 CoXXX", from the
+  C166S V2 manual; that manual is not in this tree, PM0036 is, and USR0 in
+  PM0036 is a PSW user flag in a pipeline example.  What is implemented is the
+  spelling that can be checked.
+
+  Which forms take it is the manual's Rep column, read off it rather than
+  reasoned about: 89 of the 180.  It does not follow from the addressing mode.
+  CoLOAD and CoMUL take a pointer exactly as CoMAC does and are marked no,
+  because nothing accumulates across their repetitions, and the four shift
+  instructions are marked yes for their register and pointer forms and no for
+  their immediate one.  That last is the manual explaining itself: the five
+  bit repeat field and the five bit immediate shift are the same five bits.
+
+  Reading that fixed an encoding.  The immediate shift was at bits 28 to 24
+  and PM0036's Format line puts it at 31 to 27 - "A3 00 82 ssss:s000" - so
+  "coshl #8" was A3 00 82 08 and is now A3 00 82 40.  The two cannot both be
+  right and they cannot coexist: with the repeat field at 31 to 27, a count of
+  8 at 28 to 24 sets the repeat field's low bit, which is MRW.  The comment
+  this file carried rendered that Format line as "rrr#:#", which is the same
+  line read as three bits of repeat and then the shift.
+
+  What the manual does not give is a table mapping a written count onto a
+  field value.  It gives three facts - the field is five bits, MRW sets it to
+  1, and a literal "must be less than 32" - and those leave one reading: zero
+  is the plain form, one is MRW, and a literal count is the field itself.  So
+  0 and 1 are refused rather than encoded, which puts the one thing that would
+  have been a guess out of reach in either direction.
+
+  The simulator models only the four instructions that are selected, stopping
+  and naming any of the others rather than executing it, which is what it does
+  with anything it does not know.  A repeated instruction is one of those.
 
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already

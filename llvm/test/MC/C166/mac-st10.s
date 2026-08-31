@@ -33,7 +33,7 @@
         costore r4, mrw
 
 ;; The shifter's count, at the largest value the manual defines.
-; CHECK: coshl #8         ; encoding: [0xa3,0x00,0x82,0x08]
+; CHECK: coshl #8         ; encoding: [0xa3,0x00,0x82,0x40]
         coshl   #8
 
 ;; The unit's four offset registers, which are the unit's and not any one

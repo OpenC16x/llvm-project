@@ -198,7 +198,11 @@ Enough to be worth saying plainly:
   `llvm-dwarfdump` reads it; nothing puts a source-level front end on it.
 - **Four of the coprocessor's instructions are selected.** The other 176
   assemble and disassemble but nothing generates them, and there are no
-  builtins or inline-asm constraints to reach them from C.
+  builtins or inline-asm constraints to reach them from C. Written by hand
+  they take the repeat prefix — `repeat 3 times comac r2, [r3+]`, or
+  `repeat mrw times` to take the count from the MAC repeat word — on the 89
+  forms the manual marks repeatable. The simulator does not execute any of
+  the 176, repeated or not.
 - **The ELF relocations are this backend's own invention.** LLD implements
   them and nothing else does.
 - **The extended special function registers are reachable by address but not

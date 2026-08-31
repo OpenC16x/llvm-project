@@ -46,6 +46,8 @@ public:
   void printCoPtrOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printCoIdxOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printCCOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printCoRepeatOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  int64_t getCoRepeatCount(const MCInst &MI) const;
   void printRelTargetOperand(const MCInst *MI, uint64_t Address, unsigned OpNo,
                              raw_ostream &O);
   void printMemROperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
