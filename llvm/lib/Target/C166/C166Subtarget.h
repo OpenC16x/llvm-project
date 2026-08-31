@@ -39,6 +39,7 @@ class C166Subtarget : public C166GenSubtargetInfo {
   // disassembler do, and the subtarget is where a feature bit lives.
   bool HasSFRXC164 = false;
   bool HasSFRC167 = false;
+  bool HasSFRST10 = false;
 
   C166InstrInfo InstrInfo;
   C166TargetLowering TLInfo;
@@ -61,6 +62,7 @@ public:
   bool hasMAC() const { return HasMAC; }
   bool hasSFRXC164() const { return HasSFRXC164; }
   bool hasSFRC167() const { return HasSFRC167; }
+  bool hasSFRST10() const { return HasSFRST10; }
 
   const C166InstrInfo *getInstrInfo() const override { return &InstrInfo; }
   const C166FrameLowering *getFrameLowering() const override {

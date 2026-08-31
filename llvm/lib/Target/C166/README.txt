@@ -817,8 +817,9 @@ Known limitations / things to do
   the two agree about - 91 names at the same short address, which is the
   classic C166 layout of timers, A/D converter, serial channels, peripheral
   event controller, interrupt control registers and ports 1, 3 and 5 on top of
-  the CPU core - is always available.  What they do not is FeatureSFRXC164 and
-  FeatureSFRC167, which -mcpu=xc16x and -mcpu=c167 select.
+  the CPU core - is always available.  What they do not is FeatureSFRXC164,
+  FeatureSFRC167 and FeatureSFRST10, which -mcpu=xc16x, -mcpu=c167 and
+  -mcpu=st10 select.
 
   They disagree about exactly seven short addresses, and the disagreement is
   the external bus: the XC164CM has none, so it put CPUCON1, CPUCON2, SPSEG,
@@ -840,23 +841,62 @@ Known limitations / things to do
   Manual V1.0 of 1999-05.  The check that both were read correctly is that the
   91 names the two maps share agree on the short address of every single one.
 
-  Two things this does not do.  -mcpu=st10 gets the shared set alone: an ST10
-  is a C167 derivative and very likely has its map, but very likely is not the
-  standard the rest of this is held to, so it waits for an ST10 user manual.
-  The ST10 Family Programming Manual is not that book - it gives the
-  instruction set, which is where it settled a different question: the ST10's
-  MAC is this MAC, sharing every function code, so there is one mac feature
-  rather than one per derivative.  And the extended and X-peripheral registers are the XC164CM's
-  entire, gated with the rest of its map rather than split into a shared part
-  and a per-derivative one, because there is no second ESFR map here to split
-  them against.
+  The ST10 map is the ST10F269's, from its datasheet's Table 31, and it is
+  where the guess this paragraph used to record got settled.  An ST10 is a
+  C167 derivative and it does have the C167's map: all 163 of the registers
+  Table 31 gives a short address to are names this tree already had at the
+  same short address, 97 of them shared and 66 the C167CS's, with no
+  disagreement anywhere.  So -mcpu=st10 selects that map rather than a third
+  copy of it, less the two registers the C167CS has and this part does not -
+  P1DIDIS at 52H and FOCON at D5H, neither of which is in Table 31 and neither
+  of whose short addresses is used for anything else there.
+
+  FOCON had been in the always-available set, which is documented as what
+  every map here agrees about; that was true of two maps and a third that
+  lacks it made it false, so FOCON now sits in the two maps that have it.  A
+  shared set is only worth having while it is honestly shared.
+
+  The extended registers are a different set on each part rather than the
+  XC164CM's entire, which is what they were while there was only one of them.
+  The ST10F269's are the classic C166 extended space - the PWM module, CAPCOM
+  timers 7 and 8, the port output and open-drain controls, and the interrupt
+  control registers for CAPCOM 16 to 31 - where the XC164CM's are its real-
+  time clock, chip identification and alternate-select registers.  Twelve
+  names are on both parts at the same address and belong to neither map;
+  three are the same hardware under two spellings and so name different
+  registers at one address (50H ADDAT2 or ADC_DAT2, EDH EXISEL or EXISEL0,
+  CFH XP3IC or PLL_IC), which is why the printer had to start asking the
+  subtarget before naming one.  It did not have to while one map could not be
+  mistaken for another.
+
+  Reading that table also settled something the XC164CM's manual could not.
+  That manual gives CC2_T7IC as F17AH/BEH and CC2_T8IC as F17CH/BFH, and each
+  pair disagrees with itself - BEH is F17CH and BFH is F17EH - so both were
+  left out of its map for want of anything to say which half was the typo.
+  The ST10F269 datasheet prints the identical contradiction, which says the
+  pairing was copied from a document both manuals descend from rather than
+  mistyped twice; and here it is resolvable, because this part has PWMIC at
+  F17EH/BFH, a row that agrees with itself.  BFH is therefore taken, T8IC
+  cannot have it, BDH is claimed by nothing, and F176H to F17EH is an unbroken
+  run for BBH to BFH.  The physical column is right and the two short
+  addresses are each one slot too high.  That settles it for this part only:
+  the XC164CM has no PWM module and so no PWMIC to collide with, which leaves
+  BFH free there and its manual still without a tiebreaker, so CC2_T7IC and
+  CC2_T8IC stay out on the evidence they were left out on.
+
+  The ST10 Family Programming Manual is not the book for any of this - it
+  gives the instruction set, which is where it settled a different question:
+  the ST10's MAC is this MAC, sharing every function code, so there is one mac
+  feature rather than one per derivative.
 * An extended special function register is reachable by address but not
   through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
   Getting at one that way needs an EXTR, and once encoded it is the same bytes
   as the register with the same short address in the ordinary space, so there
-  would be nothing for a disassembly to go on.  Three of them are missing
-  because the manual contradicts itself about where they are; the register file
-  names which.
+  would be nothing for a disassembly to go on.  Three of the XC164CM's are
+  still missing because its manual contradicts itself about where they are and
+  nothing in it breaks the tie; the register file names which.  Two of the
+  three are the pair the ST10F269 datasheet resolves for its own map and not
+  for this one, which is written down there rather than acted on here.
 * The interrupt jump table cache is reachable but not used.  This part can
   hold two 24 bit pointers in FINT0ADDR/FINT0CSP and FINT1ADDR/FINT1CSP and
   branch straight to those two service routines, skipping the vector table's

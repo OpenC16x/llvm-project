@@ -136,28 +136,46 @@ static MCAsmInfo *createC166MCAsmInfo(const MCRegisterInfo &MRI,
   return MAI;
 }
 
+/// Every part map a register belongs to, paired with the feature that selects
+/// it.  A register can be in more than one - the ST10F269 shares all 163 of
+/// its short-address names with the C167CS, and four extended registers are
+/// the MAC unit's rather than any part's - so this is a search rather than a
+/// cascade: the first matching class must not get to answer for the rest.
+static constexpr struct {
+  unsigned ClassID;
+  uint64_t Feature;
+} SFRMaps[] = {
+    {C166::SFRXC164RegClassID, C166::FeatureSFRXC164},
+    {C166::SFRC167RegClassID, C166::FeatureSFRC167},
+    {C166::SFRST10RegClassID, C166::FeatureSFRST10},
+    // The extended and X-peripheral registers are reachable by address rather
+    // than through a "reg" field, which makes them harmless to encode and not
+    // at all harmless to name: the address would be written, and would mean
+    // something else on a part that has something else there.
+    {C166::ESFRRegClassID, C166::FeatureSFRXC164},
+    {C166::XSFRRegClassID, C166::FeatureSFRXC164},
+    {C166::ESFRST10RegClassID, C166::FeatureSFRST10},
+};
+
 bool C166::isSFRInSelectedMap(MCRegister Reg, const MCSubtargetInfo &STI) {
-  if (getC166MCRegisterClass(C166::SFRXC164RegClassID).contains(Reg))
-    return STI.hasFeature(C166::FeatureSFRXC164);
-  if (getC166MCRegisterClass(C166::SFRC167RegClassID).contains(Reg))
-    return STI.hasFeature(C166::FeatureSFRC167);
-  // Except for the coprocessor's four offset registers, which are the MAC
-  // unit's rather than a part's: the ST10F269 datasheet gives QX0 F000H, QX1
-  // F002H, QR0 F004H and QR1 F006H, the same four at the same addresses the
-  // XC164CM User's Manual gives, so what decides whether they can be named is
-  // whether there is a unit to own them.
+  // The coprocessor's four offset registers come first because they are the
+  // MAC unit's rather than a part's: the ST10F269 datasheet gives QX0 F000H,
+  // QX1 F002H, QR0 F004H and QR1 F006H, the same four at the same addresses
+  // the XC164CM User's Manual gives, so what decides whether they can be
+  // named is whether there is a unit to own them - not which part map is
+  // selected, even though they appear in two of those maps.
   if (getC166MCRegisterClass(C166::CoOFFSRegClassID).contains(Reg))
     return STI.hasFeature(C166::FeatureMAC);
-  // The rest of the extended and X-peripheral registers are the XC164CM's
-  // entire, so they go the same way as its own short-address ones.  They are
-  // reachable by address rather than through a "reg" field, which makes them
-  // harmless to encode and not at all harmless to name: the address would be
-  // written, and would mean something else on a part that has something else
-  // there.
-  if (getC166MCRegisterClass(C166::ESFRRegClassID).contains(Reg) ||
-      getC166MCRegisterClass(C166::XSFRRegClassID).contains(Reg))
-    return STI.hasFeature(C166::FeatureSFRXC164);
-  return true;
+
+  bool InSomeMap = false;
+  for (const auto &Map : SFRMaps)
+    if (getC166MCRegisterClass(Map.ClassID).contains(Reg)) {
+      if (STI.hasFeature(Map.Feature))
+        return true;
+      InSomeMap = true;
+    }
+  // A register no map claims is one every part has.
+  return !InSomeMap;
 }
 
 static MCSubtargetInfo *createC166MCSubtargetInfo(const Triple &TT,
@@ -198,11 +216,15 @@ int64_t C166::getSFRAddress(const MCRegisterInfo &MRI, StringRef Name) {
     return getSFRAddressForShort(Short);
 
   // An extended register is reachable by address even though it is not
-  // reachable through a "reg" field.
+  // reachable through a "reg" field.  Both maps are searched because the
+  // caller has already refused a name this part does not have - see
+  // reportRegisterNotInMap in the parser - so a name reaching here is one the
+  // selected part owns, and there is nothing left for a second gate to do.
   std::string Lowered = Name.lower();
-  for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
-    if (Lowered == C166InstPrinter::getRegisterName(Reg))
-      return getESFRAddressForShort(MRI.getEncodingValue(Reg));
+  for (unsigned ClassID : {C166::ESFRRegClassID, C166::ESFRST10RegClassID})
+    for (MCPhysReg Reg : MRI.getRegClass(ClassID))
+      if (Lowered == C166InstPrinter::getRegisterName(Reg))
+        return getESFRAddressForShort(MRI.getEncodingValue(Reg));
 
   // An X-peripheral register carries its whole address, having no short one.
   for (MCPhysReg Reg : MRI.getRegClass(C166::XSFRRegClassID))
@@ -217,11 +239,19 @@ StringRef C166::getSFRName(const MCRegisterInfo &MRI, uint64_t Addr,
     if (getSFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr &&
         (!STI || isSFRInSelectedMap(Reg, *STI)))
       return C166InstPrinter::getRegisterName(Reg);
-  for (MCPhysReg Reg : MRI.getRegClass(C166::ESFRRegClassID))
-    if (getESFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr)
-      return C166InstPrinter::getRegisterName(Reg);
+  // These two were not filtered by the subtarget until there was a second
+  // extended map to confuse them with.  There is now: F0A0H is ADC_DAT2 on an
+  // XC164CM and ADDAT2 on an ST10F269, and F19EH is PLL_IC on one and XP3IC
+  // on the other, so printing whichever came first in the table would put the
+  // wrong part's name on a listing that is otherwise correct.
+  for (unsigned ClassID : {C166::ESFRRegClassID, C166::ESFRST10RegClassID})
+    for (MCPhysReg Reg : MRI.getRegClass(ClassID))
+      if (getESFRAddressForShort(MRI.getEncodingValue(Reg)) == Addr &&
+          (!STI || isSFRInSelectedMap(Reg, *STI)))
+        return C166InstPrinter::getRegisterName(Reg);
   for (MCPhysReg Reg : MRI.getRegClass(C166::XSFRRegClassID))
-    if (MRI.getEncodingValue(Reg) == Addr)
+    if (MRI.getEncodingValue(Reg) == Addr &&
+        (!STI || isSFRInSelectedMap(Reg, *STI)))
       return C166InstPrinter::getRegisterName(Reg);
   return StringRef();
 }
