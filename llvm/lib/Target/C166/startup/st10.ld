@@ -146,8 +146,10 @@ MEMORY
    * does not. */
   xram2 (rw) : ORIGIN = __c166_xram2_origin, LENGTH = __c166_xram2_length
 
-  /* The internal RAM under the system stack, which the ABI stack has to
-   * itself: the static data is in the extension RAM, which every ST10 has. */
+  /* The internal RAM under the system stack.  This is the dual-port RAM, which
+   * is the only memory the multiply-accumulate unit's IDX pointers reach, so
+   * what __dpram places is here; the rest of it is the ABI stack's, since the
+   * static data is in the extension RAM that every ST10 has. */
   iram (rw) : ORIGIN = 0x0000F600, LENGTH = __system_stack_limit - 0x0000F600
 }
 
@@ -186,6 +188,12 @@ ASSERT(__c166_rom_length <= 32K + 32K + 64K + 64K + 64K,
 
 ASSERT(__system_stack_top <= 0x0000F600 + __c166_iram_length,
        "the system stack is above the end of this part's internal RAM")
+/* The __dpram data shares the internal RAM with the ABI stack coming down.
+ * How much room that leaves the stack is not a thing a link can know; running
+ * past where the stack starts is. */
+ASSERT(__dprambss_end <= __system_stack_limit,
+       "the __dpram data does not fit under the ABI stack; the internal RAM holds both")
+
 ASSERT(__system_stack_limit >= 0x0000F600,
        "the system stack starts below the internal RAM")
 ASSERT(LENGTH(xram) == 0 ||
@@ -300,6 +308,27 @@ SECTIONS
     . = ALIGN(2);
     __farbss_end = .;
   } > xram2
+
+  /* What __dpram places, at the bottom of the internal RAM with the ABI stack
+   * coming down towards it.  That memory is the only memory the coprocessor's
+   * IDX0 and IDX1 can address - PM0036 section 2.1 - so an array a CoMAC walks
+   * through [idx0+] has to be here.  Unlike the other two scripts this needs
+   * no MAX: every ST10 has an extension RAM, so the static data is never in
+   * this memory and the bottom of it is always free. */
+  .dpramdata 0x0000F600 : ALIGN(2) {
+    __dpramdata_start = .;
+    *(.dpramdata .dpramdata.*)
+    . = ALIGN(2);
+    __dpramdata_end = .;
+  } > iram AT > rom
+  __dpramdata_load = LOADADDR(.dpramdata);
+
+  .dprambss (NOLOAD) : ALIGN(2) {
+    __dprambss_start = .;
+    *(.dprambss .dprambss.*)
+    . = ALIGN(2);
+    __dprambss_end = .;
+  } > iram
 
   /* No program SRAM on this part; the XC16x's E0'0000H window is its own. */
   __psramtext_start = .;

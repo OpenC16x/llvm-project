@@ -927,6 +927,58 @@ Known limitations / things to do
   against the host: both pointers, an offset register set by name, and the
   accumulator read back out of MAL and MAH.
 
+  What that first version of it did not do was put the arrays anywhere the unit
+  could reach.  PM0036 section 2.1: "the GPR pointer gives access to the entire
+  memory space, whereas IDXi are limited to the internal Dual-Port RAM, except
+  for the CoMOV instruction."  Ordinary static data is not in the dual-port RAM
+  - on a part with an extension RAM it is at C000H - so an IDX pointed at it
+  assembles, links, and on the part reads whatever the unit sees at that offset
+  instead.  Nothing said so: the simulator modelled the pointer as an ordinary
+  address, so the test passed.
+
+  __dpram is what places an array where IDX can reach it.  It is an attribute
+  and not an address space, which is the decision worth writing down: the
+  dual-port RAM is a near address in page 3 like the rest of the RAM, so a
+  pointer into it is an ordinary short * and carries no extra bits.  An address
+  space would buy a conversion rule and cost every pointer in the program a
+  second type to reason about, for a property that belongs to the object rather
+  than to the pointer.  What the compiler would need for selecting an IDX form
+  itself is that property, and it is on the GlobalVariable where the section is
+  chosen from it.
+
+  The section is chosen in the backend rather than named in clang, so that a
+  zero initialised object lands in a NOBITS .dprambss and does not carry its
+  length in the image - a delay line is exactly the object that would.  A read
+  only one still goes in the writable .dpramdata: being in the dual-port RAM
+  means being in RAM, so it is copied out of the image either way.
+
+  Placing it is the linker script's, and the case that needed thought is the
+  part with no extension RAM - the XC164xx-4F, which has the coprocessor and
+  none of that RAM.  There the static data is already at the bottom of this
+  same memory, so the __dpram data has to follow it rather than start
+  underneath it; on a part with an extension RAM the static data is elsewhere
+  and this starts at F600H.  MAX of the location counter and F600H says both
+  without a condition: whichever is higher is the first free word of the
+  dual-port RAM.  A region cannot say it, because "the region above, or that
+  one" is not a thing a region assignment expresses, and getting it wrong is
+  silent - two regions over one memory and the second overwrites the first.
+  lld/test/ELF/c166-dpram.s links both parts and checks the addresses.
+
+  The heap symbols moved with it.  __heap_start was __bss_end, which on a part
+  with an extension RAM is C800H, and the memory from there up to the dual-port
+  RAM is not RAM at all - so a heap that started there began in nothing.  It is
+  __dprambss_end now, which is the first free word after everything placed, on
+  both kinds of part.  Nothing here implements a heap; these say where one
+  could go.
+
+  The simulator refuses an IDX outside F600H to FDFFH now, which is what makes
+  any of this checkable: reverting one __dpram in macasm.c or macrepeat.c stops
+  it with the reason rather than quietly giving an answer.  What it does not
+  model is the other half of that manual sentence - IDXi holds even values only,
+  bit 0 always reading as zero - because that is the register masking what is
+  written rather than refusing it, and asserting an error the part does not
+  raise would be worse than saying nothing.
+
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines

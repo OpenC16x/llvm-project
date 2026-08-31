@@ -867,6 +867,37 @@ uint32_t sfrAddress(const MCRegisterInfo &MRI, MCRegister R) {
 /// to, which is all a program setting one and the unit reading it needs.
 enum { CoQX0 = 0xF000, CoQX1 = 0xF002, CoQR0 = 0xF004, CoQR1 = 0xF006 };
 
+/// The internal dual-port RAM, which is 2 KByte from F600H on every part this
+/// simulator runs.  It matters because it is the only memory IDX0 and IDX1
+/// reach: PM0036 section 2.1 says "the GPR pointer gives access to the entire
+/// memory space, whereas IDXi are limited to the internal Dual-Port RAM,
+/// except for the CoMOV instruction".  Nothing about the encoding says so, so
+/// an IDX pointed at ordinary static data assembles, links, and on the part
+/// reads whatever the unit sees instead - which is why this is checked here
+/// rather than left to be discovered on silicon.  __dpram is what puts an
+/// array where these can reach it.
+enum { DPRamStart = 0xF600, DPRamEnd = 0xFDFF };
+
+/// Whether an IDX pointer may be used for this access, stopping the machine
+/// with what is wrong if not.  The pointer steps, so this is asked on every
+/// repetition rather than once: walking off the end of the dual-port RAM is
+/// the failure worth catching.
+///
+/// The manual also says IDXi holds even values only, bit 0 always reading as
+/// zero.  That is the register masking what is written rather than refusing
+/// it, and nothing here models the masking, so an odd pointer is not checked:
+/// asserting an error the part does not raise would be worse than saying
+/// nothing.
+bool checkIdxPointer(Machine &M, uint16_t Idx) {
+  if (Idx < DPRamStart || Idx > DPRamEnd - 1) {
+    M.Stop = StopReason::BadAccess;
+    M.StopDetail = "an IDX pointer outside the dual-port RAM, which is the only "
+                   "memory it reaches - see __dpram";
+    return false;
+  }
+  return true;
+}
+
 /// What a pointer does to itself after the access, from the update code the
 /// operand carries.  The codes are PM0036 Table 31's, and the same seven
 /// serve both pointer kinds - only which pair of offset registers they name
@@ -1043,6 +1074,11 @@ void executeCoRepeatable(Machine &M, const MCInst &MI, Op O) {
     // op1 and op2, in the manual's numbering.  Which of them is a memory word
     // and which a register is the shape's business.
     uint16_t Op1 = 0, Op2 = 0;
+    // CoMOV is the one form the restriction does not apply to, which is what
+    // the manual says and what makes it the instruction for moving a buffer
+    // into the dual-port RAM in the first place.
+    if (IdxOp != ~0u && F->Kind != K::MOV && !checkIdxPointer(M, IdxVal))
+      return;
     switch (F->Shape) {
     case Sh::RP:
       Op1 = M.getWordReg(wordRegIndex(MRI, MI.getOperand(RegOp).getReg()));

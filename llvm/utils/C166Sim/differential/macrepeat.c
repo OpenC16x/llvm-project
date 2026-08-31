@@ -37,10 +37,23 @@ static void puthex(u32 v, int d) {
   put('\n');
 }
 
+/* An array an IDX pointer reads through has to be in the dual-port RAM, which
+   is the only memory IDX0 and IDX1 reach - PM0036 section 2.1.  Only the first
+   operand of these forms goes through IDX; the second is a general purpose
+   register, which reaches the whole memory space, so b, ub and dst stay
+   ordinary.  dst is where CoMOV writes, and CoMOV is the exception the manual
+   names: it is how a buffer gets into the dual-port RAM in the first place, so
+   it would be a poor instruction if it could only write there. */
+#ifdef __c166__
+#define DPRAM __dpram
+#else
+#define DPRAM
+#endif
+
 #define N 8
-static s16 a[N] = {1, -2, 3, -4, 5, -6, 7, -8};
+static DPRAM s16 a[N] = {1, -2, 3, -4, 5, -6, 7, -8};
 static s16 b[N] = {100, 200, -300, 400, -500, 600, -700, 800};
-static u16 ua[N] = {1, 2, 3, 40000, 5, 6, 7, 60000};
+static DPRAM u16 ua[N] = {1, 2, 3, 40000, 5, 6, 7, 60000};
 static u16 ub[N] = {9, 8, 7, 60000, 5, 4, 3, 40000};
 static s16 dst[N];
 
@@ -282,7 +295,7 @@ int main(void) {
      means each sample lands where the previous one was, so afterwards the
      buffer holds itself shifted down by one. */
   {
-    static s16 line[N] = {10, 20, 30, 40, 50, 60, 70, 80};
+    static DPRAM s16 line[N] = {10, 20, 30, 40, 50, 60, 70, 80};
 #ifdef __c166__
     REPEAT2("repeat 7 times comacm [idx0+], [%3+]", &line[1], b, got);
 #else

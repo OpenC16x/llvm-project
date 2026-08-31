@@ -16,6 +16,9 @@
    memory location reaches the same register the instruction inside the asm
    statement is using.
 
+   The array behind IDX is __dpram, which is what puts it where the unit can
+   address it at all; see below.
+
    The pointers are read-write because the instruction steps them, so the value
    the compiler reads back out afterwards is one past the last element
    - which the host side computes too, since a wrong step count would otherwise
@@ -36,8 +39,20 @@ static void puthex(u32 v, int d) {
   put('\n');
 }
 
+/* The array an IDX pointer walks has to be in the dual-port RAM, which is the
+   only memory IDX0 and IDX1 reach - PM0036 section 2.1.  The other operand is
+   reached through a general purpose register, which gets to the whole memory
+   space, so only one of these two needs placing.  That asymmetry is the point
+   of putting both in one program: a run where the wrong one is marked stops
+   the simulator rather than quietly reading somewhere else. */
+#ifdef __c166__
+#define DPRAM __dpram
+#else
+#define DPRAM
+#endif
+
 #define N 6
-static s16 a[N] = {1, -2, 3, -4, 5, -6};
+static DPRAM s16 a[N] = {1, -2, 3, -4, 5, -6};
 static s16 b[N] = {100, 200, -300, 400, -500, 600};
 
 int main(void) {

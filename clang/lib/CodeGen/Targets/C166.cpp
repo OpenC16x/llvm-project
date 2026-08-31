@@ -35,6 +35,15 @@ public:
 
 void C166TargetCodeGenInfo::setTargetAttributes(
     const Decl *D, llvm::GlobalValue *GV, CodeGen::CodeGenModule &M) const {
+  // An object in the dual-port RAM, which is where the coprocessor's IDX
+  // pointers reach and nowhere else.  The backend picks the section from this
+  // rather than the section being named here, so that a zero initialised one
+  // gets a NOBITS section and does not carry its zeroes in the image.
+  if (const auto *VD = dyn_cast_or_null<VarDecl>(D);
+      VD && VD->hasAttr<C166DPRamAttr>())
+    if (auto *Var = dyn_cast<llvm::GlobalVariable>(GV))
+      Var->addAttribute("c166-dpram");
+
   const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
   if (!FD)
     return;

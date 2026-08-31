@@ -107,7 +107,9 @@ Makes programs 10x faster by doing Special New Thing.
   derivatives does not mean editing a memory map by hand.
 * Four of the multiply-accumulate coprocessor's instructions are selected and
   all 180 forms assemble and disassemble, including the repeat prefix on the
-  89 the manual marks repeatable: `repeat 3 times comac r2, [r3+]`.
+  89 the manual marks repeatable: `repeat 3 times comac r2, [r3+]`. The forms
+  that address memory through `IDX0` or `IDX1` reach only the dual-port RAM,
+  which clang's `__dpram` and the linker scripts here place data in.
 * There is no default linker script, because the memory map belongs to the
   board. Three to start from are in `llvm/lib/Target/C166/startup`.
 

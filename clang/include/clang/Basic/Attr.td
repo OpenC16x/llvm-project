@@ -1101,6 +1101,12 @@ def C166Interrupt : InheritableAttr, TargetSpecificAttr<TargetC166> {
   let Documentation = [C166InterruptDocs];
 }
 
+def C166DPRam : InheritableAttr, TargetSpecificAttr<TargetC166> {
+  let Spellings = [GCC<"c166_dpram">];
+  let Subjects = SubjectList<[Var]>;
+  let Documentation = [C166DPRamDocs];
+}
+
 def AsmLabel : InheritableAttr {
   let Spellings = [CustomKeyword<"asm">, CustomKeyword<"__asm">, CustomKeyword<"__asm__">];
   let Args = [

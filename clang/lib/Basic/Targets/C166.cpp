@@ -62,6 +62,13 @@ void C166TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (HasExtInstr)
     Builder.defineMacro("__C166_EXT_INSTR__");
 
+  // The internal dual-port RAM, which is the only memory the coprocessor's
+  // IDX pointers reach.  A placement rather than an address space: it is a
+  // near address in page 3 like the rest of the RAM, so a pointer into it is
+  // an ordinary pointer.  The name is in the reserved identifier space, so it
+  // cannot collide with anything the user wrote.
+  Builder.defineMacro("__dpram", "__attribute__((c166_dpram))");
+
   // Far data lives in address space 1.  Spell it the way the vendor
   // toolchains do; the name is in the reserved identifier space, so it cannot
   // collide with anything the user wrote.

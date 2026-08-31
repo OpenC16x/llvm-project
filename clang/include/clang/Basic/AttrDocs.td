@@ -3322,6 +3322,39 @@ hand written vector, exactly as it is for the vendor toolchains.
   }];
 }
 
+def C166DPRamDocs : Documentation {
+  let Category = DocCatVariable;
+  let Heading = "c166_dpram (C166)";
+  let Content = [{
+Places a variable in the C166's internal dual-port RAM. ``__dpram`` is
+predefined as a shorthand::
+
+  __dpram short delay[32];
+
+The multiply-accumulate coprocessor is the reason this exists. Its two address
+pointers IDX0 and IDX1 reach the dual-port RAM and nothing else -- the ST10
+Family Programming Manual (PM0036) section 2.1 says so, with ``CoMOV`` the one
+exception -- so an array a ``CoMAC`` or ``CoMACM`` walks through ``[idx0+]``
+has to be there. Ordinary static data is not: it goes in whatever RAM the part
+uses for it, which on most parts is somewhere the coprocessor cannot address.
+The second operand of those instructions is reached through a general purpose
+register and can be anywhere, so a coefficient table needs no attribute.
+
+The dual-port RAM is small -- 2 KByte on the parts this target knows -- and the
+stacks are in it, so what goes here should be what has to be. The linker script
+places it below the stack and asserts that the two do not meet; a program that
+puts too much here fails to link rather than running into its own stack.
+
+The attribute is a placement and not an address space: the dual-port RAM is a
+near address in page 3 like the rest of the RAM, so a pointer into it is an
+ordinary ``short *`` and needs no conversion rule of its own.
+
+It may be applied only to a variable with static storage duration. An
+automatic variable is on the stack by definition, and the stack is where the
+linker script puts the rest of this memory.
+  }];
+}
+
 def C166FarDocs : Documentation {
   let Category = DocCatFunction;
   let Heading = "far (C166)";

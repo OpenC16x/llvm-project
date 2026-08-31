@@ -214,15 +214,28 @@ arguments, locals and spills, is addressed through R0 and grows down from
 __user_stack_top.
 
 The two RAMs are split along that line.  Static data goes in the DSRAM, which
-is 2 KByte and has nothing else in it; the ABI stack gets the KByte of DPRAM
-from 00'F600H to 00'F9FFH to itself, with the system stack growing down into
-FA00H from the other side.  So the two stacks meet at a known address and
-neither of them grows into the program's variables, which is what would happen
-if all three shared the DPRAM.
+is 2 KByte and has nothing else in it; the KByte of DPRAM from 00'F600H to
+00'F9FFH is the ABI stack's, with the system stack growing down into FA00H from
+the other side.  So the two stacks meet at a known address and neither of them
+grows into the program's variables, which is what would happen if all three
+shared the DPRAM.
 
-The variant of this part with 32 KByte of Flash has no DSRAM.  That one wants
-the dsram region deleted and .data and .bss moved to dpram, which puts the
-statics and the ABI stack back in the same KByte.
+One thing does share it, and only because it has to.  The multiply-accumulate
+unit's IDX0 and IDX1 reach the dual-port RAM and nothing else, so an array a
+CoMAC walks through them has to be there; __dpram is what puts it there, at the
+bottom of that KByte with the ABI stack coming down towards it.  How much room
+that leaves the stack is not a thing a link can know, so the script asserts
+only that the data itself fits below where the stack starts.  A program that
+puts a lot here should move the system stack up, which is __system_stack_limit
+at the top of the script.  crt0 copies and zeroes the two halves of it the way
+it does .data and .bss, so a script of your own has to define
+__dpramdata_load, __dpramdata_start, __dpramdata_end, __dprambss_start and
+__dprambss_end - an empty pair is fine, and is what a part with no coprocessor
+ends up with anyway.
+
+The variant of this part with 32 KByte of Flash has no DSRAM, and the script
+handles that without an edit: the dsram region becomes the dual-port RAM, and
+the __dpram data follows the static data in it rather than starting underneath.
 
 crt0.S writes SP, STKUN, STKOV and the DPPs with a plain "mov sp, #..." each,
 which the assembler can do because the 8 bit "reg" field of MOV reaches the

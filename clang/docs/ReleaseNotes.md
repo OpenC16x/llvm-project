@@ -615,6 +615,9 @@ features cannot lower the translation-unit ABI level;
   rather than 16-bit and cost an `EXTend` prefix or a `CALLS`.
 - `__attribute__((interrupt))` generates an entry and exit sequence usable
   directly as an interrupt service routine.
+- `__dpram` places a variable in the internal dual-port RAM, which is the only
+  memory the multiply-accumulate coprocessor's `IDX0` and `IDX1` can address,
+  so an array one of its instructions walks through has to be there.
 - `__C166_MAC__` and `__C166_EXT_INSTR__` say whether the multiply-accumulate
   coprocessor and the `EXTend` instructions are available, so that code can
   ask rather than infer them from a part number.

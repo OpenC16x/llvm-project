@@ -200,17 +200,35 @@ All three are still fine in a clobber list, which asks for no move.
 ### Reaching the coprocessor
 
 Nothing selects the coprocessor's repeatable forms, so an asm statement is how
-they are used. Which of the two pointers an instruction runs on is in the
-encoding rather than in an operand, so naming the register is the only way to
-say it:
+they are used. Two things have to be right, and only one of them is about the
+assembly.
+
+**Where the data is.** IDX0 and IDX1 reach the internal dual-port RAM and
+nothing else — PM0036 section 2.1, with `CoMOV` the one exception. Ordinary
+static data is not there; it is in whatever RAM the part uses for it, which on
+most parts the coprocessor cannot address at all. So an array a `CoMAC` walks
+through `[idx0+]` must be declared `__dpram`:
 
 ```c
-long dot(const short *x, const short *y, unsigned short n) {
-  register const short *p __asm__("idx0") = x;
+__dpram short delay[8];             /* IDX0 walks this   */
+static const short coef[8] = {…};   /* a register walks this, so anywhere */
+```
+
+The second operand goes through a general purpose register, which reaches the
+whole memory space, so a coefficient table needs no attribute. The dual-port
+RAM is 2 KByte on the parts here and the stacks are in it, so what goes there
+should be what has to.
+
+**Which pointer.** Which of the two an instruction runs on is in the encoding
+rather than in an operand, so naming the register is the only way to say it:
+
+```c
+long dot(unsigned short n) {
+  register const short *p __asm__("idx0") = delay;
   register unsigned short rep __asm__("mrw") = n - 1;
   register unsigned short lo __asm__("mal");
   register unsigned short hi __asm__("mah");
-  const short *q = y;
+  const short *q = coef;
   unsigned short zero = 0;
   __asm__ volatile("coload %5, %5\n\t"
                    "repeat mrw times comac [idx0+], [%1+]"
@@ -229,7 +247,10 @@ times` takes the count from the MAC repeat word, which the manual gives as
 `MRW[12:0] + 1` — hence the `n - 1` — and a literal count is `repeat 8 times`.
 
 `llvm/utils/C166Sim/differential/macasm.c` is this worked through, run in the
-simulator and checked against the host.
+simulator and checked against the host. The simulator stops with *an IDX
+pointer outside the dual-port RAM* if the array was not placed, which is a
+mistake nothing else catches: it assembles, it links, and on the part it reads
+whatever the unit sees there instead.
 
 ## Predefined macros
 
