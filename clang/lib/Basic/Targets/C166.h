@@ -178,7 +178,17 @@ public:
 
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &Info) const override {
-    return false;
+    switch (*Name) {
+    // The four registers an indirect ALU form can point through.  Its
+    // pointer field is two bits wide, so "add Rwn, [Rwm]" can only name R0 to
+    // R3 - and asking for one with "r" gets whichever register the allocator
+    // had spare, which assembles only by luck.
+    case 'q':
+      Info.setAllowsRegister();
+      return true;
+    default:
+      return false;
+    }
   }
 
   std::string_view getClobbers() const override { return ""; }

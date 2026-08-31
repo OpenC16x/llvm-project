@@ -32,10 +32,26 @@
 // CORE is the instruction set, which -mcpu= names, and with it the shape of
 // the memory map and which special function registers exist.
 //
+// The extension RAM is the one memory a row may place itself, because the ST10
+// rows below are two parts with the same core and the same Flash that put it
+// in different places.  Everything else keeps the rule above: where it is
+// belongs to the core, and the core's linker script is where that is written.
+//
 //===----------------------------------------------------------------------===//
 
+// The full row.  XRAMORG is where the extension RAM starts, or zero to take
+// the core's answer, and XRAM2 is a second one in its own right rather than
+// adjoining the first.  Both exist for the ST10 and are zero everywhere else,
+// which is what C166_PART is for: a row that names an address should look
+// different from a row that does not.
+#ifndef C166_PART_AT
+#define C166_PART_AT(NAME, CORE, PROGRAM, XRAM, XRAMORG, XRAM2, XRAM2ORG,      \
+                     IRAM, PSRAM, ROMMED)
+#endif
+
 #ifndef C166_PART
-#define C166_PART(NAME, CORE, PROGRAM, XRAM, IRAM, PSRAM, ROMMED)
+#define C166_PART(NAME, CORE, PROGRAM, XRAM, IRAM, PSRAM, ROMMED)              \
+  C166_PART_AT(NAME, CORE, PROGRAM, XRAM, 0, 0, 0, IRAM, PSRAM, ROMMED)
 #endif
 
 // XC164CM System Units (Vol. 1 of 2), V1.2 2006-03, Table 1-1 "XC164xx
@@ -94,4 +110,55 @@ C166_PART("c167cr-lm", "c167", 0, 2048, 2048, 0, false)
 C166_PART("c167cr-4rm", "c167", 32768, 2048, 2048, 0, true)
 C166_PART("c167cr-16rm", "c167", 131072, 2048, 2048, 0, true)
 
+// ST10F269 data sheet, September 2013, "Memory Organization" and Figure 4
+// "ST10F269 On-chip Memory Mapping"; and ST10F272B/ST10F272E data sheet,
+// Doc ID 11917 Rev 5, "Memory organization" with Table 2 "Summary of IFLASH
+// address range".  Both give the same eight Flash blocks, and the run is not
+// continuous - 00'8000H to 01'7FFFH is not Flash on either part:
+//
+//   00'0000H - 00'7FFFH   32 KByte      02'0000H - 02'FFFFH   64 KByte
+//   01'8000H - 01'FFFFH   32 KByte      03'0000H - 03'FFFFH   64 KByte
+//                                       04'0000H - 04'FFFFH   64 KByte
+//
+// so PROGRAM is 256 KByte on all three and st10.ld knows where the hole is.
+// Every one has 2 KByte of IRAM at 00'F600H, which is the family's.
+//
+// The extension RAM is what makes these rows carry addresses.  All three have
+// XRAM1, 2 KByte at 00'E000H, which is exactly the C167's; they differ in the
+// second one:
+//
+//   ST10F269    XRAM2 is 8 KByte at 00'C000H, which runs up to 00'DFFFH and
+//               so adjoins XRAM1 - one contiguous 10 KByte at 00'C000H, all
+//               of it in page 3 and reached by DPP3 like any near data.
+//   ST10F272B   XRAM2 is 8 KByte and the F272E's is 16 KByte, both at
+//   ST10F272E   09'0000H after reset, mirrored every 16 KByte.  That is not a
+//               page any pointer here holds, so it is a far region of its own
+//               and the near RAM stays the 2 KByte at 00'E000H.
+//
+// Every ST10 row names its own extension RAM address rather than leaving it at
+// zero, because there is no ST10 answer to fall back to: the two addresses
+// above are both ST10 addresses, and a row that said nothing would silently
+// get whichever one the script happens to default to.
+//
+// XPERCON is F024H with reset value 05H on both parts, which is CAN1 and
+// XRAM1 - so XRAM2 is off until something sets bit 3, and XPERCON cannot be
+// written after SYSCON.XPEN.  crt0 does it in that order; see st10.ld.  The
+// F272 data sheet warns that its XPERCON "bit mapping" differs from the
+// F269's, which is true of the peripherals it added and not of bits 2 and 3:
+// both data sheets give XRAM1EN as bit 2 and XRAM2EN as bit 3.
+//
+// Not here, and why.  The ST10F276E and ST10F296E have 832 KByte, and it is
+// two Flash modules on two buses: 512 KByte of IFLASH and 320 KByte of XFLASH
+// at 09'0000H, of which the data sheet says "the XFLASH is seen as external
+// memory" and tabulates modes it cannot be fetched from.  Which of that is
+// program memory is a question about fetch modes rather than a size, so a row
+// claiming 832 KByte would claim something the part does not plainly offer.
+
+C166_PART_AT("st10f269", "st10", 262144, 10240, 0x00C000, 0, 0, 2048, 0, false)
+C166_PART_AT("st10f272b", "st10", 262144, 2048, 0x00E000, 8192, 0x090000, 2048,
+             0, false)
+C166_PART_AT("st10f272e", "st10", 262144, 2048, 0x00E000, 16384, 0x090000, 2048,
+             0, false)
+
 #undef C166_PART
+#undef C166_PART_AT

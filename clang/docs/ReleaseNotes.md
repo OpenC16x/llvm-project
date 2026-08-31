@@ -604,6 +604,21 @@ features cannot lower the translation-unit ABI level;
 
 #### AVR Support
 
+#### C166 Support
+
+- Added support for the Infineon C166 family and the C167, ST10 and XC16x
+  parts derived from it, under the `c166` target triple.
+- `-mcpu=` names a core and `-mmcu=` names a part; the two are refused when
+  they disagree about the core and a link would have to reconcile them.
+- `__far` places data in address space 1 and `__attribute__((far))` places a
+  function where a caller in another segment can reach it. Both are 24-bit
+  rather than 16-bit and cost an `EXTend` prefix or a `CALLS`.
+- `__attribute__((interrupt))` generates an entry and exit sequence usable
+  directly as an interrupt service routine.
+- `__C166_MAC__` and `__C166_EXT_INSTR__` say whether the multiply-accumulate
+  coprocessor and the `EXTend` instructions are available, so that code can
+  ask rather than infer them from a part number.
+
 #### SystemZ Support
 
 ### DWARF Support in Clang

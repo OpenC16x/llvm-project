@@ -76,6 +76,13 @@ public:
                    bool KillSrc, bool RenamableDest = false,
                    bool RenamableSrc = false) const override;
 
+  /// Report that \p Reg cannot be copied and why, and put a NOP where the copy
+  /// would have gone.  Only an asm statement naming a register by hand can ask
+  /// for one of these, so it is a diagnostic rather than an assertion.
+  void reportImpossibleCopy(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator I, const DebugLoc &DL,
+                            Register Reg, const Twine &Why) const;
+
   void storeRegToStackSlot(
       MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register SrcReg,
       bool IsKill, int FrameIndex, const TargetRegisterClass *RC, Register VReg,

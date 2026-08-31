@@ -85,6 +85,18 @@ static DecodeStatus decodeCondCode(MCInst &MI, uint64_t Imm, uint64_t Address,
   return MCDisassembler::Success;
 }
 
+/// The five bit repeat count of a coprocessor instruction.
+///
+/// Every value decodes, zero included: zero is the plain form, which is what
+/// the great majority of these are, and rejecting it would leave the eighty
+/// nine repeatable forms undecodable in the shape they are almost always
+/// written in.  The printer is what leaves the prefix off for zero.
+static DecodeStatus decodeCoRepeat(MCInst &MI, uint64_t Imm, uint64_t Address,
+                                   const MCDisassembler *Decoder) {
+  MI.addOperand(MCOperand::createImm(Imm & 0x1f));
+  return MCDisassembler::Success;
+}
+
 /// [Rw + #data16], packed by the encoder as (disp << 4) | base.
 static DecodeStatus decodeMemRIOperand(MCInst &MI, uint64_t Imm,
                                        uint64_t Address,

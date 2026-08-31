@@ -11,6 +11,9 @@ copied into a project and adjusted rather than installed.
   c167-crt0.S          the same for a C167, which has no PLL to program and
                        no RAM outside the data page pointers
   c167.ld              a linker script for a C167
+  st10.ld              a linker script for an ST10, whose Flash arrives in
+                       blocks with a hole in the middle and whose extension
+                       RAM is not where a C167's is
   vectors.ld           the interrupt vector table, for a program with handlers;
                        it serves both parts, since a C167 has the layout an
                        XC164CM comes up with and no registers to change it
@@ -19,11 +22,16 @@ copied into a project and adjusted rather than installed.
   c167-vectors.inc     the same for a C167
 
 Which of each pair a program gets is the core's, and -mcpu= or -mmcu= decides:
-the driver puts c167-crt0.o first for the c167 core and crt0.o for the rest, in
-the order those two options already resolve the core in.
+the driver puts c167-crt0.o first for the c167 and st10 cores and crt0.o for
+the rest, in the order those two options already resolve the core in.  An ST10
+takes the C167's startup because it needs nothing else - no PLL of the kind
+crt0.S programs, and data page pointers that come up holding what its script
+wants.  The one thing it does need beyond a C167, XPERCON written before
+SYSCON.XPEN, is in that file driven by symbols the script defines, so a C167
+branches over it and an ST10 does not.
 The linker script is passed with -T and is not chosen for you, because the
-memory map is the board's rather than the part's; the two here are starting
-points for the two parts they name.
+memory map is the board's rather than the part's; the three here are starting
+points for the three parts they name.
 
 crt0.S has to be assembled for its own part - "-mcpu=xc16x", or an -mmcu= that
 implies it - because it programs the XC164CM's PLL through that part's extended

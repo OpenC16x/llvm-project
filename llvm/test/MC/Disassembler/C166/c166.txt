@@ -1,4 +1,12 @@
-# RUN: llvm-mc -triple=c166 -disassemble %s | FileCheck %s
+# RUN: llvm-mc -triple=c166 -mcpu=xc16x -disassemble %s | FileCheck %s
+
+# An XC164CM, because this covers that part's extended registers and the
+# multiply-accumulate unit, and both are things the disassembler will only
+# produce when it is told the part has them: without a CPU an extended address
+# comes back as a number and a coprocessor word as "invalid instruction
+# encoding".  The file said no CPU and expected the names anyway, and nothing
+# noticed because nothing ran it - see
+# llvm/utils/C166Sim/differential/testdirs.txt.
 
 # The opcode byte alone decides whether an instruction is one or two words.
 
@@ -233,7 +241,11 @@
 0x93 0xb7 0xd8 0x07
 # CHECK: comul- r2, r3
 0xa3 0x23 0xc8 0x00
+# The shift count of an immediate shift is the five bit field at the top of
+# the word, which is the field a repeat prefix uses on the forms that take
+# one.  This line still had it three bits lower, where it was until the two
+# were told apart.
 # CHECK: coashr #7, rnd
-0xa3 0x00 0xb2 0x07
+0xa3 0x00 0xb2 0x38
 # CHECK: costore r3, mas
 0xc3 0x33 0x10 0x00

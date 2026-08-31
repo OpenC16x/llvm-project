@@ -66,6 +66,10 @@ def FeatureSFRC167
     : SubtargetFeature<"sfr-c167", "HasSFRC167", "true",
                        "The C167's special function registers">;
 
+def FeatureSFRST10
+    : SubtargetFeature<"sfr-st10", "HasSFRST10", "true",
+                       "The ST10F269's special function registers">;
+
 //===----------------------------------------------------------------------===//
 // C166 supported processors
 //===----------------------------------------------------------------------===//
@@ -73,13 +77,14 @@ def FeatureSFRC167
 class Proc<string Name, list<SubtargetFeature> Features>
     : Processor<Name, NoItineraries, Features>;
 
-// Only two of these name a peripheral map, because only two have been read.
-// "st10" is a C167 derivative and very likely shares its map, but likely is
-// not the standard the rest of this file is held to, so it gets the shared set
-// until somebody reads an ST10 user manual.  The ST10 Family Programming
-// Manual has been read - see FeatureMAC above - and it is the wrong book for
-// this: it gives the instruction set and not the register addresses.  "c166"
-// is the first generation, whose peripherals are its own.
+// Three of these name a peripheral map, because three have been read.  "st10"
+// used to get the shared set alone: the ST10 Family Programming Manual had
+// been read - see FeatureMAC above - and it is the wrong book for this, since
+// it gives the instruction set and not the register addresses.  The ST10F269
+// datasheet is the right one, and it settled the guess this comment used to
+// record: an ST10 does share the C167's map, on every one of the 163 names
+// both give a short address to, with one register the C167CS has and it has
+// not.  "c166" is the first generation, whose peripherals are its own.
 //
 // "generic" is the second generation core rather than the oldest one the
 // family ever had.  Every part still sold, every part -mmcu= knows, and the
@@ -90,7 +95,7 @@ class Proc<string Name, list<SubtargetFeature> Features>
 def : Proc<"generic", [FeatureExtInstr]>;
 def : Proc<"c166",    []>;
 def : Proc<"c167",    [FeatureExtInstr, FeatureSFRC167]>;
-def : Proc<"st10",    [FeatureExtInstr]>;
+def : Proc<"st10",    [FeatureExtInstr, FeatureSFRST10]>;
 def : Proc<"xc16x",   [FeatureExtInstr, FeatureMAC, FeatureSFRXC164]>;
 
 //===----------------------------------------------------------------------===//

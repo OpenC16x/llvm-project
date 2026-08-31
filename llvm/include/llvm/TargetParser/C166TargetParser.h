@@ -25,12 +25,16 @@ namespace C166 {
 /// the whole of each memory; where a program is put inside them is the linker
 /// script's business rather than this table's.
 /// The memories below are named for what they are rather than for where they
-/// are, because where they are is the core's answer and not the same one
-/// twice.  A C167 puts its program memory at the bottom of segment 0 or 1 and
+/// are, because where they are is usually the core's answer rather than the
+/// part's.  A C167 puts its program memory at the bottom of segment 0 or 1 and
 /// an XC16x puts it at C0'0000H; both have the internal RAM window at
 /// 00'F600H, which one manual calls the dual-port RAM and the other the IRAM.
-/// The addresses live in the linker script, which is per core; this table is
-/// only how much of each there is.
+/// Those addresses live in the linker script, which is per core.
+///
+/// The extension RAM is the exception, and the ST10 is what made it one: two
+/// parts with the same core and the same 256 KByte of Flash put it in
+/// different places, so a row can say where its own is.  A zero origin means
+/// the core's answer, which is what every part read before the ST10 gives.
 struct Part {
   StringRef Name;
   /// The instruction set, which is what -mcpu= names.  It also picks the
@@ -41,6 +45,18 @@ struct Part {
   /// RAM outside the internal RAM window: the XC16x's data SRAM at 00'C000H,
   /// a C167's extension RAM.  Zero on the derivatives that have none.
   unsigned XRAMSize;
+  /// Where that RAM starts, or zero to take the core's answer.  This is the
+  /// one memory whose address is not the core's, and the ST10 is what made it
+  /// necessary: an ST10F269 has 10 KByte of it at 00'C000H where a C167 has 2
+  /// KByte at 00'E000H, and both are ST10s to -mcpu=.
+  unsigned XRAMOrigin;
+  /// A second extension RAM, in its own right rather than adjoining the first.
+  /// An ST10F272 puts 8 or 16 KByte at 09'0000H, which no data page pointer
+  /// this tree programs reaches, so it is a far memory and a region of its
+  /// own.  Zero on every part that has one extension RAM or none.
+  unsigned XRAM2Size;
+  /// Where that second RAM starts.  Meaningless, and zero, when XRAM2Size is.
+  unsigned XRAM2Origin;
   /// The internal RAM at 00'F600H, which every part in the family has there.
   unsigned IRAMSize;
   /// The program SRAM at E0'0000H, which no near address reaches.  XC16x

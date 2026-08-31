@@ -691,10 +691,10 @@ does unconditionally.
 Known limitations / things to do
 --------------------------------
 
-* Two parts' worth of board support is here rather than one.  c167.ld and
-  c167-crt0.S are the C167's, and -mmcu= picks the startup file while -T still
-  picks the script, because the map is the board's rather than the part's and
-  the scripts here are starting points.
+* Three parts' worth of board support is here rather than one.  c167.ld and
+  c167-crt0.S are the C167's, st10.ld is the ST10's, and -mmcu= picks the
+  startup file while -T still picks the script, because the map is the board's
+  rather than the part's and the scripts here are starting points.
 
   Two things make the C167 simpler rather than harder.  Its program memory is
   at the bottom of segment 0, so the data page pointers want the values they
@@ -740,6 +740,52 @@ Known limitations / things to do
   BSET and not a read-modify-write of a register whose other bits the reset
   pins set.
 
+* An ST10 takes that same startup file and needs a script of its own, which is
+  the opposite way round from the C167 and is what its data sheets say.  Two
+  things about its memory are the part's rather than the core's.
+
+  Its Flash is not one run.  256 KByte arrives as 32 KByte at 00'0000H, then
+  nothing from 00'8000H to 01'7FFFH, then 32 KByte at 01'8000H and 64 KByte
+  each at 02'0000H, 03'0000H and 04'0000H - which the ST10F269 and ST10F272
+  data sheets give identically.  c167.ld computes its regions by dividing one
+  length up from zero and would put code in that hole, so st10.ld has a region
+  per block instead, one per segment because a far access carries one segment
+  and a near branch cannot leave one.
+
+  Its extension RAM is somewhere else, and not the same somewhere else on
+  every ST10.  An ST10F269 has XRAM2's 8 KByte at 00'C000H running up to
+  00'DFFFH and XRAM1's 2 KByte at 00'E000H, so the two adjoin and are 10 KByte
+  in one region, all of it in page 3 and near.  An ST10F272 has the same
+  XRAM1 and puts XRAM2 at 09'0000H, which no pointer here holds - so that one
+  is a far region and the near RAM is 2 KByte.  Two parts, one core, one Flash
+  size, two maps: that is why a part table row can name its own extension RAM
+  address, and why every ST10 row does rather than leaving it to a default
+  that would be the other part's.
+
+  XPERCON is what makes the second one exist, and it is the reason that write
+  is in the shared startup at all.  Its reset value is 05H - CAN1 and XRAM1 -
+  so XRAM2 is off until bit 3 is set, and the data sheet says XPERCON cannot
+  be changed after SYSCON.XPEN.  There is one window, before the enable, and
+  c167-crt0.S uses it under a flag the script sets: an ST10 writes 0DH and a
+  C167, whose one XRAM is already selected at reset, branches over it.
+
+  That write names XPERCON by address rather than by name.  The file is
+  assembled once for both cores and -mcpu=c167 does not know the name: this
+  tree has the XC164CM's extended register map and the ST10F269's and no C167
+  one, and a C167 does have the register.  What is missing is the map, so the
+  address comes from the linker script - which is per part - rather than from
+  a name asserting a map nobody has read.
+
+  Which ST10s are rows, and which are not.  The ST10F269, ST10F272B and
+  ST10F272E have their maps read and are here.  The ST10F276E and ST10F296E
+  have 832 KByte and it is two Flash modules on two buses - 512 KByte of
+  IFLASH and 320 KByte of XFLASH at 09'0000H - of which the data sheet says
+  "the XFLASH is seen as external memory" and tabulates the modes it cannot be
+  fetched from.  How much of that is program memory is a question about fetch
+  modes rather than a size, so there is no row: a table whose header forbids
+  inferring a map from a part number should not infer one from a headline
+  figure either.
+
 * The near addressing model is the XC164CM's: a near reference relocates as
   SOF16, the offset within a segment, and the data page pointers decide which
   page that offset lands in.  DPP0 to DPP2 cover the Flash and DPP3 the RAM and
@@ -776,14 +822,110 @@ Known limitations / things to do
   the C166S V2 manual gives each instruction rather than written out by hand -
   the same table read from the opcode list agrees with those lines on every row
   the two share.  Each one assembles to the bytes the manual specifies and
-  disassembles back to itself.
+  disassembles back to itself.  PM0036's own table was read the same way and
+  joined to these 180 records on the opcode and function byte: 180 of 180
+  matched, with no pair of its rows disagreeing about a record, and its Rep
+  column agrees with the presence of the repeat field in its Format line on
+  all 179 rows it prints.
 
-  Two things it does not do.  The repeat prefix, which the manual writes
-  "- USR0 CoXXX", is not accepted: it puts two tokens in front of the mnemonic
-  and the matcher keys on the mnemonic being first.  rrr is therefore always
-  000, the plain form.  And the simulator models only the four instructions
-  that are selected, stopping and naming any of the others rather than
-  executing it, which is what it does with anything it does not know.
+  The repeat prefix is accepted, in the spelling PM0036 section 2.4.7 gives:
+  "Repeat #data5 times CoXXX..." or "Repeat MRW times CoXXX...".  It puts two
+  tokens in front of the mnemonic and the matcher keys on the mnemonic being
+  first, so the parser takes it apart - the count is remembered, the real
+  mnemonic becomes the mnemonic, and the instruction is parsed as if it stood
+  alone with the count appended afterwards, which is where its operand is.
+  This paragraph used to say the prefix was written "- USR0 CoXXX", from the
+  C166S V2 manual; that manual is not in this tree, PM0036 is, and USR0 in
+  PM0036 is a PSW user flag in a pipeline example.  What is implemented is the
+  spelling that can be checked.
+
+  Which forms take it is the manual's Rep column, read off it rather than
+  reasoned about: 89 of the 180.  It does not follow from the addressing mode.
+  CoLOAD and CoMUL take a pointer exactly as CoMAC does and are marked no,
+  because nothing accumulates across their repetitions, and the four shift
+  instructions are marked yes for their register and pointer forms and no for
+  their immediate one.  That last is the manual explaining itself: the five
+  bit repeat field and the five bit immediate shift are the same five bits.
+
+  Reading that fixed an encoding.  The immediate shift was at bits 28 to 24
+  and PM0036's Format line puts it at 31 to 27 - "A3 00 82 ssss:s000" - so
+  "coshl #8" was A3 00 82 08 and is now A3 00 82 40.  The two cannot both be
+  right and they cannot coexist: with the repeat field at 31 to 27, a count of
+  8 at 28 to 24 sets the repeat field's low bit, which is MRW.  The comment
+  this file carried rendered that Format line as "rrr#:#", which is the same
+  line read as three bits of repeat and then the shift.
+
+  What the manual does not give is a table mapping a written count onto a
+  field value.  It gives three facts - the field is five bits, MRW sets it to
+  1, and a literal "must be less than 32" - and those leave one reading: zero
+  is the plain form, one is MRW, and a literal count is the field itself.  So
+  0 and 1 are refused rather than encoded, which puts the one thing that would
+  have been a guess out of reach in either direction.
+
+  The simulator runs them.  It used to model only the instructions the
+  compiler selects, which made a repeated one assemble, link and then stop it
+  - so the prefix could be written and not tried.  All 89 repeatable forms
+  execute now, with both addressing modes, the seven pointer steps of PM0036
+  Table 31, and the count from either the field or MRW.  What is still refused
+  is the rest: the register-only forms of operations nothing selects, and
+  CoABS, CoCMP, CoLOAD and CoMUL through a pointer, none of which the Rep
+  column marks and none of which a repeat can therefore reach.
+
+  differential/macrepeat.c is what says they are right, and it is the reason
+  for doing this at all: 37 values from signed, unsigned and both mixed dot
+  products, the negating and reversing forms, pointers stepped forwards,
+  backwards and by QR0, a count from MRW, CoADD, CoSUB2, CoMAX, CoMOV,
+  CoSTORE, a repeated shift, and CoMACM moving a delay line along while it
+  sums the taps - each computed twice and required to agree.  Getting the
+  su/us operand order backwards, dropping CoMACM's write, or reading MRW as
+  the count rather than one less than it all fail it.
+
+  Two things that program has to do that are worth knowing before writing any
+  of this by hand.  R0 is the ABI stack pointer, so "coload r0, r0" loads that
+  rather than clearing the accumulator, which is the obvious way to write it
+  and wrong.  And each sequence has to be one asm statement with the pointers
+  as read-write operands: the accumulator is a machine resource the compiler
+  does not model, so two statements expecting it to survive between them stay
+  adjacent at -O0 and do not at -O2.
+
+  Writing macrepeat.c is also what said the constraint set was too thin.  Its
+  sequences put a pointer in IDX0 by writing "mov idx0, %2" inside the asm
+  string, which works and says nothing: the compiler does not know the
+  register was written, so it cannot know it was read back either, and the
+  value the instruction leaves there - the pointer stepped past the last
+  element - has to be thrown away.  The unit's registers are names clang knows
+  now, so a value can be pinned to one with register ... __asm__("idx0") and
+  the compiler makes the moves.  Which of the two pointers an instruction uses
+  is in its encoding rather than in an operand, so naming the register is the
+  only thing that makes sense here; there is nothing for a register class
+  constraint to choose between.
+
+  A special function register is a memory location with a name, so the copy
+  the code generator makes for one is the absolute addressed MOV rather than a
+  register to register move - the same instruction with the same address in it
+  that the assembler emits for "mov r2, idx0", which is why the two agree by
+  construction.  Nothing selects a copy like this, and copyPhysReg aborted the
+  compiler on one until the names were published and made it reachable.  Two
+  cases it still cannot do it says so about, rather than writing an address
+  that means something else: MAS, which has no address at all because CoSTORE
+  names it by a five bit code, and a register the selected part does not have.
+  A byte value is the third: a byte write to a word wide special function
+  register writes the whole word with 00H in the half that was not addressed,
+  which is not what register unsigned char x __asm__("mal") asks for, so that
+  is refused rather than quietly losing MAL's high half.  All three are still
+  fine in a clobber list, which asks for no move.
+
+  The other half is the "q" constraint, which is R0 to R3: the pointer field
+  of an indirect form is two bits wide, so "add Rwn, [Rwm]" cannot name a
+  higher register, and asking for one with "r" assembles only by luck.  Two
+  things the roadmap wanted here turned out not to be needed and not to be
+  possible: a byte register is already what "r" gives a byte sized value, and
+  there is no register pair class to constrain to, because nothing in this
+  backend has one.
+
+  differential/macasm.c is the whole of it run in the simulator and checked
+  against the host: both pointers, an offset register set by name, and the
+  accumulator read back out of MAL and MAH.
 
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
@@ -812,13 +954,14 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
-* Two SFR maps are modelled and the subtarget picks between them, because the
-  same short address names different registers on different derivatives.  What
-  the two agree about - 91 names at the same short address, which is the
+* Three SFR maps are modelled and the subtarget picks between them, because
+  the same short address names different registers on different derivatives.
+  What they all agree about - 97 names at the same short address, which is the
   classic C166 layout of timers, A/D converter, serial channels, peripheral
   event controller, interrupt control registers and ports 1, 3 and 5 on top of
-  the CPU core - is always available.  What they do not is FeatureSFRXC164 and
-  FeatureSFRC167, which -mcpu=xc16x and -mcpu=c167 select.
+  the CPU core - is always available.  What they do not is FeatureSFRXC164,
+  FeatureSFRC167 and FeatureSFRST10, which -mcpu=xc16x, -mcpu=c167 and
+  -mcpu=st10 select.
 
   They disagree about exactly seven short addresses, and the disagreement is
   the external bus: the XC164CM has none, so it put CPUCON1, CPUCON2, SPSEG,
@@ -840,23 +983,62 @@ Known limitations / things to do
   Manual V1.0 of 1999-05.  The check that both were read correctly is that the
   91 names the two maps share agree on the short address of every single one.
 
-  Two things this does not do.  -mcpu=st10 gets the shared set alone: an ST10
-  is a C167 derivative and very likely has its map, but very likely is not the
-  standard the rest of this is held to, so it waits for an ST10 user manual.
-  The ST10 Family Programming Manual is not that book - it gives the
-  instruction set, which is where it settled a different question: the ST10's
-  MAC is this MAC, sharing every function code, so there is one mac feature
-  rather than one per derivative.  And the extended and X-peripheral registers are the XC164CM's
-  entire, gated with the rest of its map rather than split into a shared part
-  and a per-derivative one, because there is no second ESFR map here to split
-  them against.
+  The ST10 map is the ST10F269's, from its datasheet's Table 31, and it is
+  where the guess this paragraph used to record got settled.  An ST10 is a
+  C167 derivative and it does have the C167's map: all 163 of the registers
+  Table 31 gives a short address to are names this tree already had at the
+  same short address, 97 of them shared and 66 the C167CS's, with no
+  disagreement anywhere.  So -mcpu=st10 selects that map rather than a third
+  copy of it, less the two registers the C167CS has and this part does not -
+  P1DIDIS at 52H and FOCON at D5H, neither of which is in Table 31 and neither
+  of whose short addresses is used for anything else there.
+
+  FOCON had been in the always-available set, which is documented as what
+  every map here agrees about; that was true of two maps and a third that
+  lacks it made it false, so FOCON now sits in the two maps that have it.  A
+  shared set is only worth having while it is honestly shared.
+
+  The extended registers are a different set on each part rather than the
+  XC164CM's entire, which is what they were while there was only one of them.
+  The ST10F269's are the classic C166 extended space - the PWM module, CAPCOM
+  timers 7 and 8, the port output and open-drain controls, and the interrupt
+  control registers for CAPCOM 16 to 31 - where the XC164CM's are its real-
+  time clock, chip identification and alternate-select registers.  Twelve
+  names are on both parts at the same address and belong to neither map;
+  three are the same hardware under two spellings and so name different
+  registers at one address (50H ADDAT2 or ADC_DAT2, EDH EXISEL or EXISEL0,
+  CFH XP3IC or PLL_IC), which is why the printer had to start asking the
+  subtarget before naming one.  It did not have to while one map could not be
+  mistaken for another.
+
+  Reading that table also settled something the XC164CM's manual could not.
+  That manual gives CC2_T7IC as F17AH/BEH and CC2_T8IC as F17CH/BFH, and each
+  pair disagrees with itself - BEH is F17CH and BFH is F17EH - so both were
+  left out of its map for want of anything to say which half was the typo.
+  The ST10F269 datasheet prints the identical contradiction, which says the
+  pairing was copied from a document both manuals descend from rather than
+  mistyped twice; and here it is resolvable, because this part has PWMIC at
+  F17EH/BFH, a row that agrees with itself.  BFH is therefore taken, T8IC
+  cannot have it, BDH is claimed by nothing, and F176H to F17EH is an unbroken
+  run for BBH to BFH.  The physical column is right and the two short
+  addresses are each one slot too high.  That settles it for this part only:
+  the XC164CM has no PWM module and so no PWMIC to collide with, which leaves
+  BFH free there and its manual still without a tiebreaker, so CC2_T7IC and
+  CC2_T8IC stay out on the evidence they were left out on.
+
+  The ST10 Family Programming Manual is not the book for any of this - it
+  gives the instruction set, which is where it settled a different question:
+  the ST10's MAC is this MAC, sharing every function code, so there is one mac
+  feature rather than one per derivative.
 * An extended special function register is reachable by address but not
   through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
   Getting at one that way needs an EXTR, and once encoded it is the same bytes
   as the register with the same short address in the ordinary space, so there
-  would be nothing for a disassembly to go on.  Three of them are missing
-  because the manual contradicts itself about where they are; the register file
-  names which.
+  would be nothing for a disassembly to go on.  Three of the XC164CM's are
+  still missing because its manual contradicts itself about where they are and
+  nothing in it breaks the tie; the register file names which.  Two of the
+  three are the pair the ST10F269 datasheet resolves for its own map and not
+  for this one, which is written down there rather than acted on here.
 * The interrupt jump table cache is reachable but not used.  This part can
   hold two 24 bit pointers in FINT0ADDR/FINT0CSP and FINT1ADDR/FINT1CSP and
   branch straight to those two service routines, skipping the vector table's

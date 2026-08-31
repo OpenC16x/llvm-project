@@ -20,6 +20,7 @@
 #include "MCTargetDesc/C166MCAsmInfo.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
 #include "TargetInfo/C166TargetInfo.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -147,7 +148,18 @@ public:
   bool isImm4() const { return isImmInRange(0, 15, /*AllowSymbol=*/false); }
   // The MAC shifter's count.  Five bits are encoded and only 0 to 8 are
   // defined; see "coshift" in C166InstrInfo.td.
-  bool isCoShift() const { return isImmInRange(0, 8, /*AllowSymbol=*/false); }
+  // Any constant immediate.  The shifter's range is checked after the match
+  // instead; see matchAndEmitInstruction.  Accepting the whole of it here is
+  // what makes a count of -1 and a count of 9 get the same answer, rather
+  // than one of them falling through to another form's diagnostic.
+  bool isCoShift() const {
+    return Kind == k_Immediate && isa<MCConstantExpr>(Imm);
+  }
+  // How many times a repeatable coprocessor instruction runs.  1 is MRW and
+  // is only ever produced by the parser below, never written; 0 is the plain
+  // form and has no prefix to write it with.  See "corepeat" in
+  // C166InstrInfo.td.
+  bool isCoRepeat() const { return isImmInRange(1, 31, /*AllowSymbol=*/false); }
   bool isData8() const { return isImmInRange(-128, 255, /*AllowSymbol=*/true); }
   bool isData16() const {
     return isImmInRange(-32768, 65535, /*AllowSymbol=*/true);
@@ -383,12 +395,28 @@ class C166AsmParser : public MCTargetAsmParser {
   bool parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                         SMLoc NameLoc, OperandVector &Operands) override;
 
+  bool parseCoRepeatCount(const MCExpr *&Count, SMLoc &Loc);
+
+  /// What a repeatable coprocessor instruction gets when it is written with
+  /// no prefix, which is the plain form: a zero repeat field, the same bits
+  /// every instruction here encoded before the prefix was accepted at all.
+  std::unique_ptr<C166Operand> defaultCoRepeatOperands() {
+    SMLoc L = getLexer().getLoc();
+    return C166Operand::createImm(MCConstantExpr::create(0, getContext()), L, L);
+  }
+
   bool parseOperand(OperandVector &Operands, StringRef Mnemonic);
   bool parseExpressionWithSpecifier(const MCExpr *&Res);
   bool reportOperandError(SMLoc IDLoc, OperandVector &Operands,
                           uint64_t ErrorInfo, const Twine &Msg);
   bool parseMemory(OperandVector &Operands);
   bool parseBracketedRegister(OperandVector &Operands);
+
+  // Whether the statement being matched began with a repeat prefix, so that a
+  // failure can say the instruction is not repeatable rather than blaming the
+  // count.  Set by parseInstruction, read by matchAndEmitInstruction, which
+  // runs immediately after it for the same statement.
+  bool SawRepeatPrefix = false;
 
   // Mnemonics that had a trailing minus glued back on; see parseInstruction.
   // A list rather than a vector because the operands hold references into it.
@@ -813,23 +841,88 @@ bool C166AsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
     Lex();
   }
 
-  Operands.push_back(C166Operand::createToken(Name, NameLoc));
-
-  if (getLexer().is(AsmToken::EndOfStatement))
-    return false;
-
-  if (parseOperand(Operands, Name))
-    return true;
-
-  while (getLexer().is(AsmToken::Comma)) {
-    Lex();
-    if (parseOperand(Operands, Name))
+  // "Repeat 3 times CoMAC ..." and "Repeat MRW times CoMAC ...", the two forms
+  // PM0036 2.4.7 gives.  The prefix puts two tokens in front of the mnemonic
+  // and the matcher keys on the mnemonic being first, so it is taken apart
+  // here: the count is remembered, the real mnemonic becomes Name, and the
+  // instruction is then parsed exactly as if it stood alone.  The count goes
+  // on the end afterwards, which is where its operand is.
+  const MCExpr *Repeat = nullptr;
+  SMLoc RepeatLoc;
+  SawRepeatPrefix = false;
+  if (Name.equals_insensitive("repeat")) {
+    SawRepeatPrefix = true;
+    RepeatLoc = getLexer().getLoc();
+    if (parseCoRepeatCount(Repeat, RepeatLoc))
       return true;
+    if (getLexer().isNot(AsmToken::Identifier) ||
+        !getLexer().getTok().getIdentifier().equals_insensitive("times"))
+      return Error(getLexer().getLoc(), "expected 'times' after a repeat count");
+    Lex();
+    if (getLexer().isNot(AsmToken::Identifier))
+      return Error(getLexer().getLoc(),
+                   "expected a coprocessor instruction after 'repeat'");
+    NameLoc = getLexer().getLoc();
+    GluedMnemonics.emplace_back(getLexer().getTok().getIdentifier().str());
+    Name = GluedMnemonics.back();
+    Lex();
+    // The same trailing minus the glue above handles, now that the mnemonic
+    // has moved: "Repeat 3 times CoMAC- R3, [R7-]".
+    if (getLexer().is(AsmToken::Minus) &&
+        getLexer().getTok().getLoc().getPointer() ==
+            NameLoc.getPointer() + Name.size()) {
+      GluedMnemonics.emplace_back((Name + "-").str());
+      Name = GluedMnemonics.back();
+      Lex();
+    }
   }
 
-  if (getLexer().isNot(AsmToken::EndOfStatement))
-    return Error(getLexer().getLoc(), "unexpected token in operand list");
+  Operands.push_back(C166Operand::createToken(Name, NameLoc));
 
+  if (getLexer().isNot(AsmToken::EndOfStatement)) {
+    if (parseOperand(Operands, Name))
+      return true;
+
+    while (getLexer().is(AsmToken::Comma)) {
+      Lex();
+      if (parseOperand(Operands, Name))
+        return true;
+    }
+
+    if (getLexer().isNot(AsmToken::EndOfStatement))
+      return Error(getLexer().getLoc(), "unexpected token in operand list");
+  }
+
+  if (Repeat)
+    Operands.push_back(
+        C166Operand::createImm(Repeat, RepeatLoc, getLexer().getLoc()));
+
+  return false;
+}
+
+/// The count in "Repeat <count> times", which is either MRW or a literal.
+///
+/// MRW encodes as 1 and a literal encodes as itself, so 0 and 1 are both
+/// refused: 0 is the plain form, which is written by leaving the prefix off,
+/// and 1 would mean MRW rather than once.  Refusing them is what keeps the
+/// one thing PM0036 does not state outright - how a literal maps onto the
+/// field - from being guessed at in either direction.
+bool C166AsmParser::parseCoRepeatCount(const MCExpr *&Count, SMLoc &Loc) {
+  Loc = getLexer().getLoc();
+  if (getLexer().is(AsmToken::Identifier) &&
+      getLexer().getTok().getIdentifier().equals_insensitive("mrw")) {
+    Lex();
+    Count = MCConstantExpr::create(1, getContext());
+    return false;
+  }
+
+  int64_t Value;
+  if (getParser().parseAbsoluteExpression(Value))
+    return true;
+  if (Value < 2 || Value > 31)
+    return Error(Loc, "repeat count must be in the range [2, 31], or MRW; "
+                      "a count of 1 is the instruction without the prefix");
+  Count = MCConstantExpr::create(Value, getContext());
   return false;
 }
 
@@ -884,12 +977,32 @@ bool C166AsmParser::matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
 
   switch (Result) {
   case Match_Success:
+    // The shifter authorizes only 8 bit shifts and the count field is five
+    // bits wide, so the range is the shifter's rather than the field's:
+    // PM0036 2.4.8, "shift values must be between 0-8 (inclusive)".  Checked
+    // here rather than by the operand class so that the diagnostic names the
+    // count, which is what was written; see CoShiftAsmOperand.
+    if (Inst.getNumOperands() &&
+        (this->MII.get(Inst.getOpcode()).TSFlags & 2)) {
+      const MCOperand &S = Inst.getOperand(0);
+      if (S.isImm() && (S.getImm() < 0 || S.getImm() > 8))
+        return Error(IDLoc, "shift count must be in the range [0, 8]");
+    }
     Inst.setLoc(IDLoc);
     Out.emitInstruction(Inst, getSTI());
     return false;
   case Match_MnemonicFail:
     return Error(IDLoc, "invalid instruction mnemonic");
   case Match_InvalidOperand:
+    // A repeat prefix on a form the manual does not mark repeatable fails
+    // here, because the count has nowhere to go: only the eighty nine
+    // repeatable forms carry that operand.  Saying which it was beats the
+    // operand diagnostic, which would point at the count and call it invalid
+    // when the count is the one thing that was fine.
+    if (SawRepeatPrefix && ErrorInfo + 1 == Operands.size())
+      return Error(IDLoc,
+                   "this instruction cannot be repeated; the manual's Rep "
+                   "column marks it no, and it has no repeat field");
     return reportOperandError(IDLoc, Operands, ErrorInfo,
                               "invalid operand for instruction");
   case Match_MissingFeature:

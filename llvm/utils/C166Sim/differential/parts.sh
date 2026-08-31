@@ -35,9 +35,12 @@ ${CC:-cc} -O2 -w -o "$TMP/host" "$SRC"
 # The parts come from the table itself rather than from the driver's error
 # message, so that this does not quietly test nothing if that wording changes.
 DEF=$(cd "$HERE/../../../include/llvm/TargetParser" && pwd)/C166TargetParser.def
-PARTS=$(sed -n 's/^C166_PART("\([^"]*\)".*/\1/p' "$DEF")
-CORES=$(sed -n 's/^C166_PART("[^"]*", *"\([^"]*\)".*/\1/p' "$DEF")
+# Both spellings of a row: C166_PART_AT is the one that names an address, and
+# a part table read for only one of them would quietly stop covering the other.
+PARTS=$(sed -n 's/^C166_PART\(_AT\)\{0,1\}("\([^"]*\)".*/\2/p' "$DEF")
+CORES=$(sed -n 's/^C166_PART\(_AT\)\{0,1\}("[^"]*", *"\([^"]*\)".*/\2/p' "$DEF")
 C167_SCRIPT=$(dirname "$SCRIPT")/c167.ld
+ST10_SCRIPT=$(dirname "$SCRIPT")/st10.ld
 if [ -z "$PARTS" ]; then
   echo "FAIL no parts found in $DEF"
   exit 1
@@ -49,6 +52,7 @@ for PART in $PARTS; do
   CORE=$(echo "$CORES" | sed -n "${INDEX}p")
   PART_SCRIPT=$SCRIPT
   [ "$CORE" = c167 ] && PART_SCRIPT=$C167_SCRIPT
+  [ "$CORE" = st10 ] && PART_SCRIPT=$ST10_SCRIPT
 
   if ! "$BIN/clang" -target c166 -mmcu="$PART" -Os --sysroot="$SYSROOT" \
       -T "$PART_SCRIPT" "$SRC" -o "$TMP/$PART.elf" 2> "$TMP/$PART.build"; then

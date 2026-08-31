@@ -51,6 +51,21 @@ class C166Inst<dag outs, dag ins, int size, string asmstr, list<dag> pattern>
   let AsmString = asmstr;
   let Pattern = pattern;
   let Size = size;
+
+  // Whether the last operand is a coprocessor repeat count.  It cannot be
+  // told from the operand alone - an immediate in the last position is
+  // ordinary elsewhere - and the printer has to know, because the count is
+  // written in front of the mnemonic rather than where its operand sits.
+  bit IsCoRepeat = 0;
+  let TSFlags{0} = IsCoRepeat;
+
+  // Whether the first operand is the coprocessor shifter's immediate count.
+  // Its range is checked after the match rather than by its operand class,
+  // because three forms of every shift share a mnemonic and the matcher
+  // reports whichever candidate it tried last - so a count out of range was
+  // being blamed on the pointer form, which is not what was written.
+  bit IsCoShiftImm = 0;
+  let TSFlags{1} = IsCoShiftImm;
 }
 
 // Two byte instruction: register/register, register/#data4, register

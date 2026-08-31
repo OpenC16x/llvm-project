@@ -53,11 +53,16 @@
 ;; authorizes only 8-bit left/right shifts.  Shift values must be between 0-8
 ;; (inclusive)".  Eight is the largest that means anything, so it is the one
 ;; written here; see coshift-range.s for the other side of it.
+;; The count is in the top five bits of the last byte, which is where PM0036's
+;; Format line puts it: "A3 00 82 ssss:s000".  Those are the repeat field's
+;; five bits, and that is the manual's own reason for marking these four the
+;; shift instructions' only forms it does not mark repeatable - the count is
+;; already living there.  #8 is 01000 in that field, so the byte is 40h.
 ; CHECK: coshl r4         ; encoding: [0xa3,0x44,0x8a,0x00]
         coshl   r4
-; CHECK: coshl #8         ; encoding: [0xa3,0x00,0x82,0x08]
+; CHECK: coshl #8         ; encoding: [0xa3,0x00,0x82,0x40]
         coshl   #8
-; CHECK: coashr #7, rnd   ; encoding: [0xa3,0x00,0xb2,0x07]
+; CHECK: coashr #7, rnd   ; encoding: [0xa3,0x00,0xb2,0x38]
         coashr  #7, rnd
 
 ;; Some have no operands at all.

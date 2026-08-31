@@ -404,7 +404,10 @@ def MAS      : C166Reg<0x00, "mas">;
 // FE58H/2CH, CC2_T7IC as F17AH/BEH and CC2_T8IC as F17CH/BFH, and in each case
 // the address and the short address name different words - 2CH is F058H in
 // this space, BEH is F17CH and BFH is F17EH - with nothing else nearby to say
-// which half is the typo.
+// which half is the typo.  The ST10F269 datasheet prints the identical
+// contradiction for its own T7IC and T8IC and does supply the missing
+// neighbour, so it is resolvable there and is resolved; see ESFRST10 below
+// for why that settles nothing here.
 
 def QX0         : C166Reg<0x00, "qx0">; // F000H
 def QX1         : C166Reg<0x01, "qx1">; // F002H
@@ -443,6 +446,104 @@ def SYSCON3     : C166Reg<0xEA, "syscon3">; // F1D4H
 def EXISEL1     : C166Reg<0xEC, "exisel1">; // F1D8H
 def EXISEL0     : C166Reg<0xED, "exisel0">; // F1DAH
 def SYSCON1     : C166Reg<0xEE, "syscon1">; // F1DCH
+
+// The ST10F269's extended registers, from its datasheet's Table 31.  It is a
+// C167 derivative, so what is here is the classic C166 extended space - the
+// PWM module, CAPCOM timers 7 and 8, the port output and open drain controls,
+// the second A/D result register and the interrupt control registers for
+// CAPCOM 16 to 31 - rather than the XC164CM's real-time clock, chip
+// identification and alternate select registers.
+//
+// Twelve names above are this part's too, at the same short addresses, so
+// they are reused rather than defined again: QX0, QX1, QR0 and QR1 (the MAC
+// unit's, which is why they are not either part's), DP1L, DP1H, EXICON,
+// ODP3 and the four identification registers.
+//
+// Three short addresses name different registers on the two parts, which is
+// the whole reason this map is chosen rather than assumed - though in each
+// case the two names describe the same hardware, so the difference is one of
+// spelling:
+//
+//   50H  ADDAT2, not ADC_DAT2      EDH  EXISEL, not EXISEL0
+//   CFH  XP3IC,  not PLL_IC
+//
+// T7IC and T8IC settle something the XC164CM comment above could not.  This
+// datasheet reproduces the identical contradiction - T7IC at F17AH/BEH and
+// T8IC at F17CH/BFH, where BEH is F17CH and BFH is F17EH - which says the
+// pairing was copied from a document both manuals descend from rather than
+// mistyped twice.  Here it is resolvable: this part has PWMIC, whose own row
+// is F17EH/BFH and is self-consistent, so BFH is taken and T8IC cannot have
+// it; BDH is claimed by nothing; and F176H to F17EH is an unbroken run for
+// BBH to BFH.  The physical column is right and the two short addresses are
+// each one slot too high, so T7IC is BDH and T8IC is BEH.
+//
+// That resolves it for this part only.  The XC164CM has no PWM module and so
+// no PWMIC to collide with, which leaves BFH free there and its own manual
+// still without a tiebreaker - so CC2_T7IC and CC2_T8IC stay out of the map
+// above, on the same evidence they were left out on.
+
+def XPERCON    : C166Reg<0x12, "xpercon">; // F024H  XPER Configuration Register
+def PT0        : C166Reg<0x18, "pt0">; // F030H  PWM Module Up/Down Counter 0
+def PT1        : C166Reg<0x19, "pt1">; // F032H  PWM Module Up/Down Counter 1
+def PT2        : C166Reg<0x1A, "pt2">; // F034H  PWM Module Up/Down Counter 2
+def PT3        : C166Reg<0x1B, "pt3">; // F036H  PWM Module Up/Down Counter 3
+def PP0        : C166Reg<0x1C, "pp0">; // F038H  PWM Module Period Register 0
+def PP1        : C166Reg<0x1D, "pp1">; // F03AH  PWM Module Period Register 1
+def PP2        : C166Reg<0x1E, "pp2">; // F03CH  PWM Module Period Register 2
+def PP3        : C166Reg<0x1F, "pp3">; // F03EH  PWM Module Period Register 3
+def T7         : C166Reg<0x28, "t7">; // F050H  CAPCOM Timer 7 Register
+def T8         : C166Reg<0x29, "t8">; // F052H  CAPCOM Timer 8 Register
+def T7REL      : C166Reg<0x2A, "t7rel">; // F054H  CAPCOM Timer 7 Reload Register
+def T8REL      : C166Reg<0x2B, "t8rel">; // F056H  CAPCOM Timer 8 Reload Register
+def POCON0L    : C166Reg<0x40, "pocon0l">; // F080H  PORT0 Low Output Control Register (8-bit)
+def POCON0H    : C166Reg<0x41, "pocon0h">; // F082H  PORT0 High Output Control Register (8-bit)
+def POCON1L    : C166Reg<0x42, "pocon1l">; // F084H  PORT1 Low Output Control Register (8-bit)
+def POCON1H    : C166Reg<0x43, "pocon1h">; // F086H  PORT1 High Output Control Register (8-bit)
+def POCON2     : C166Reg<0x44, "pocon2">; // F088H  Port2 Output Control Register
+def POCON3     : C166Reg<0x45, "pocon3">; // F08AH  Port3 Output Control Register
+def POCON4     : C166Reg<0x46, "pocon4">; // F08CH  Port4 Output Control Register (8-bit)
+def POCON6     : C166Reg<0x47, "pocon6">; // F08EH  Port6 Output Control Register (8-bit)
+def POCON7     : C166Reg<0x48, "pocon7">; // F090H  Port7 Output Control Register (8-bit)
+def POCON8     : C166Reg<0x49, "pocon8">; // F092H  Port8 Output Control Register (8-bit)
+def ADDAT2     : C166Reg<0x50, "addat2">; // F0A0H  A/D Converter 2 Result Register
+def POCON20    : C166Reg<0x55, "pocon20">; // F0AAH  ALE, RD , WR Output Control Register (8-bit)
+def SSCTB      : C166Reg<0x58, "ssctb">; // F0B0H  SSC Transmit Buffer (write only)
+def SSCRB      : C166Reg<0x59, "sscrb">; // F0B2H  SSC Receive Buffer (read only)
+def SSCBR      : C166Reg<0x5A, "sscbr">; // F0B4H  SSC Baud Rate Register
+def DP0L       : C166Reg<0x80, "dp0l">; // F100H  P0L Direction Control Register
+def DP0H       : C166Reg<0x81, "dp0h">; // F102H  P0h Direction Control Register
+def RP0H       : C166Reg<0x84, "rp0h">; // F108H  System Start-up Configuration Register (read only)
+def CC16IC     : C166Reg<0xB0, "cc16ic">; // F160H  CAPCOM Register 16 Interrupt Control Register
+def CC17IC     : C166Reg<0xB1, "cc17ic">; // F162H  CAPCOM Register 17 Interrupt Control Register
+def CC18IC     : C166Reg<0xB2, "cc18ic">; // F164H  CAPCOM Register 18 Interrupt Control Register
+def CC19IC     : C166Reg<0xB3, "cc19ic">; // F166H  CAPCOM Register 19 Interrupt Control Register
+def CC20IC     : C166Reg<0xB4, "cc20ic">; // F168H  CAPCOM Register 20 Interrupt Control Register
+def CC21IC     : C166Reg<0xB5, "cc21ic">; // F16AH  CAPCOM Register 21 Interrupt Control Register
+def CC22IC     : C166Reg<0xB6, "cc22ic">; // F16CH  CAPCOM Register 22 Interrupt Control Register
+def CC23IC     : C166Reg<0xB7, "cc23ic">; // F16EH  CAPCOM Register 23 Interrupt Control Register
+def CC24IC     : C166Reg<0xB8, "cc24ic">; // F170H  CAPCOM Register 24 Interrupt Control Register
+def CC25IC     : C166Reg<0xB9, "cc25ic">; // F172H  CAPCOM Register 25 Interrupt Control Register
+def CC26IC     : C166Reg<0xBA, "cc26ic">; // F174H  CAPCOM Register 26 Interrupt Control Register
+def CC27IC     : C166Reg<0xBB, "cc27ic">; // F176H  CAPCOM Register 27 Interrupt Control Register
+def CC28IC     : C166Reg<0xBC, "cc28ic">; // F178H  CAPCOM Register 28 Interrupt Control Register
+def T7IC       : C166Reg<0xBD, "t7ic">; // F17AH  CAPCOM Timer 7 Interrupt Control Register
+def T8IC       : C166Reg<0xBE, "t8ic">; // F17CH  CAPCOM Timer 8 Interrupt Control Register
+def PWMIC      : C166Reg<0xBF, "pwmic">; // F17EH  PWM Module Interrupt Control Register
+def CC29IC     : C166Reg<0xC2, "cc29ic">; // F184H  CAPCOM Register 29 Interrupt Control Register
+def XP0IC      : C166Reg<0xC3, "xp0ic">; // F186H  CAN1 Module Interrupt Control Register
+def CC30IC     : C166Reg<0xC6, "cc30ic">; // F18CH  CAPCOM Register 30 Interrupt Control Register
+def XP1IC      : C166Reg<0xC7, "xp1ic">; // F18EH  CAN2 Module Interrupt Control Register
+def CC31IC     : C166Reg<0xCA, "cc31ic">; // F194H  CAPCOM Register 31 Interrupt Control Register
+def XP2IC      : C166Reg<0xCB, "xp2ic">; // F196H  Flash ready/busy interrupt control register
+def S0TBIC     : C166Reg<0xCE, "s0tbic">; // F19CH  Serial Channel 0 Transmit Buffer Interrupt Control Register
+def XP3IC      : C166Reg<0xCF, "xp3ic">; // F19EH  PLL unlock Interrupt Control Register
+def ODP2       : C166Reg<0xE1, "odp2">; // F1C2H  Port 2 Open Drain Control Register
+def PICON      : C166Reg<0xE2, "picon">; // F1C4H  Port Input Threshold Control Register
+def ODP4       : C166Reg<0xE5, "odp4">; // F1CAH  Port 4 Open Drain Control Register
+def ODP6       : C166Reg<0xE7, "odp6">; // F1CEH  Port 6 Open Drain Control Register
+def ODP7       : C166Reg<0xE9, "odp7">; // F1D2H  Port 7 Open Drain Control Register
+def ODP8       : C166Reg<0xEB, "odp8">; // F1D6H  Port 8 Open Drain Control Register
+def EXISEL     : C166Reg<0xED, "exisel">; // F1DAH  External Interrupt Source Selection Register
 
 //===----------------------------------------------------------------------===//
 // Registers with no short address
@@ -546,7 +647,7 @@ def SFRCommon : RegisterClass<"C166", [i16], 16,
       SSCCON, PECC0, PECC1, PECC2, PECC3, PECC4, PECC5, PECC6, PECC7, T2IC,
       T3IC, T4IC, T5IC, T6IC, CRIC, S0TIC, S0RIC, S0EIC, SSCTIC, SSCRIC,
       SSCEIC, CC8IC, CC9IC, CC10IC, CC11IC, CC12IC, CC13IC, ADCIC, ADEIC,
-      P1L, P1H, P3, DP3, P5, P5DIDIS, FOCON, IDX0, IDX1, MAL, MAH, MRW,
+      P1L, P1H, P3, DP3, P5, P5DIDIS, IDX0, IDX1, MAL, MAH, MRW,
       MCW, MSW
   )> {
   let isAllocatable = 0;
@@ -556,7 +657,7 @@ def SFRCommon : RegisterClass<"C166", [i16], 16,
 // The XC164CM's, selected by FeatureSFRXC164.
 def SFRXC164 : RegisterClass<"C166", [i16], 16,
   (add
-      CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9
+      CPUCON1, CPUCON2, SPSEG, VECSEG, P9, DP9, ODP9, FOCON
   )> {
   let isAllocatable = 0;
   let CopyCost = -1;
@@ -571,8 +672,28 @@ def SFRC167 : RegisterClass<"C166", [i16], 16,
       SYSCON, BUSCON1, BUSCON2, BUSCON3, BUSCON4, PWMCON0, PWMCON1, T01CON,
       CCM0, CCM1, CCM2, CCM3, CC0IC, CC1IC, CC2IC, CC3IC, CC4IC, CC5IC,
       CC6IC, CC7IC, CC14IC, CC15IC, T0IC, T1IC, P2, DP2, P4, DP4, P6, DP6,
-      P7, DP7, P8, DP8
+      P7, DP7, P8, DP8, FOCON
   )> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The ST10F269's, selected by FeatureSFRST10.  Every one of the 163 names its
+// datasheet gives a short address to is a name the two classes above between
+// them also have, at the same short address - which is what says both were
+// read correctly, and is why this is the C167's map rather than a third copy
+// of it.  Like its two siblings this is what to add to the shared set, not
+// the whole map: naming SFRCommon here would make every register every part
+// has depend on a feature only one part sets.
+//
+// Two names are the exception and the reason for the subtraction, and in both
+// cases the C167CS has the register and the ST10F269 has nothing at that
+// short address at all: P1DIDIS at 52H and FOCON at D5H.  FOCON also had to
+// come out of SFRCommon, which claims to be what every map here agrees about
+// - true of two maps and made false by a third that lacks it - so it now sits
+// in the two maps that do have it.
+def SFRST10 : RegisterClass<"C166", [i16], 16,
+  (add (sub SFRC167, P1DIDIS, FOCON))> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }
@@ -616,6 +737,23 @@ def ESFR : RegisterClass<"C166", [i16], 16,
       ALTSEL0P1H, ALTSEL0P3, ALTSEL0P1L, ALTSEL0P9, ALTSEL1P9, EOPIC,
       PLL_IC, RTC_IC, EXICON, ODP3, PLLCON, SYSCON3, EXISEL1, EXISEL0,
       SYSCON1)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
+// The ST10F269's, which are a different set at overlapping addresses - see
+// the definitions for the three that collide and for what T7IC and T8IC
+// settle.  Reached by address only, for the same reason as the class above.
+def ESFRST10 : RegisterClass<"C166", [i16], 16,
+  (add
+      QX0, QX1, QR0, QR1, XPERCON, PT0, PT1, PT2, PT3, PP0, PP1, PP2, PP3,
+      T7, T8, T7REL, T8REL, IDPROG, IDMEM, IDCHIP, IDMANUF, POCON0L,
+      POCON0H, POCON1L, POCON1H, POCON2, POCON3, POCON4, POCON6, POCON7,
+      POCON8, ADDAT2, POCON20, SSCTB, SSCRB, SSCBR, DP0L, DP0H, DP1L,
+      DP1H, RP0H, CC16IC, CC17IC, CC18IC, CC19IC, CC20IC, CC21IC, CC22IC,
+      CC23IC, CC24IC, CC25IC, CC26IC, CC27IC, CC28IC, T7IC, T8IC, PWMIC,
+      CC29IC, XP0IC, CC30IC, XP1IC, CC31IC, XP2IC, S0TBIC, XP3IC, EXICON,
+      ODP2, PICON, ODP3, ODP4, ODP6, ODP7, ODP8, EXISEL)> {
   let isAllocatable = 0;
   let CopyCost = -1;
 }

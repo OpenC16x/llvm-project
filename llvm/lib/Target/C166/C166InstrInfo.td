@@ -217,10 +217,25 @@ def CoIdxAsmOperand : AsmOperandClass {
   let DiagnosticString = "expected [idx0] or [idx1], with an optional step";
 }
 
+// Any immediate: the range is checked after the match instead, because three
+// forms of every shift share a mnemonic - #data5, Rwn and [Rwm] - and a count
+// this class rejected was reported as whichever of the other two the matcher
+// happened to try last.  See IsCoShiftImm in C166InstrFormats.td.
 def CoShiftAsmOperand : AsmOperandClass {
   let Name = "CoShift";
   let RenderMethod = "addImmOperands";
-  let DiagnosticString = "expected a shift count in the range [0, 8]";
+  let DiagnosticString = "expected an immediate shift count";
+}
+
+// Optional, because the overwhelming majority of these instructions are
+// written without a prefix and that is the same encoding with the field at
+// zero.  Leaving it out is what the matcher then fills in.
+def CoRepeatAsmOperand : AsmOperandClass {
+  let Name = "CoRepeat";
+  let RenderMethod = "addImmOperands";
+  let IsOptional = 1;
+  let DefaultMethod = "defaultCoRepeatOperands";
+  let DiagnosticString = "expected a repeat count in the range [2, 31], or MRW";
 }
 
 def Trap7AsmOperand : AsmOperandClass {
@@ -494,6 +509,26 @@ def coreg : RegisterOperand<CoREG> {
 // low five bits of a register, and what is in the register is not known here.
 def coshift : Operand<i8> {
   let ParserMatchClass = CoShiftAsmOperand;
+}
+
+// How many times a repeatable coprocessor instruction runs, which is the five
+// bit field at the top of the last byte - the same five bits an immediate
+// shift uses, which is why a form taking one of those is never repeatable.
+//
+// The manual (PM0036 2.4.7) gives three facts about the field and no table:
+// it is five bits, MRW sets it to 1, and a literal count "must be less than
+// 32".  Those three leave one reading.  Zero is the plain form, which is what
+// every non-repeatable form encodes and what this backend has always emitted.
+// One is MRW.  So a literal count is the field itself, 2 to 31 - a count of
+// one is not expressible and does not need to be, being the plain form, and
+// the parser refuses 0 and 1 rather than encoding a guess for either.
+//
+// MRW's own count is (MRW[12:0] + 1), which the manual does say, so up to 8192
+// repetitions go through the register and up to 31 through the field.
+def corepeat : Operand<i8> {
+  let ParserMatchClass = CoRepeatAsmOperand;
+  let PrintMethod = "printCoRepeatOperand";
+  let DecoderMethod = "decodeCoRepeat";
 }
 
 // A trap number.  It is written as the trap number itself; where it sits in

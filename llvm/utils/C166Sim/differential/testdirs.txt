@@ -1,4 +1,11 @@
-# The lit directories this target has tests in, one per line.
+# The lit targets this target has tests in, one per line.  A line is a
+# directory or a single test file; the clang driver tests are files because
+# the directory they live in is the whole clang driver suite.
+#
+# A test not named here is a test CI does not run, which is how the clang
+# side came to be running only its two driver tests: everything else under
+# clang and the disassembler's own directory were written and then never
+# checked again.
 #
 # There are two readers and they must not drift apart: the workflow runs lit
 # over these, and checktools.sh reads the RUN lines in them to work out which
@@ -7,6 +14,13 @@
 # was not looking at the directory the test was in.
 llvm/test/CodeGen/C166
 llvm/test/MC/C166
+llvm/test/MC/Disassembler/C166
 llvm/test/DebugInfo/C166
 llvm/test/tools/c166-sim
 llvm/test/Analysis/CostModel/C166
+clang/test/CodeGen/C166
+clang/test/Driver/c166-mmcu.c
+clang/test/Driver/c166-toolchain.c
+clang/test/Preprocessor/init-c166.c
+clang/test/Sema/attr-c166-interrupt.c
+clang/test/Sema/inline-asm-c166.c

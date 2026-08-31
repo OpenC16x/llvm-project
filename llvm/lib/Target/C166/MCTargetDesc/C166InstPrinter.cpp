@@ -31,8 +31,45 @@ void C166InstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                 StringRef Annot, const MCSubtargetInfo &STI,
                                 raw_ostream &O) {
   this->STI = &STI;
+  // A repeated coprocessor instruction is written with its count in front of
+  // the mnemonic, which no asm string can express - so the operand prints as
+  // nothing where it sits and the prefix goes on here.  Zero is the plain
+  // form and prints nothing at all, which is how the great majority of these
+  // are written.
+  if (int64_t N = getCoRepeatCount(*MI)) {
+    O << "repeat ";
+    if (N == 1)
+      O << "mrw";
+    else
+      O << N;
+    O << " times";
+  }
   printInstruction(MI, Address, O);
   printAnnotation(O, Annot);
+}
+
+/// The repeat count an instruction carries, or zero when it carries none.
+///
+/// The operand is always the last one where it is there at all, which is what
+/// lets the parser append it after reading the instruction the prefix applies
+/// to.  Whether it is there is the instruction's business rather than the
+/// operand's - an ordinary instruction ending in an immediate must not be
+/// read as a repeated one - so this asks the description, which carries the
+/// bit the repeatable classes set.
+int64_t C166InstPrinter::getCoRepeatCount(const MCInst &MI) const {
+  const MCInstrDesc &Desc = MII.get(MI.getOpcode());
+  if (!(Desc.TSFlags & 1))
+    return 0;
+  unsigned N = Desc.getNumOperands();
+  if (N == 0 || N > MI.getNumOperands())
+    return 0;
+  const MCOperand &Op = MI.getOperand(N - 1);
+  return Op.isImm() ? Op.getImm() : 0;
+}
+
+void C166InstPrinter::printCoRepeatOperand(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O) {
+  // Printed by printInst, in front of the mnemonic where the manual puts it.
 }
 
 void C166InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,

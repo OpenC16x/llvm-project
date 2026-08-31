@@ -1063,6 +1063,7 @@ C166TargetLowering::getConstraintType(StringRef Constraint) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
     case 'r':
+    case 'q':
       return C_RegisterClass;
     default:
       break;
@@ -1075,10 +1076,19 @@ std::pair<unsigned, const TargetRegisterClass *>
 C166TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                                  StringRef Constraint,
                                                  MVT VT) const {
-  if (Constraint.size() == 1 && Constraint[0] == 'r') {
-    if (VT == MVT::i8)
-      return std::make_pair(0U, &C166::GR8RegClass);
-    return std::make_pair(0U, &C166::GR16RegClass);
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    case 'r':
+      if (VT == MVT::i8)
+        return std::make_pair(0U, &C166::GR8RegClass);
+      return std::make_pair(0U, &C166::GR16RegClass);
+    // R0 to R3, which is as far as the two bit pointer field of an indirect
+    // ALU form reaches.
+    case 'q':
+      return std::make_pair(0U, &C166::GR16PRegClass);
+    default:
+      break;
+    }
   }
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }
