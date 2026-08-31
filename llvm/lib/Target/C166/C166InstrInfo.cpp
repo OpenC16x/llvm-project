@@ -560,6 +560,25 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
     break;
   }
+  case C166::MINMAX32rr: {
+    // The first operand goes into the accumulator, the comparison takes the
+    // larger or smaller of it and the second, and the two words come back out.
+    // Four instructions and no branch, against the tree that comparing two
+    // words in order otherwise needs.
+    Register Lo = MI.getOperand(0).getReg();
+    Register Hi = MI.getOperand(1).getReg();
+    Register ALo = MI.getOperand(2).getReg();
+    Register AHi = MI.getOperand(3).getReg();
+    Register BLo = MI.getOperand(4).getReg();
+    Register BHi = MI.getOperand(5).getReg();
+    unsigned Kind = MI.getOperand(6).getImm();
+
+    Emit(C166::CoLOAD_rr).addReg(ALo).addReg(AHi);
+    Emit(C166::getMinMaxOpcode(Kind)).addReg(BLo).addReg(BHi);
+    Emit(C166::CoSTORE_sr).addDef(Lo).addReg(C166::MAL);
+    Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
+    break;
+  }
   case C166::UDIVREM32by16: {
     // Two divides.  The first takes the high word alone, which is what DIVU
     // does, and the second takes its remainder together with the low word,

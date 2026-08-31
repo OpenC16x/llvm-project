@@ -44,6 +44,17 @@ inline unsigned getMACOpcode(unsigned Kind) {
   llvm_unreachable("Unknown C166MAC::Kind");
 }
 
+/// The comparison a MINMAX32rr's $kind operand stands for.
+inline unsigned getMinMaxOpcode(unsigned Kind) {
+  switch (Kind) {
+  case C166MAC::Max:
+    return C166::CoMAX_rr;
+  case C166MAC::Min:
+    return C166::CoMIN_rr;
+  }
+  llvm_unreachable("Unknown C166MAC::MinMax");
+}
+
 /// The rounding multiply a MULRND32rr's $kind operand stands for.
 ///
 /// Only the two plain signs: the rounding idiom this comes from has no

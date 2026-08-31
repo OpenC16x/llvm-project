@@ -74,6 +74,12 @@ clang --target=c166 -mcpu=st10 -Xclang -target-feature -Xclang +mac ...
 
 There is no `-mmac`; that is a rough edge rather than a design.
 
+What the unit does for ordinary C, without an asm statement: `acc += a * b`
+with 16-bit operands and a 32-bit accumulator, `(a * b + 0x8000) >> 16` as one
+rounding multiply, and a 32-bit signed `min` or `max` — which is four
+straight-line instructions where the alternative is a tree of five basic
+blocks, measured at 2.4 times faster and a third of the code.
+
 ## Types
 
 A 16-bit machine, so `int` is a register and the bus is a word wide:
@@ -354,14 +360,14 @@ Enough to be worth saying plainly:
   out and is checked against the host, but a simulator is not a part.
 - **No debugger knows this architecture.** DWARF is emitted and
   `llvm-dwarfdump` reads it; nothing puts a source-level front end on it.
-- **Four of the coprocessor's instructions are selected.** The other 176
+- **Six of the coprocessor's instructions are selected.** The other 174
   assemble and disassemble but nothing generates them, and there are no
   builtins: reaching them from C means an asm statement, which the register
   names above make workable but do not make pleasant. Written by hand
   they take the repeat prefix — `repeat 3 times comac r2, [r3+]`, or
   `repeat mrw times` to take the count from the MAC repeat word — on the 89
   forms the manual marks repeatable, and the simulator runs those 89. The
-  other 87 assemble and disassemble but stop it.
+  other 85 assemble and disassemble but stop it.
 - **The ELF relocations are this backend's own invention.** LLD implements
   them and nothing else does.
 - **The extended special function registers are reachable by address but not

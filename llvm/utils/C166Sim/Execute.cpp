@@ -114,6 +114,7 @@ enum class Op {
   X(CMPD216ri4) X(CMPD216regi) X(CMPD216rega)                                    \
   X(SCXTregi) X(SCXTrega) X(CALLR) X(PCALL) X(RETP)                            \
   X(CoLOAD_rr) X(CoMAC_rr) X(CoMACu_rr) X(CoMACN_rr) X(CoMACuN_rr)               \
+  X(CoMAX_rr) X(CoMIN_rr)                                                      \
   X(CoMUL_rr) X(CoMULu_rr) X(CoMUL_rr_rnd) X(CoMULu_rr_rnd)                    \
   X(CoSTORE_sr)                                                                \
   /* The 89 forms the ST10 Family Programming Manual's Rep column marks     */\
@@ -675,6 +676,8 @@ static unsigned baseStateTime(Op O, bool Taken) {
   case Op::CoMACu_rr:
   case Op::CoMACN_rr:
   case Op::CoMACuN_rr:
+  case Op::CoMAX_rr:
+  case Op::CoMIN_rr:
   case Op::CoSTORE_sr:
     return 2;
   // The same table gives the rounding forms two cycles rather than one, so
@@ -1669,6 +1672,18 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
   case Op::CoLOAD_rr: {
     int64_t V = int64_t(int32_t((uint32_t(W(1)) << 16) | W(0)));
     M.setACC(V);
+    break;
+  }
+  case Op::CoMAX_rr:
+  case Op::CoMIN_rr: {
+    // The operand is the two registers concatenated and sign extended into 40
+    // bits, exactly as CoLOAD builds one, and the comparison is signed.  The
+    // manual says the MS bit of MCW does not affect either of these, so
+    // saturation cannot change the answer and nothing here consults it.
+    int64_t V = int64_t(int32_t((uint32_t(W(1)) << 16) | W(0)));
+    bool Take = O == Op::CoMAX_rr ? V > M.ACC : V < M.ACC;
+    if (Take)
+      M.setACC(V);
     break;
   }
   case Op::CoMUL_rr:

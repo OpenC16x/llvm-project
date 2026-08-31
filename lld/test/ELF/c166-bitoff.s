@@ -21,12 +21,14 @@
 
 ## An address in neither window is not a truncation to report as one - there is
 ## no bit instruction that reaches it at all.
-# RUN: not ld.lld -T %S/Inputs/c166-bitoff-elsewhere.ld %t.o -o /dev/null 2>&1 \
+# RUN: echo "SECTIONS { .text 0x0 : { *(.text) } .bitbss 0xC000 : { *(.bitbss) } }" > %t-away.ld
+# RUN: not ld.lld -T %t-away.ld %t.o -o /dev/null 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=AWAY
 # AWAY: bit variable first is at c000, which is not in the bit-addressable space
 
 ## And an odd one names no word either, however well placed the section is.
-# RUN: not ld.lld -T %S/Inputs/c166-bitoff-odd.ld %t.o -o /dev/null 2>&1 \
+# RUN: echo "SECTIONS { .text 0x0 : { *(.text) } .bitbss 0xFD01 : { *(.bitbss) } }" > %t-odd.ld
+# RUN: not ld.lld -T %t-odd.ld %t.o -o /dev/null 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ODD
 # ODD: bit variable first is at fd01, which is not in the bit-addressable space
 

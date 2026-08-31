@@ -108,6 +108,10 @@ def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166udivl32  : SDNode<"C166ISD::UDIVREM32BY16", SDT_C166DivL>;
 def C166mac      : SDNode<"C166ISD::MAC", SDT_C166MAC>;
+// The same shape as a multiply-accumulate - two words in, two words out, and
+// a kind saying which instruction - so it shares the type profile rather than
+// having an identical one of its own.
+def C166minmax   : SDNode<"C166ISD::MINMAX", SDT_C166MAC>;
 def C166mulrnd   : SDNode<"C166ISD::MUL_RND", SDT_C166MULRND>;
 def C166smulo    : SDNode<"C166ISD::SMULO", SDT_C166MULO>;
 def C166umulo    : SDNode<"C166ISD::UMULO", SDT_C166MULO>;
@@ -961,6 +965,23 @@ def MULRND32rr : Pseudo<(outs GR16:$hi), (ins GR16:$a, GR16:$b, i16imm:$kind),
                         "#MULRND32rr",
                         [(set GR16:$hi,
                               (C166mulrnd GR16:$a, GR16:$b, timm:$kind))]>;
+
+// A 32 bit signed minimum or maximum, which the unit does in one comparison
+// against its 40 bit accumulator.  The alternative is a branch tree: the two
+// words have to be compared in the right order and the equal case carried
+// between them, which is five basic blocks and about twenty instructions.
+//
+// The accumulator is loaded and read back the same way MAC32rr does it, and
+// for the same reason: nothing saves it across a call or an interrupt, so it
+// lives only between these four instructions.
+let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
+def MINMAX32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
+                        (ins GR16:$alo, GR16:$ahi, GR16:$blo, GR16:$bhi,
+                         i16imm:$kind),
+                        "#MINMAX32rr",
+                        [(set GR16:$lo, GR16:$hi,
+                              (C166minmax GR16:$alo, GR16:$ahi,
+                                          GR16:$blo, GR16:$bhi, timm:$kind))]>;
 
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW] in
 def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),

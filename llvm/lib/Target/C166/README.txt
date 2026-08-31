@@ -855,7 +855,7 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* Four of the MAC unit's instructions are selected and the other 176 are
+* Six of the MAC unit's instructions are selected and the other 174 are
   assembled and disassembled only.  All 180 forms are there, in
   C166InstrMAC.td, which is generated from the Format lines
   the C166S V2 manual gives each instruction rather than written out by hand -
@@ -1346,6 +1346,40 @@ One shape it does not catch: an unrolled loop whose adds have been
 reassociated no longer has a multiply feeding the accumulator, so nothing
 matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
 what the unit's CoMUL is for, and is not done.
+
+Thirty two bit minimum and maximum
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+CoMIN and CoMAX compare a forty bit operand against the accumulator and keep
+the smaller or larger, and the operand is two registers concatenated and sign
+extended - which is how CoLOAD builds one too.  So a 32 bit signed minimum or
+maximum is CoLOAD, one of these, and the two words back out: four straight
+line instructions.
+
+What they replace is worth seeing.  i32 is not a legal type here, so an
+ISD::SMAX of one goes to the type legalizer, which compares the two words in
+order and carries the equal case between them - five basic blocks and about
+twenty instructions with a branch on every path.  Custom lowering catches the
+node before that happens; ReplaceNodeResults is where, because the result type
+is the illegal one.
+
+Measured on a loop taking the running minimum and maximum of 128 values:
+7199 states without the unit and 2997 with, which is 2.4 times.  The pair of
+functions on their own is 104 bytes of code without and 36 with.
+
+Three things this does not do, all of them the instruction's rather than
+choices.  There is no unsigned pair, so umin and umax are left alone.  Sixteen
+bits are left alone too, and that is a choice but not a close one: a compare
+and a conditional move is three instructions and six bytes, where going
+through the unit would be four four-byte instructions and the operands would
+each need sign extending into a pair first.  And saturation cannot interfere
+with either: the manual says the MS bit of MCW does not affect CoMIN or CoMAX
+at all, and CoLOAD saturates only on a 32 bit overflow, which a value that
+started as 32 bits cannot cause.
+
+The accumulator does not stay, for the same reason it does not stay for a
+multiply-accumulate: nothing saves it across a call or an interrupt, so it
+lives only between the four instructions of the expansion.
 
 Rounding a fixed point product
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
