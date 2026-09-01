@@ -42,6 +42,11 @@ for SRC in "$HERE"/*.c "$HERE"/*.cpp; do
   # side is to be the reference, and it is not this part.
   EXTRA=$(sed -n 's,^/\* c166-flags: \(.*\) \*/$,\1,p' "$SRC")
 
+  # And a program that needs the simulator set up a particular way says that
+  # in a line of its own too - injecting an interrupt is the one that does.
+  # The host is again not told: it has no interrupts to inject.
+  SIMFLAGS=$(sed -n 's,^/\* c166-sim-flags: \(.*\) \*/$,\1,p' "$SRC")
+
   for OPT in $LEVELS; do
     if ! "$BIN/$TARGETCC" -target c166 $EXTRA "$OPT" --sysroot="$SYSROOT" -T "$SCRIPT" \
         "$SRC" -o "$TMP/$NAME.elf" 2> "$TMP/$NAME.build"; then
@@ -60,7 +65,7 @@ for SRC in "$HERE"/*.c "$HERE"/*.cpp; do
       STATUS=1
       continue
     fi
-    if ! "$BIN/c166-sim" "$TMP/$NAME.elf" > "$TMP/$NAME.got" 2> "$TMP/$NAME.run"; then
+    if ! "$BIN/c166-sim" $SIMFLAGS "$TMP/$NAME.elf" > "$TMP/$NAME.got" 2> "$TMP/$NAME.run"; then
       echo "FAIL $NAME $OPT (run)"
       cat "$TMP/$NAME.run"
       STATUS=1

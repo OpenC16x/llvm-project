@@ -24,10 +24,12 @@ execution reaches __c166_exit, which is where crt0.S parks a returned-from
 main(); the exit code is R2, where the ABI returns a word.  --exit-symbol
 names a different symbol.
 
-  --trace        print each instruction as it executes
-  --dump-state   print the registers when the program stops
-  --backtrace    walk the stack when the program stops
-  --max-steps    give up after this many instructions
+  --trace            print each instruction as it executes
+  --dump-state       print the registers when the program stops
+  --backtrace        walk the stack when the program stops
+  --max-steps        give up after this many instructions
+  --interrupt-at     raise an interrupt request once, at a state count
+  --interrupt-every  raise one every that many states
 
 --backtrace is the one that is a check rather than a convenience.  It walks the
 stack using the call frame information in the executable, which on this target
@@ -133,23 +135,71 @@ that they are, the condition flags, the multiply/divide unit, the system stack
 with its STKOV and STKUN bounds, the DPP window and the EXTP/EXTS overrides
 that replace it, and bit addressing.
 
-Four of the MAC unit's instructions run: CoLOAD, CoMUL, CoMAC and CoSTORE,
-which is what a multiply-accumulate needs and no more.  The accumulator is
-held as a 40 bit signed value, MAL and MAH being its low two words.  MCW
-resets to zero, so the product shift and the saturation are both off and this
-is plain signed integer multiply-accumulate; a program that wants either has
-to ask, and nothing here asks.  The other 176 forms stop the simulator by
-name, as any unimplemented instruction does - including the rounding variants
-of the four above, which are separate opcodes that add 00 0000 8000H and clear
-MAL, and would otherwise be a quiet wrong answer rather than a loud one.
+101 of the MAC unit's 180 forms run: the 89 the manual marks repeatable,
+which the repeat prefix runs as many times as its count says, and twelve
+register forms on top of them - CoLOAD and CoSTORE, CoMUL and CoMAC with
+their unsigned and negated variants, the two rounding forms of CoMUL, and
+CoMIN and CoMAX.  The accumulator is held as a 40 bit signed value, MAL and
+MAH being its low two words.  MCW resets to zero, so the product shift and the saturation are both
+off and this is plain signed integer multiply-accumulate; a program that wants
+either has to ask, and nothing here asks.  The other 79 forms stop the
+simulator by name, as any unimplemented instruction does, rather than being a
+quiet wrong answer.
 
-Not modelled: interrupts and traps, the peripherals, and the extended
-SFR space that EXTR selects.  Of the MAC unit, MSW's flags and guard bits, the
-repeat prefix, the limiter and the shifter are not modelled either.  A peripheral register reads back what was
-written to it, which is enough to run code that configures a peripheral it
-then never waits on.  ATOMIC and EXTR are accepted and counted so that the
-length of an EXTend sequence stays right, but they lock nothing, because there
-is nothing to lock.
+Not modelled: the peripherals, and the extended SFR space that EXTR selects.
+Of the MAC unit, MSW's flags and guard bits, the limiter and the shifter are
+not modelled either.  A peripheral register reads back what was written to it,
+which is enough to run code that configures a peripheral it then never waits
+on.  EXTR is accepted and counted so that the length of an EXTend sequence
+stays right, but the SFR space it selects is not switched.
+
+Interrupts
+----------
+
+There are no peripherals, so there is nothing to raise a request on its own.
+A source is declared on the command line instead and fires on the clock:
+
+  --interrupt-at=<states>:<vector>[:<level>]
+  --interrupt-every=<states>:<vector>[:<level>]
+
+The vector is the entry in the vector table the CPU branches to, 0 to 127; the
+level is the source's priority, 1 to 15, and defaults to 15.  Either option
+may be given more than once, so a program can have several sources at
+different priorities.  Firing on a state count rather than on anything the
+program does is what makes a test of this reproducible.
+
+What the core does with the request is modelled, and that is the part worth
+having.  The request is raised when its time comes and stays raised until it
+is accepted - "if the requesting source has a lower (or equal) interrupt
+priority than the current CPU task, it remains pending" (C166S V2 Architecture
+Overview Handbook, section 7.2), so a request that arrives while interrupts
+are off is not lost.  The highest priority pending request wins arbitration,
+and is accepted when PSW.IEN is set and its level is strictly above PSW.ILVL.
+Entry saves PSW, CSP and IP on the system stack and branches to the vector
+table entry, which is exactly what TRAP does - they share the code - and then
+sets PSW.ILVL to the accepted source's level, which is what stops a handler
+being re-entered by its own level or below.  RETI puts back all three, and
+with PSW both the level and the condition flags.  An ATOMIC or an EXTend locks
+the request out for the instructions it covers, which is what ATOMIC is for.
+
+Two things are deliberately absent.  The source's own enable bit is one: it
+lives in a peripheral control register that does not exist here, and which
+register belongs to which vector is a property of the derivative rather than
+of the core, so an injected request is by definition enabled and PSW.IEN and
+the priority are what gate it.  The PEC is the other - a request here is
+always serviced by the CPU.
+
+Entering a handler costs four states, TRAP's figure for the same work, and is
+not counted as an instruction.  The real response time is longer, because of
+arbitration and the pipeline being thrown away, in the same way and for the
+same reason as the other lower bounds in the state count below.
+
+test/tools/c166-sim/interrupt.s is the check.  Its last case is the one that
+matters most: a hundred rounds of arithmetic ending in a conditional branch,
+run against four unrelated interrupt rhythms and once against none, all of
+which have to give the same answer - which they only can if the condition
+flags survive an interrupt landing between the SUB and the JMPR that reads
+them.
 
 Counting time
 -------------

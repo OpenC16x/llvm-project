@@ -177,7 +177,16 @@ The handler saves and restores every register it touches and returns with
 `RETI`. It must take no parameters and return `void`, cannot be called from
 C, and is never inlined. Putting it in the vector table is the linker
 script's business or a hand-written vector's, exactly as with the vendor
-toolchains.
+toolchains — the `.vectors` section follows the four bytes of the reset
+vector, so a `jmps #seg(handler), sof(handler)` placed there is vector 1.
+
+That the saving and restoring is right is checked rather than assumed:
+`llvm/utils/C166Sim/differential/interrupts.c` runs a computation whose every
+step depends on the last while the simulator fires a handler into it a few
+dozen times, and the answer has to match the host's, which had no interrupts
+at all. The simulator raises the requests itself — see `--interrupt-at` and
+`--interrupt-every` in `llvm/utils/C166Sim/README.txt`, since there are no
+peripherals to raise them.
 
 Both attributes are described in Clang's attribute reference alongside every
 other target's.

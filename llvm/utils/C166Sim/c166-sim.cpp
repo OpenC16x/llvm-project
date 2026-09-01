@@ -16,6 +16,7 @@
 #include "Machine.h"
 #include "GDBServer.h"
 #include "Unwind.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELFObjectFile.h"
@@ -73,6 +74,63 @@ static cl::opt<unsigned long long>
     LoadAddress("load-address", cl::init(0),
                 cl::desc("where to load a flat image (default 0)"));
 
+static cl::list<std::string> InterruptAt(
+    "interrupt-at",
+    cl::desc("raise an interrupt request once, when the program has run for "
+             "this many states.  The spec is <states>:<vector>[:<level>]: the "
+             "vector is the entry in the vector table the CPU branches to, and "
+             "the level is the source's priority, 1 to 15, defaulting to 15.  "
+             "May be given more than once."),
+    cl::value_desc("states:vector[:level]"));
+
+static cl::list<std::string> InterruptEvery(
+    "interrupt-every",
+    cl::desc("raise an interrupt request every this many states, the first "
+             "one at that many.  Same spec as --interrupt-at, and likewise "
+             "repeatable; this is the one that stands in for a timer."),
+    cl::value_desc("states:vector[:level]"));
+
+/// Parse one --interrupt-at or --interrupt-every spec.
+///
+/// Returns the error text, or an empty string when \p S came out whole.
+static std::string parseInterrupt(StringRef S, bool Periodic,
+                                  InterruptSource &Out) {
+  auto Bad = [&](const Twine &Why) {
+    return ("--interrupt-" + Twine(Periodic ? "every" : "at") + "='" + S +
+            "': " + Why)
+        .str();
+  };
+  SmallVector<StringRef, 4> Fields;
+  S.split(Fields, ':');
+  if (Fields.size() < 2 || Fields.size() > 3)
+    return Bad("expected <states>:<vector>[:<level>]");
+
+  unsigned long long At = 0, Vector = 0, Level = 15;
+  if (Fields[0].getAsInteger(0, At))
+    return Bad("'" + Fields[0] + "' is not a state count");
+  if (Fields[1].getAsInteger(0, Vector))
+    return Bad("'" + Fields[1] + "' is not a vector number");
+  if (Fields.size() == 3 && Fields[2].getAsInteger(0, Level))
+    return Bad("'" + Fields[2] + "' is not a priority level");
+
+  // The vector table has 128 entries, and a priority of zero can never win the
+  // comparison against the CPU's own level, so a source declared at it would
+  // silently never fire.
+  if (Vector > 127)
+    return Bad("the vector table has 128 entries, so the vector must be 0..127");
+  if (Level < 1 || Level > 15)
+    return Bad("the priority level must be 1..15; 0 is the level the CPU runs "
+               "at out of reset, and a request has to beat that");
+  if (Periodic && At == 0)
+    return Bad("a period of zero states would never come round");
+
+  Out.At = At;
+  Out.Period = Periodic ? At : 0;
+  Out.Vector = unsigned(Vector);
+  Out.Level = unsigned(Level);
+  return "";
+}
+
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
   LLVMInitializeC166TargetInfo();
@@ -101,6 +159,17 @@ int main(int argc, char **argv) {
   // output goes the other way rather than into the middle of a packet.
   M.ConsoleOS = GDB ? &errs() : &outs();
 
+  for (auto &&[Specs, Periodic] : {std::make_pair(&InterruptAt, false),
+                                   std::make_pair(&InterruptEvery, true)}) {
+    for (const std::string &Spec : *Specs) {
+      InterruptSource Src;
+      std::string Err = parseInterrupt(Spec, Periodic, Src);
+      if (!Err.empty())
+        return Fail(Err);
+      M.Interrupts.push_back(Src);
+    }
+  }
+
   const object::ObjectFile *BacktraceObj = nullptr;
   auto Finish = [&]() -> int {
     if (Backtrace && BacktraceObj)
@@ -115,8 +184,14 @@ int main(int argc, char **argv) {
       errs() << formatv("MDL={0:x-4} MDH={1:x-4} steps={2}\n", M.MDL, M.MDH,
                         M.Steps);
     }
-    if (Stats)
-      errs() << formatv("instructions {0}  states {1}\n", M.Steps, M.States);
+    if (Stats) {
+      errs() << formatv("instructions {0}  states {1}", M.Steps, M.States);
+      // Only when there were sources, so that a program with none reads the
+      // same as it always has.
+      if (!M.Interrupts.empty())
+        errs() << formatv("  interrupts {0}", M.InterruptsTaken);
+      errs() << "\n";
+    }
     switch (M.Stop) {
     case StopReason::Exited:
       return M.ExitCode;

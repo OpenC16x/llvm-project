@@ -723,6 +723,104 @@ static bool isConditionalBranch(Op O) {
   }
 }
 
+/// Save the interrupted state and branch to a vector table entry.
+///
+/// This is what TRAP does and what accepting an interrupt does; the core does
+/// not distinguish them, which is why the two share it.  CSP is pushed because
+/// segmentation is on, the only mode this simulator runs in, and RETI undoes
+/// all three pushes in the opposite order.
+///
+/// Where the entry is comes from two registers on this core rather than being
+/// fixed: the table is at the low end of the segment VECSEG names, and
+/// CPUCON1's VECSC field says how many words apart the entries are - 2, 4, 8
+/// or 16, so 4 bytes a vector at its reset value.  An older part had neither,
+/// and behaved as these do out of reset.  The entry is branched *to*, not read
+/// through: it is where a project puts a jump to its handler.
+static void enterVector(Machine &M, unsigned Vector) {
+  unsigned Space = 4u << ((M.CPUCON1 >> 5) & 3);
+  M.push(M.PSW);
+  M.push(M.CSP);
+  M.CSP = M.VECSEG;
+  M.push(M.IP);
+  M.IP = uint16_t(Space * (Vector & 0x7F));
+}
+
+/// What accepting an interrupt costs, in states.
+///
+/// It does exactly what TRAP does, so it is charged what TRAP is charged.  The
+/// part's real response time is longer - arbitration, and the pipeline being
+/// thrown away - but both depend on what was in flight rather than on the
+/// program, in the same way as the penalties section 7.3 leaves out.  So this
+/// is a lower bound, which is what everything else in States already is.
+static constexpr unsigned InterruptEntryStates = 4;
+
+bool Machine::serviceInterrupts() {
+  if (Interrupts.empty())
+    return false;
+
+  // Raise whatever is due.  A source that is still pending when its period
+  // comes round again does not stack up a second request: one request flag
+  // cannot hold two, and the part loses the repetition rather than
+  // remembering it.
+  for (InterruptSource &S : Interrupts) {
+    if (States < S.At)
+      continue;
+    S.Pending = true;
+    if (!S.Period) {
+      S.At = InterruptSource::Never;
+      continue;
+    }
+    do
+      S.At += S.Period;
+    while (S.At <= States);
+  }
+
+  // An ATOMIC or an EXTend covers the instructions after it, and locking
+  // interrupts out is the whole point of ATOMIC.  The request stays pending
+  // and is taken once the sequence has run out.
+  if (ExtendCount > 0 || Extend != ExtendKind::None)
+    return false;
+  if (!flag(PSW_IEN))
+    return false;
+
+  // Arbitration: the highest priority pending request wins.  A tie goes to
+  // the source declared first, which stands in for the group level and the
+  // node number the part breaks ties with - neither of which exists here,
+  // since a source here is a command line argument and not a peripheral.
+  InterruptSource *Winner = nullptr;
+  for (InterruptSource &S : Interrupts)
+    if (S.Pending && (!Winner || S.Level > Winner->Level))
+      Winner = &S;
+  if (!Winner)
+    return false;
+
+  // "On receipt of the arbitration interrupt request winner, the CPU accepts
+  // an action request if the requesting source has a higher priority than the
+  // current CPU priority level.  If the requesting source has a lower (or
+  // equal) interrupt priority than the current CPU task, it remains pending."
+  // (C166S V2 Architecture Overview Handbook, section 7.2.)  So the comparison
+  // is strict, and losing it is not losing the request.
+  if (Winner->Level <= cpuPriority())
+    return false;
+
+  Winner->Pending = false;
+  enterVector(*this, Winner->Vector);
+  if (Stop != StopReason::Running)
+    return true;
+  // The CPU now runs at the accepted source's priority, which is what stops a
+  // handler being interrupted by its own level or below.  IEN is left alone:
+  // on this core the priority level is the whole of the nesting rule, and a
+  // handler that wants no interrupts at all raises the level rather than
+  // clearing the enable.  RETI puts back the pushed PSW, and with it both.
+  setCPUPriority(Winner->Level);
+  ++InterruptsTaken;
+  States += InterruptEntryStates;
+  // Nothing was decoded, so nothing can be covered by an extend and nothing
+  // wrote PSW as an instruction would.  The handler starts clean.
+  PrevWrotePSW = false;
+  return true;
+}
+
 bool Machine::step() {
   if (Stop != StopReason::Running)
     return false;
@@ -744,6 +842,15 @@ bool Machine::step() {
     ExitCode = getWordReg(2);
     return false;
   }
+
+  // Between instructions is where the core accepts a request, so this is where
+  // one is offered.  Entering a handler is not executing an instruction: it
+  // costs states but not steps, and the instruction that would have run this
+  // step runs after the handler returns.  It is offered after the exit check
+  // rather than before, so that a program which has finished stays finished
+  // and a periodic source cannot keep it alive.
+  if (serviceInterrupts())
+    return Stop == StopReason::Running;
 
   uint8_t Bytes[4];
   for (unsigned I = 0; I != 4; ++I)
@@ -2096,26 +2203,13 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.IP = M.pop();
     M.CSP = M.pop();
     break;
-  case Op::TRAP: {
-    // A trap saves what a hardware interrupt saves and then branches to the
-    // vector table entry itself - it does not read a vector through it.  The
-    // entry is where a project puts a jump to its handler.  CSP is pushed
-    // because segmentation is on, which is the only mode this simulator runs
-    // in, and RETI undoes all three pushes in the opposite order.
-    //
-    // Where the entry is comes from two registers on this core rather than
-    // being fixed: the table is at the low end of the segment VECSEG names,
-    // and CPUCON1's VECSC field says how many words apart the entries are - 2,
-    // 4, 8 or 16, so 4 bytes a vector at its reset value.  An older part had
-    // neither, and behaved as these do out of reset.
-    unsigned Space = 4u << ((M.CPUCON1 >> 5) & 3);
-    M.push(M.PSW);
-    M.push(M.CSP);
-    M.CSP = M.VECSEG;
-    M.push(M.IP);
-    M.IP = uint16_t(Space * (Imm(0) & 0x7F));
+  case Op::TRAP:
+    // A trap saves what accepting an interrupt saves and reaches the table the
+    // same way, which is why the two share enterVector().  What it does not do
+    // is raise the CPU priority: a software trap has no priority to raise it
+    // to.
+    enterVector(M, Imm(0));
     break;
-  }
   case Op::RETI:
     // The interrupted state is IP, then CSP while segmentation is on, then
     // PSW.  Segmentation is enabled out of reset, which is the only mode this
@@ -2520,7 +2614,8 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.ExtendCount = Imm(0) + 1;
     break;
   case Op::ATOMIC:
-    // Interrupts are not simulated, so locking them is a no-op.
+    // Locking interrupts out is the whole of what this does; the count is what
+    // serviceInterrupts() looks at, so setting it is setting the lock.
     M.ExtendCount = Imm(0) + 1;
     break;
 
