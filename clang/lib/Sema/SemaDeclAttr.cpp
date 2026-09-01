@@ -6694,7 +6694,7 @@ static void handleC166InterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   }
 
-  if (!AL.checkExactlyNumArgs(S, 0))
+  if (!AL.checkAtMostNumArgs(S, 1))
     return;
 
   // A C166 handler is entered by the hardware and left with RETI, so there is
@@ -6710,7 +6710,30 @@ static void handleC166InterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
     return;
   }
 
-  handleSimpleAttribute<C166InterruptAttr>(S, D, AL);
+  // The optional argument is the trap number whose vector table slot should
+  // hold a jump to this handler.  Without one the handler is still a handler -
+  // the entry and exit sequence is what the attribute is mainly for - and
+  // reaching it is left to a hand written vector, which is what a program with
+  // a shared node or its own dispatcher wants.
+  //
+  // 1 to 127 rather than 0 to 127: trap 0 is reset and the startup code owns
+  // it, so a handler asking for it would be silently overwritten by crt0's
+  // jump or silently overwrite it.  That leaves zero free to mean "no slot",
+  // which is what the attribute holds when it was written without an
+  // argument.
+  uint32_t Number = 0;
+  if (AL.getNumArgs() == 1) {
+    const Expr *E = AL.getArgAsExpr(0);
+    if (!S.checkUInt32Argument(AL, E, Number, /*Idx=*/0))
+      return;
+    if (Number < 1 || Number > 127) {
+      S.Diag(E->getBeginLoc(), diag::err_attribute_argument_out_of_range)
+          << AL << 1 << 127 << E->getSourceRange();
+      return;
+    }
+  }
+
+  D->addAttr(::new (S.Context) C166InterruptAttr(S.Context, AL, Number));
 }
 
 static void handleC166BitAddrAttr(Sema &S, Decl *D, const ParsedAttr &AL) {

@@ -452,6 +452,15 @@ Three things the backend reads are spelled in C as attributes:
   __attribute__((far))        the "far" function attribute
   __far, i.e. address space 1 far data
 
+"interrupt" takes an optional trap number, which travels as a second string
+attribute, "c166-interrupt-vector".  The AsmPrinter turns that into the
+contents of the slot - a JMPS to the handler in a section named .vectors.NNN
+after the trap number, padded to three digits so the name sorts the way the
+number does - and reports two handlers claiming one slot, which the linker
+could only see as a location counter that had to move backwards.  The number
+is 1 to 127: trap 0 is reset and crt0.S owns it, which leaves zero free to
+mean that the attribute was written without one.
+
 "far" is applied to declarations as well as definitions, because it is what
 tells a caller in another translation unit to use CALLS rather than CALL.
 Its spelling is shared with MIPS's long_call attribute, which means the same

@@ -193,6 +193,19 @@ SECTIONS
     KEEP(*(.vectors))
   } > rom
 
+  /* A numbered slot - what __attribute__((interrupt(n))) emits, and what the
+   * VECTOR_ macros in xc164cm-vectors.inc expand to - needs the table that
+   * puts each of them at 4n, which is vectors.ld and is not here because it
+   * costs 512 bytes of ROM whether its slots are filled or not.  Without it
+   * these sections would be orphans, and LLD would place them somewhere
+   * plausible and wrong: the program would link, and the wrong interrupt
+   * would go somewhere nobody wrote.  So they are caught here and named. */
+  .vectors.unplaced : {
+    __c166_unplaced_vectors_start = .;
+    KEEP(*(.vectors.[0-9][0-9][0-9]))
+    __c166_unplaced_vectors_end = .;
+  } > rom
+
   .text : {
     *(.text .text.*)
   } > rom
@@ -324,3 +337,6 @@ SECTIONS
 
   /DISCARD/ : { *(.comment) *(.note.*) }
 }
+
+ASSERT(__c166_unplaced_vectors_start == __c166_unplaced_vectors_end,
+       "this program claims interrupt vector table slots, which need a linker script that INCLUDEs vectors.ld; see startup/README.txt")

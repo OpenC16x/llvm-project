@@ -6,6 +6,11 @@
 __attribute__((interrupt)) void handler(void) {}
 // CHECK: define {{.*}}void @handler() [[ISR:#[0-9]+]]
 
+// A trap number asks for the vector table slot as well, and travels as a
+// second string attribute the AsmPrinter reads.
+__attribute__((interrupt(26))) void slotted(void) {}
+// CHECK: define {{.*}}void @slotted() [[SLOTTED:#[0-9]+]]
+
 __attribute__((far)) int distant(int x) { return x + 1; }
 // CHECK: define {{.*}}i16 @distant(i16 noundef %x) [[FAR:#[0-9]+]]
 
@@ -23,6 +28,7 @@ void caller(void) { elsewhere(); }
 // CHECK: declare void @elsewhere() [[FARDECL:#[0-9]+]]
 
 // CHECK-DAG: attributes [[ISR]] = { noinline {{.*}}"interrupt"{{.*}} }
+// CHECK-DAG: attributes [[SLOTTED]] = { noinline {{.*}}"c166-interrupt-vector"="26"{{.*}}"interrupt"{{.*}} }
 // CHECK-DAG: attributes [[FAR]] = { {{.*}}"far"{{.*}} }
 // CHECK-DAG: attributes [[FARDECL]] = { "far"{{.*}} }
 // CHECK-DAG: attributes [[NEAR]] = { noinline nounwind optnone "no-trapping-math"{{.*}} }

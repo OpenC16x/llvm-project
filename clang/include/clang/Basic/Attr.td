@@ -1097,6 +1097,10 @@ def AVRSignal : InheritableAttr, TargetSpecificAttr<TargetAVR> {
 def C166Interrupt : InheritableAttr, TargetSpecificAttr<TargetC166> {
   let Spellings = [GCC<"interrupt">];
   let Subjects = SubjectList<[Function]>;
+  // The trap number whose vector table slot should hold a jump to this
+  // handler, or zero for none.  Zero cannot mean a slot: trap 0 is reset, and
+  // the startup code owns it.
+  let Args = [UnsignedArgument<"Number", /*opt=*/1>];
   let ParseKind = "Interrupt";
   let Documentation = [C166InterruptDocs];
 }

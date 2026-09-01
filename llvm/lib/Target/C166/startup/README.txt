@@ -381,8 +381,13 @@ A handler is declared
 
   __attribute__((interrupt)) void handler(void) { ... }
 
-which makes it save what it uses and return with RETI, and its slot is claimed
-by name:
+which makes it save what it uses and return with RETI.  Given a trap number it
+also claims that slot, and the compiler writes the jump that goes in it:
+
+  __attribute__((interrupt(43))) void handler(void) { ... }
+
+A slot can be claimed by name instead, which is what a handler wired to a
+peripheral wants:
 
   #include "xc164cm-vectors.inc"
   VECTOR_ASC0_RIC  uart_rx_isr
@@ -390,13 +395,16 @@ by name:
 That claims the slot ASC0 raises on a received character.  Every source the
 part has is in that file, named after its interrupt control register, so
 nothing has to be looked up and typed - a handler wired to the wrong source is
-not a failure anyone sees quickly.  A slot can be claimed by number instead,
-if the number is already known:
+not a failure anyone sees quickly.  Underneath, both spellings come to the same
+thing, and it can be written out where neither fits - in assembly, say, or for
+a slot whose handler is picked at link time:
 
   .section .vectors.043,"ax",@progbits
   jmps    #seg(handler), sof(handler)
 
-where the number is the trap number in decimal, padded to three digits.
+where the number is the trap number in decimal, padded to three digits.  Two
+handlers claiming one slot is an error the compiler reports, since the second
+jump would otherwise sit on top of the next slot.
 
 The hardware traps are in that file too, under the names the manual gives them
 - VECTOR_NMITRAP, VECTOR_STOTRAP for stack overflow, VECTOR_STUTRAP for stack
@@ -418,6 +426,13 @@ table is 512 bytes of ROM whether its slots are filled or not, which a program
 with no handlers should not pay.  Unclaimed slots end up holding LLD's trap
 pattern, JMPR cc_UC, -1, so a spurious interrupt stops rather than running into
 whatever follows.
+
+Claiming a slot and then linking with a script that has no table in it would
+otherwise be silent: the section would be an orphan, LLD would place it
+somewhere plausible, and the program would link and go somewhere nobody wrote
+when the interrupt arrived.  So c166.ld, c167.ld and st10.ld gather the
+numbered sections into one of their own and assert that nothing landed there,
+which turns that into a link error naming this file.
 
 On an XC164CM this is the layout the part has at reset.  Two of its registers
 can change it: CPUCON1.VECSC sets the space between vectors, and resets to 00,

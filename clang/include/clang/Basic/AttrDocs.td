@@ -3317,8 +3317,27 @@ A C166 interrupt handler must take no parameters and return ``void``. Because
 the handler runs on top of arbitrary interrupted code, it may not be called
 directly from C, and it is never inlined.
 
-Placing the handler in the vector table is left to the linker script or to a
-hand written vector, exactly as it is for the vendor toolchains.
+The attribute takes an optional trap number, which is the vector table slot the
+hardware branches to for that source::
+
+  __attribute__((interrupt(26))) void t3_isr(void) { ... }
+
+Given one, the backend also emits the contents of the slot: a ``JMPS`` to the
+handler, in a section named ``.vectors.026`` after the trap number in decimal,
+padded to three digits. A slot holds a jump rather than an address because the
+hardware branches to the slot instead of reading through it. The linker script
+places that section at four times the trap number; ``vectors.ld`` beside the
+C166 startup files does so for all 128 slots, and a script without it rejects
+the program rather than putting the section somewhere plausible and wrong.
+
+The number is 1 to 127. Trap 0 is reset and the startup code owns it. Two
+handlers asking for the same slot is an error, since the second jump would
+otherwise displace the next slot.
+
+Without a number the handler is still a handler -- the entry and exit sequence
+is what the attribute is mainly for -- and reaching it is left to a hand
+written vector, which is what a program with a shared interrupt node or a
+dispatcher of its own wants.
   }];
 }
 

@@ -15,18 +15,24 @@
 #include "C166MCInstLower.h"
 #include "C166TargetMachine.h"
 #include "MCTargetDesc/C166InstPrinter.h"
+#include "MCTargetDesc/C166MCAsmInfo.h"
 #include "TargetInfo/C166TargetInfo.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Mangler.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -53,6 +59,7 @@ public:
   void emitInstruction(const MachineInstr *MI) override;
   const MCExpr *lowerConstant(const Constant *CV, const Constant *BaseCV,
                               uint64_t Offset) override;
+  void emitEndOfAsmFile(Module &M) override;
 };
 
 } // end anonymous namespace
@@ -156,6 +163,67 @@ void C166AsmPrinter::emitInstruction(const MachineInstr *MI) {
        I != MBB.instr_end() && I->isInsideBundle(); ++I)
     if (!I->isDebugInstr() && !I->isImplicitDef())
       Emit(&*I);
+}
+
+/// Emit the vector table slots that __attribute__((interrupt(n))) asked for.
+///
+/// A slot is a jump rather than an address: TRAP and a hardware interrupt both
+/// branch to the slot instead of reading through it, so what has to be there
+/// is a JMPS to the handler.  Each one goes in a section of its own named for
+/// its trap number, which is what startup/vectors.ld places at 4n into the
+/// segment the table lives in; the padding to three digits is so that the name
+/// sorts the way the number does, for anyone reading a map file.
+///
+/// This is done at the end of the file rather than beside each function
+/// because a slot is not part of the function's section, and because doing it
+/// in one place is what makes two handlers claiming one slot something this
+/// can see rather than something the linker trips over later.
+void C166AsmPrinter::emitEndOfAsmFile(Module &M) {
+  StringRef ClaimedBy[128] = {};
+
+  for (const Function &F : M) {
+    if (F.isDeclaration())
+      continue;
+    Attribute A = F.getFnAttribute("c166-interrupt-vector");
+    if (!A.isStringAttribute())
+      continue;
+    // The front end has already checked this; what reaches here unchecked is
+    // hand written IR, which gets a diagnostic rather than a crash.
+    unsigned Number = 0;
+    if (A.getValueAsString().getAsInteger(10, Number) || Number == 0 ||
+        Number > 127) {
+      M.getContext().emitError("'c166-interrupt-vector' on '" + F.getName() +
+                               "' must be a trap number 1 to 127, not '" +
+                               A.getValueAsString() + "'");
+      continue;
+    }
+
+    // Two handlers in one translation unit asking for the same slot.  Across
+    // translation units the linker catches it, because the second section in
+    // a slot pushes the location counter past where the next slot has to
+    // start, but it can only say so in terms of addresses.
+    if (!ClaimedBy[Number].empty()) {
+      M.getContext().emitError("interrupt vector " + Twine(Number) +
+                               " is claimed by both '" + ClaimedBy[Number] +
+                               "' and '" + F.getName() + "'");
+      continue;
+    }
+    ClaimedBy[Number] = F.getName();
+
+    MCSection *Slot = OutContext.getELFSection(
+        formatv(".vectors.{0:3}", Number).str(), ELF::SHT_PROGBITS,
+        ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
+    OutStreamer->switchSection(Slot);
+
+    const MCExpr *Ref = MCSymbolRefExpr::create(getSymbol(&F), OutContext);
+    MCInst Jump;
+    Jump.setOpcode(C166::JMPS);
+    Jump.addOperand(MCOperand::createExpr(
+        MCSpecifierExpr::create(Ref, C166::S_SEG, OutContext)));
+    Jump.addOperand(MCOperand::createExpr(
+        MCSpecifierExpr::create(Ref, C166::S_SOF, OutContext)));
+    OutStreamer->emitInstruction(Jump, TM.getMCSubtargetInfo());
+  }
 }
 
 char C166AsmPrinter::ID = 0;

@@ -8,6 +8,7 @@
 
 #include "ABIInfoImpl.h"
 #include "TargetInfo.h"
+#include "llvm/ADT/StringExtras.h"
 
 using namespace clang;
 using namespace clang::CodeGen;
@@ -74,9 +75,14 @@ void C166TargetCodeGenInfo::setTargetAttributes(
   if (GV->isDeclaration())
     return;
 
-  if (FD->hasAttr<C166InterruptAttr>()) {
+  if (const auto *A = FD->getAttr<C166InterruptAttr>()) {
     F->addFnAttr(llvm::Attribute::NoInline);
     F->addFnAttr("interrupt");
+    // A trap number means the backend should also emit the jump that goes in
+    // that slot of the vector table.  Zero is what the attribute holds when it
+    // was written without one, and is not a slot: trap 0 is reset.
+    if (A->getNumber())
+      F->addFnAttr("c166-interrupt-vector", llvm::utostr(A->getNumber()));
   }
 }
 

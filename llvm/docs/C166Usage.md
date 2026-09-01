@@ -175,10 +175,28 @@ __attribute__((interrupt)) void timer0(void) { ... }
 
 The handler saves and restores every register it touches and returns with
 `RETI`. It must take no parameters and return `void`, cannot be called from
-C, and is never inlined. Putting it in the vector table is the linker
-script's business or a hand-written vector's, exactly as with the vendor
-toolchains — the `.vectors` section follows the four bytes of the reset
-vector, so a `jmps #seg(handler), sof(handler)` placed there is vector 1.
+C, and is never inlined.
+
+An optional trap number claims that slot of the vector table and has the
+compiler write what goes in it:
+
+```c
+__attribute__((interrupt(26))) void t3_isr(void) { ... }
+```
+
+A slot holds a jump rather than an address, because the hardware branches to
+the slot instead of reading through it, so what is emitted is a `JMPS` to the
+handler in a section named `.vectors.026` — the trap number in decimal, padded
+to three digits. `llvm/lib/Target/C166/startup/vectors.ld` places all 128 of
+them at four times their number; a script without it makes the program a link
+error rather than putting the section somewhere plausible and wrong. The
+number is 1 to 127, trap 0 being reset, and two handlers asking for one slot
+is an error.
+
+Without a number the handler is still a handler, and reaching it is left to a
+hand-written vector — which is what a program with a shared interrupt node or
+its own dispatcher wants. The `.vectors` section follows the four bytes of the
+reset vector, so a `jmps #seg(handler), sof(handler)` placed there is vector 1.
 
 That the saving and restoring is right is checked rather than assumed:
 `llvm/utils/C166Sim/differential/interrupts.c` runs a computation whose every

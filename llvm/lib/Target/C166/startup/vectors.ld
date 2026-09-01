@@ -13,13 +13,23 @@
  * A slot is one double word at 4 * the trap number, and what goes in it is a
  * jump rather than an address, because TRAP and a hardware interrupt both
  * branch to the slot instead of reading through it.  So a handler is reached
- * by putting a JMPS in its own slot:
+ * by putting a JMPS in its own slot, which the attribute writes:
+ *
+ *   __attribute__((interrupt(26))) void t3_isr(void) { ... }
+ *
+ * and which can be written by hand where it has to be - in assembly, or for a
+ * slot whose handler is chosen at link time:
  *
  *   .section .vectors.026,"ax",@progbits
  *   jmps    #seg(t3_isr), sof(t3_isr)
  *
  * The number in the section name is the trap number in decimal, padded to
  * three digits.  Slots nothing claims stay zero.
+ *
+ * A program that claims a slot and is linked with a script that does not have
+ * this file in it is rejected rather than mislinked: c166.ld and its two
+ * neighbours collect the numbered sections into a section of their own and
+ * assert that nothing landed there.
  *
  * This is the layout an XC164CM has at reset: CPUCON1.VECSC resets to 00,
  * which is two words between vectors, and VECSEG selects the segment the
