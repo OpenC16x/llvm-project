@@ -6713,6 +6713,35 @@ static void handleC166InterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   handleSimpleAttribute<C166InterruptAttr>(S, D, AL);
 }
 
+static void handleC166BitAddrAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // Same reasoning as __dpram below: what is placed is an object with an
+  // address of its own, and an automatic variable is on the stack.
+  const auto *VD = dyn_cast<VarDecl>(D);
+  if (!VD || !VD->hasGlobalStorage()) {
+    S.Diag(AL.getLoc(), diag::err_attribute_wrong_decl_type_str)
+        << AL << AL.isRegularKeywordAttribute()
+        << "variables with static storage duration";
+    return;
+  }
+
+  handleSimpleAttribute<C166BitAddrAttr>(S, D, AL);
+}
+
+static void handleC166DPRamAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // The dual-port RAM is where the linker script puts the stacks, so an
+  // automatic variable is in it already and saying so would mean nothing.
+  // What the attribute places is an object that has an address of its own.
+  const auto *VD = dyn_cast<VarDecl>(D);
+  if (!VD || !VD->hasGlobalStorage()) {
+    S.Diag(AL.getLoc(), diag::err_attribute_wrong_decl_type_str)
+        << AL << AL.isRegularKeywordAttribute()
+        << "variables with static storage duration";
+    return;
+  }
+
+  handleSimpleAttribute<C166DPRamAttr>(S, D, AL);
+}
+
 static void handleInterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Dispatch the interrupt attribute based on the current target.
   switch (S.Context.getTargetInfo().getTriple().getArch()) {
@@ -7745,6 +7774,12 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_Interrupt:
     handleInterruptAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_C166DPRam:
+    handleC166DPRamAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_C166BitAddr:
+    handleC166BitAddrAttr(S, D, AL);
     break;
   case ParsedAttr::AT_ARMInterruptSaveFP:
     S.ARM().handleInterruptSaveFPAttr(D, AL);

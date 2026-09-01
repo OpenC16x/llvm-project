@@ -16,7 +16,9 @@ namespace llvm {
 
 /// Puts objects declared in the far address space into their own sections, so
 /// that a linker script can place them outside segment 0 where reaching them
-/// with a near pointer would not work anyway.
+/// with a near pointer would not work anyway, and objects marked __dpram into
+/// theirs, so that a script can put them in the dual-port RAM - which is the
+/// only memory the coprocessor's IDX pointers reach.
 class C166TargetObjectFile : public TargetLoweringObjectFileELF {
   using Base = TargetLoweringObjectFileELF;
 
@@ -31,6 +33,10 @@ private:
   MCSectionELF *FarBSSSection = nullptr;
   MCSectionELF *FarRodataSection = nullptr;
   MCSectionELF *FarTextSection = nullptr;
+  MCSectionELF *DPRamDataSection = nullptr;
+  MCSectionELF *DPRamBSSSection = nullptr;
+  MCSectionELF *BitDataSection = nullptr;
+  MCSectionELF *BitBSSSection = nullptr;
 };
 
 } // end namespace llvm

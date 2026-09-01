@@ -57,6 +57,17 @@ enum Kind : unsigned {
   SignedNegate = 2,    ///< CoMAC-:  ACC -= (signed)a * (signed)b
   UnsignedNegate = 3,  ///< CoMACu-: ACC -= (unsigned)a * (unsigned)b
 };
+
+/// Which of the coprocessor's two 40 bit comparisons a MINMAX32rr stands for.
+///
+/// Both take the larger or smaller of the accumulator and a 40 bit operand
+/// built from two registers and sign extended, so a 32 bit signed minimum or
+/// maximum is CoLOAD, one of these, and the two words back out.  There is no
+/// unsigned pair: the comparison is signed and nothing makes it not be.
+enum MinMax : unsigned {
+  Max = 0, ///< CoMAX: ACC = max(ACC, operand)
+  Min = 1, ///< CoMIN: ACC = min(ACC, operand)
+};
 } // end namespace C166MAC
 
 namespace C166CC {

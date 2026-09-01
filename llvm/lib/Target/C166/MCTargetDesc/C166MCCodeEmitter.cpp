@@ -112,6 +112,13 @@ class C166MCCodeEmitter : public MCCodeEmitter {
                              SmallVectorImpl<MCFixup> &Fixups,
                              const MCSubtargetInfo &STI) const;
 
+  /// The bitoff on its own, for the forms that carry the bit position in a
+  /// field of their own.  Like the above it is a relocation when the word is a
+  /// symbol rather than a number.
+  unsigned getBitOffOpValue(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &STI) const;
+
   /// The 8 bit "reg" field of a word instruction.
   unsigned getReg8OpValue(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
@@ -355,9 +362,31 @@ C166MCCodeEmitter::getBitAddrOpValue(const MCInst &MI, unsigned OpNo,
                                      const MCSubtargetInfo &STI) const {
   const MCOperand &Off = MI.getOperand(OpNo);
   const MCOperand &Pos = MI.getOperand(OpNo + 1);
-  assert(Off.isImm() && Pos.isImm() && "Bit address must be constant");
-  return ((static_cast<unsigned>(Pos.getImm()) & 0xf) << 8) |
-         (static_cast<unsigned>(Off.getImm()) & 0xff);
+  assert(Pos.isImm() && "Bit position must be constant");
+  unsigned Bits = (static_cast<unsigned>(Pos.getImm()) & 0xf) << 8;
+
+  // A bit variable the linker places: which word of the bit-addressable space
+  // it is depends on the address it ends up at, so the byte is a relocation.
+  // It is the second byte of the instruction in every form that has one.
+  if (!Off.isImm()) {
+    Fixups.push_back(MCFixup::create(1, Off.getExpr(), C166::fixup_c166_bitoff,
+                                     /*PCRel=*/false));
+    return Bits;
+  }
+  return Bits | (static_cast<unsigned>(Off.getImm()) & 0xff);
+}
+
+unsigned
+C166MCCodeEmitter::getBitOffOpValue(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const {
+  const MCOperand &MO = MI.getOperand(OpNo);
+  if (MO.isImm())
+    return static_cast<unsigned>(MO.getImm()) & 0xff;
+
+  Fixups.push_back(MCFixup::create(1, MO.getExpr(), C166::fixup_c166_bitoff,
+                                   /*PCRel=*/false));
+  return 0;
 }
 
 unsigned C166MCCodeEmitter::getRel8OpValue(const MCInst &MI, unsigned OpNo,

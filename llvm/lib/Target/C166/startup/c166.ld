@@ -160,14 +160,23 @@ MEMORY
   dsram (rw) : ORIGIN = __c166_dsram_length ? 0x0000C000 : 0x0000F600,
                LENGTH = __c166_dsram_length ? __c166_dsram_length
                                             : __system_stack_limit - 0x0000F600
-  /* The DPRAM under the system stack, which on a part with a DSRAM the ABI
-   * stack has to itself, and on one without is where the static data above
-   * already is - so this region is empty there rather than overlapping it.
+  /* The DPRAM under the system stack.  On a part with a DSRAM the ABI stack
+   * and whatever __dpram places have it to themselves; on one without, the
+   * region above is this same memory and the two names deliberately cover the
+   * same bytes, because it is the same memory.  Nothing is placed twice: the
+   * sections that go here take their address from the location counter, so
+   * they follow the static data rather than starting under it, and the ASSERT
+   * on __dprambss_end below is what checks the total either way.
    * Where the system stack starts is a choice rather than a part property, so
    * the ASSERTs below are what say the choice fits the part. */
   dpram (rw) : ORIGIN = 0x0000F600,
-               LENGTH = __c166_dsram_length
-                          ? __system_stack_limit - 0x0000F600 : 0
+               LENGTH = __system_stack_limit - 0x0000F600
+  /* The bit-addressable RAM: the 128 words from FD00H to FDFEH, which is what
+   * a bit instruction can name and the only memory that is.  It sits above the
+   * register bank at FC00H, in the part of this memory nothing else here uses,
+   * so it is a region of its own rather than a slice of one above. */
+  bitram (rw) : ORIGIN = 0x0000FD00, LENGTH = 256
+
   /* The PSRAM, which is the only RAM here that a near address cannot reach:
    * it is data page 896 and the four pointers are spoken for.  So this is
    * where __far data goes, and it is worth knowing that the manual calls it
@@ -212,6 +221,15 @@ ASSERT((ORIGIN(dpram) >> 16) == ((ORIGIN(dpram) + LENGTH(dpram) - 1) >> 16),
        "the dpram region crosses a segment boundary")
 ASSERT((ORIGIN(psram) >> 16) == ((ORIGIN(psram) + LENGTH(psram) - 1) >> 16),
        "the psram region crosses a segment boundary")
+
+/* On a part with no extension RAM the dsram and dpram regions name the same
+ * memory, so neither region's own overflow check sees the whole of what is in
+ * it; this is what does.  How much room the ABI stack then has left is not a
+ * thing a link can know, but running past where the stack starts is. */
+ASSERT(__dprambss_end <= __user_stack_top,
+       "the __dpram data does not fit under the ABI stack; the dual-port RAM holds both")
+ASSERT(__dpramdata_start >= 0x0000F600,
+       "the __dpram data starts below the dual-port RAM")
 
 SECTIONS
 {
@@ -289,6 +307,60 @@ SECTIONS
     __bss_end = .;
   } > dsram
 
+  /* What __dpram places, at the bottom of the dual-port RAM with the ABI stack
+   * coming down towards it.  This memory is the only memory the coprocessor's
+   * IDX0 and IDX1 can address - PM0036 section 2.1 - so an array a CoMAC walks
+   * through [idx0+] has to be here and ordinary static data will not do.
+   *
+   * The address is MAX of the location counter and F600H rather than simply
+   * the region's start, because which memory these belong in depends on the
+   * part.  On a derivative with no extension RAM the dsram region above is
+   * already this same dual-port RAM, so .bss has ended inside it and these
+   * have to follow on; on a part with one, .bss ended at C800H and these start
+   * at the bottom of the dual-port RAM instead.  A region cannot say "after
+   * the one above, or at the start of this one" - and starting at F600H
+   * regardless would put these under the static data on the first kind of
+   * part, silently, since two regions over one memory is not an error.
+   * Whichever address is higher is the first free word of this memory. */
+  .dpramdata MAX(., 0x0000F600) : ALIGN(2) {
+    __dpramdata_start = .;
+    *(.dpramdata .dpramdata.*)
+    . = ALIGN(2);
+    __dpramdata_end = .;
+  } > dpram AT > rom
+  __dpramdata_load = LOADADDR(.dpramdata);
+
+  .dprambss (NOLOAD) : ALIGN(2) {
+    __dprambss_start = .;
+    *(.dprambss .dprambss.*)
+    . = ALIGN(2);
+    __dprambss_end = .;
+  } > dpram
+
+  /* What __bitaddr places: the bit-addressable RAM, which is the 128 words
+   * from FD00H to FDFEH and nothing else.  A bit instruction takes an 8 bit
+   * word number of that space rather than an address, so an object anywhere
+   * else has no bit address for one to name - the linker says so rather than
+   * writing a byte that names some other word.
+   *
+   * It is above the register bank at FC00H and below the top of this memory,
+   * which is the part of the dual-port RAM nothing else here uses.
+   */
+  .bitdata 0x0000FD00 : ALIGN(2) {
+    __bitdata_start = .;
+    *(.bitdata .bitdata.*)
+    . = ALIGN(2);
+    __bitdata_end = .;
+  } > bitram AT > rom
+  __bitdata_load = LOADADDR(.bitdata);
+
+  .bitbss (NOLOAD) : ALIGN(2) {
+    __bitbss_start = .;
+    *(.bitbss .bitbss.*)
+    . = ALIGN(2);
+    __bitbss_end = .;
+  } > bitram
+
   /* Code that runs from the PSRAM rather than from the Flash.  That is what
    * that memory is for - the manual calls it optimised for code fetches - and
    * it is also the only way to run a routine that rewrites the Flash, since a
@@ -325,15 +397,17 @@ SECTIONS
     __farbss_end = .;
   } > psram
 
-  /* The ABI stack that R0 addresses grows down from the top of the DPRAM, and
-   * has that KByte to itself: the system stack is above it and the static data
-   * is in the DSRAM, so the two stacks grow towards each other from either end
-   * of FA00H rather than the ABI stack growing into the program's variables. */
   /* The ABI stack comes down from just under the system stack, whether what
-   * is below it is an empty DPRAM or the static data of a part with no
-   * DSRAM. */
+   * is below it is an empty DPRAM, the __dpram data, or the static data of a
+   * part with no DSRAM. */
   __user_stack_top = __system_stack_limit;
-  __heap_start = __bss_end;
+  /* Nothing here implements a heap; these say where one could go.  It starts
+   * after the last thing placed rather than after .bss, which is what it used
+   * to say: on a part with an extension RAM .bss ends at C800H and the memory
+   * from there to the dual-port RAM is not RAM at all, so a heap that started
+   * there began in nothing.  Now it is the room between what is placed in the
+   * dual-port RAM and the ABI stack coming down. */
+  __heap_start = __dprambss_end;
   __heap_end = __user_stack_top;
 
   /DISCARD/ : { *(.comment) *(.note.*) }

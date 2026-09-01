@@ -1101,6 +1101,23 @@ def C166Interrupt : InheritableAttr, TargetSpecificAttr<TargetC166> {
   let Documentation = [C166InterruptDocs];
 }
 
+def C166BitAddr : InheritableAttr, TargetSpecificAttr<TargetC166> {
+  let Spellings = [GCC<"c166_bitaddr">];
+  let Subjects = SubjectList<[Var]>;
+  let Documentation = [C166BitAddrDocs];
+}
+
+def C166DPRam : InheritableAttr, TargetSpecificAttr<TargetC166> {
+  let Spellings = [GCC<"c166_dpram">];
+  let Subjects = SubjectList<[Var]>;
+  let Documentation = [C166DPRamDocs];
+}
+
+// The dual-port RAM and the bit-addressable RAM are different memories, so a
+// variable cannot be in both; without this the section chosen would depend on
+// which check ran first.
+def : MutualExclusions<[C166BitAddr, C166DPRam]>;
+
 def AsmLabel : InheritableAttr {
   let Spellings = [CustomKeyword<"asm">, CustomKeyword<"__asm">, CustomKeyword<"__asm__">];
   let Args = [

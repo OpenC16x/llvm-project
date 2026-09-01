@@ -105,9 +105,19 @@ Makes programs 10x faster by doing Special New Thing.
   `c166`, `c167`, `st10` and `xc16x`. `-mmcu=` selects one of 23 parts and
   supplies its memory sizes to the linker script, so that moving between
   derivatives does not mean editing a memory map by hand.
-* Four of the multiply-accumulate coprocessor's instructions are selected and
+* Six of the multiply-accumulate coprocessor's instructions are selected and
   all 180 forms assemble and disassemble, including the repeat prefix on the
-  89 the manual marks repeatable: `repeat 3 times comac r2, [r3+]`.
+  89 the manual marks repeatable: `repeat 3 times comac r2, [r3+]`. The forms
+  that address memory through `IDX0` or `IDX1` reach only the dual-port RAM,
+  which clang's `__dpram` and the linker scripts here place data in.
+* A 32-bit signed minimum or maximum is one comparison against the
+  coprocessor's 40-bit accumulator where it was five basic blocks: measured at
+  2.4 times faster on a loop over 128 values, and a third of the code.
+* The bit instructions are selected for a register, for a constant address in
+  one of the two bit-addressable windows, and for a variable clang's
+  `__bitaddr` places in one. The last needs a relocation, `R_C166_BITOFF8`,
+  because the byte the instruction carries is a word number of that space
+  rather than an address.
 * There is no default linker script, because the memory map belongs to the
   board. Three to start from are in `llvm/lib/Target/C166/startup`.
 

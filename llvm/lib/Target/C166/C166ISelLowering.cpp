@@ -90,6 +90,16 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   for (unsigned Opc : {ISD::UDIV, ISD::UREM, ISD::SDIV, ISD::SREM})
     setOperationAction(Opc, MVT::i32, Custom);
 
+  // A 32 bit signed minimum or maximum is one comparison on the coprocessor's
+  // 40 bit accumulator, where without it the type legalizer builds a tree of
+  // five basic blocks to compare two words in order.  Only the signed pair:
+  // CoMIN and CoMAX compare signed and there is no unsigned form of either.
+  // The 16 bit ones are left alone - a compare and a conditional move is
+  // already three instructions and six bytes, which nothing here beats.
+  if (Subtarget.hasMAC())
+    for (unsigned Opc : {ISD::SMAX, ISD::SMIN})
+      setOperationAction(Opc, MVT::i32, Custom);
+
   for (MVT VT : {MVT::i8, MVT::i16}) {
     setOperationAction(ISD::ROTL, VT, VT == MVT::i16 ? Legal : Expand);
     setOperationAction(ISD::ROTR, VT, VT == MVT::i16 ? Legal : Expand);
@@ -910,7 +920,47 @@ void C166TargetLowering::ReplaceNodeResults(SDNode *N,
   case ISD::SREM:
     ReplaceSignedDivBy16Results(N, Results, DAG);
     return;
+  case ISD::SMAX:
+  case ISD::SMIN:
+    ReplaceMinMaxResults(N, Results, DAG);
+    return;
   }
+}
+
+/// A 32 bit signed minimum or maximum, as one comparison in the coprocessor.
+///
+/// CoLOAD puts the first operand in the accumulator, sign extended from 32
+/// bits into 40; CoMIN or CoMAX replaces it with whichever of the two is
+/// wanted, comparing all 40 bits signed; and the two CoSTOREs bring the answer
+/// back. The extension is what makes the 40 bit comparison the 32 bit one the
+/// program asked for, and the truncation on the way out cannot lose anything,
+/// because the result is one of the two operands and both came from 32 bits.
+///
+/// Saturation cannot interfere. The manual says the MS bit of MCW does not
+/// affect CoMIN or CoMAX at all, and CoLOAD saturates only on a 32 bit
+/// overflow, which a value that started as 32 bits cannot cause.
+void C166TargetLowering::ReplaceMinMaxResults(
+    SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
+  if (N->getValueType(0) != MVT::i32)
+    return;
+
+  SDLoc DL(N);
+  auto Split = [&](SDValue V) {
+    return std::make_pair(
+        DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, V,
+                    DAG.getIntPtrConstant(0, DL)),
+        DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, V,
+                    DAG.getIntPtrConstant(1, DL)));
+  };
+  auto [ALo, AHi] = Split(N->getOperand(0));
+  auto [BLo, BHi] = Split(N->getOperand(1));
+
+  unsigned Kind = N->getOpcode() == ISD::SMAX ? C166MAC::Max : C166MAC::Min;
+  SDValue R = DAG.getNode(C166ISD::MINMAX, DL,
+                          DAG.getVTList(MVT::i16, MVT::i16), ALo, AHi, BLo, BHi,
+                          DAG.getTargetConstant(Kind, DL, MVT::i16));
+  Results.push_back(DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, R.getValue(0),
+                                R.getValue(1)));
 }
 
 /// A 32 bit unsigned division whose divisor came from 16 bits, as two divides

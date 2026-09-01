@@ -342,9 +342,48 @@ relocation is left behind.  A disassembly names the target address, but only
 llvm-objdump asks for that; left to itself the printer gives the distance,
 which is what can be handed back to the assembler.
 
-Nothing generates any of these: whether an address is bit addressable is not
-something the compiler can see from the IR, so it would take an intrinsic or
-an address space to express it.
+What the compiler generates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Three shapes reach a bit instruction.  A single bit set or cleared in a value
+the register allocator has placed is BSETr/BCLRr, because bitoff F0H + n names
+R0 to R15, and a branch on one bit of a register is JBr/JNBr.  A constant
+address in one of the two windows - which is how a peripheral register with no
+name in the map gets written - is matched from the address itself.  And a
+variable declared __bitaddr is matched from the symbol.
+
+That last one is the reason for R_C166_BITOFF8.  A global's address is not
+known when the instruction is selected, and the byte the instruction carries
+is not the address anyway: it is the 8 bit word number of the bit-addressable
+space, which is FD00H upwards in one window and FF00H upwards in another, so
+no ABS8 of anything produces it.  The linker computes it, and refuses an
+address in neither window rather than writing a byte that names some other
+word - which is worth having, because putting a bit variable somewhere it
+cannot live is otherwise a silent mistake.
+
+Two details of the selection are worth writing down.
+
+A word only one byte of which is looked at arrives at the branch matcher as a
+byte load and a byte AND, because that is what the combiner narrows it to.  The
+bit instruction still names the word, so the low byte is the same word and the
+same bit and the high byte is the same word eight bits up - which is where the
+odd address the byte load carries goes.  __bitaddr forces word alignment on
+what it places, which is what makes an odd offset from one mean "the high
+byte" rather than "some other variable".
+
+The branch form needs the load to fold into it, and that needs the branch to
+be the next thing on the load's chain.  A volatile word is: nothing may be
+moved across it.  A plain one may have been scheduled away from the branch, in
+which case the load stays and the compare and jump it would have been is what
+comes out.  Volatile is how a word an interrupt also touches is spelled, so
+the case that wants the instruction is the case that gets it.  The read,
+change, write forms have no such condition - they match a load and a store on
+one chain - so BSET and BCLR are selected either way.
+
+Placing them is llvm/lib/Target/C166/startup/*.ld: 128 words at FD00H, in the
+part of the dual-port RAM above the register bank that nothing else uses.  The
+section is a region of its own, so a program with more than 256 bytes of bit
+variables is told at the link rather than one relocation at a time.
 
 Short encodings
 ---------------
@@ -816,7 +855,7 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* Four of the MAC unit's instructions are selected and the other 176 are
+* Six of the MAC unit's instructions are selected and the other 174 are
   assembled and disassembled only.  All 180 forms are there, in
   C166InstrMAC.td, which is generated from the Format lines
   the C166S V2 manual gives each instruction rather than written out by hand -
@@ -926,6 +965,58 @@ Known limitations / things to do
   differential/macasm.c is the whole of it run in the simulator and checked
   against the host: both pointers, an offset register set by name, and the
   accumulator read back out of MAL and MAH.
+
+  What that first version of it did not do was put the arrays anywhere the unit
+  could reach.  PM0036 section 2.1: "the GPR pointer gives access to the entire
+  memory space, whereas IDXi are limited to the internal Dual-Port RAM, except
+  for the CoMOV instruction."  Ordinary static data is not in the dual-port RAM
+  - on a part with an extension RAM it is at C000H - so an IDX pointed at it
+  assembles, links, and on the part reads whatever the unit sees at that offset
+  instead.  Nothing said so: the simulator modelled the pointer as an ordinary
+  address, so the test passed.
+
+  __dpram is what places an array where IDX can reach it.  It is an attribute
+  and not an address space, which is the decision worth writing down: the
+  dual-port RAM is a near address in page 3 like the rest of the RAM, so a
+  pointer into it is an ordinary short * and carries no extra bits.  An address
+  space would buy a conversion rule and cost every pointer in the program a
+  second type to reason about, for a property that belongs to the object rather
+  than to the pointer.  What the compiler would need for selecting an IDX form
+  itself is that property, and it is on the GlobalVariable where the section is
+  chosen from it.
+
+  The section is chosen in the backend rather than named in clang, so that a
+  zero initialised object lands in a NOBITS .dprambss and does not carry its
+  length in the image - a delay line is exactly the object that would.  A read
+  only one still goes in the writable .dpramdata: being in the dual-port RAM
+  means being in RAM, so it is copied out of the image either way.
+
+  Placing it is the linker script's, and the case that needed thought is the
+  part with no extension RAM - the XC164xx-4F, which has the coprocessor and
+  none of that RAM.  There the static data is already at the bottom of this
+  same memory, so the __dpram data has to follow it rather than start
+  underneath it; on a part with an extension RAM the static data is elsewhere
+  and this starts at F600H.  MAX of the location counter and F600H says both
+  without a condition: whichever is higher is the first free word of the
+  dual-port RAM.  A region cannot say it, because "the region above, or that
+  one" is not a thing a region assignment expresses, and getting it wrong is
+  silent - two regions over one memory and the second overwrites the first.
+  lld/test/ELF/c166-dpram.s links both parts and checks the addresses.
+
+  The heap symbols moved with it.  __heap_start was __bss_end, which on a part
+  with an extension RAM is C800H, and the memory from there up to the dual-port
+  RAM is not RAM at all - so a heap that started there began in nothing.  It is
+  __dprambss_end now, which is the first free word after everything placed, on
+  both kinds of part.  Nothing here implements a heap; these say where one
+  could go.
+
+  The simulator refuses an IDX outside F600H to FDFFH now, which is what makes
+  any of this checkable: reverting one __dpram in macasm.c or macrepeat.c stops
+  it with the reason rather than quietly giving an answer.  What it does not
+  model is the other half of that manual sentence - IDXi holds even values only,
+  bit 0 always reading as zero - because that is the register masking what is
+  written rather than refusing it, and asserting an error the part does not
+  raise would be worse than saying nothing.
 
   Table 2-9 of that manual disagrees with its own Format lines about CoSTORE:
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
@@ -1255,6 +1346,40 @@ One shape it does not catch: an unrolled loop whose adds have been
 reassociated no longer has a multiply feeding the accumulator, so nothing
 matches.  A sum of two products could be a CoMUL followed by a CoMAC, which is
 what the unit's CoMUL is for, and is not done.
+
+Thirty two bit minimum and maximum
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+CoMIN and CoMAX compare a forty bit operand against the accumulator and keep
+the smaller or larger, and the operand is two registers concatenated and sign
+extended - which is how CoLOAD builds one too.  So a 32 bit signed minimum or
+maximum is CoLOAD, one of these, and the two words back out: four straight
+line instructions.
+
+What they replace is worth seeing.  i32 is not a legal type here, so an
+ISD::SMAX of one goes to the type legalizer, which compares the two words in
+order and carries the equal case between them - five basic blocks and about
+twenty instructions with a branch on every path.  Custom lowering catches the
+node before that happens; ReplaceNodeResults is where, because the result type
+is the illegal one.
+
+Measured on a loop taking the running minimum and maximum of 128 values:
+7199 states without the unit and 2997 with, which is 2.4 times.  The pair of
+functions on their own is 104 bytes of code without and 36 with.
+
+Three things this does not do, all of them the instruction's rather than
+choices.  There is no unsigned pair, so umin and umax are left alone.  Sixteen
+bits are left alone too, and that is a choice but not a close one: a compare
+and a conditional move is three instructions and six bytes, where going
+through the unit would be four four-byte instructions and the operands would
+each need sign extending into a pair first.  And saturation cannot interfere
+with either: the manual says the MS bit of MCW does not affect CoMIN or CoMAX
+at all, and CoLOAD saturates only on a 32 bit overflow, which a value that
+started as 32 bits cannot cause.
+
+The accumulator does not stay, for the same reason it does not stay for a
+multiply-accumulate: nothing saves it across a call or an interrupt, so it
+lives only between the four instructions of the expansion.
 
 Rounding a fixed point product
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

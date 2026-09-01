@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -126,6 +127,36 @@ static bool matchAbsoluteAddress(SelectionDAG &DAG, SDValue Addr,
   }
 
   return false;
+}
+
+/// The word operand a bit instruction takes, for the address \p Base + \p
+/// Offset that matchAbsoluteAddress returned.  Two things can be one:
+///
+///   - a constant address, whose bitoff is known here;
+///   - a variable declared __bitaddr, whose address the linker decides, so
+///     what goes in the instruction is the symbol and the byte is a
+///     relocation.
+///
+/// Anything else has no bit address at all - which is most things, since only
+/// 128 words of RAM and the special function registers are bit addressable.
+static bool getBitWordOperand(SelectionDAG &DAG, SDValue Base, int64_t Offset,
+                              const SDLoc &DL, SDValue &Out) {
+  if (auto *C = dyn_cast<ConstantSDNode>(Base)) {
+    int BitOff = C166::getBitOffForAddress(C->getZExtValue() + Offset);
+    if (BitOff < 0)
+      return false;
+    Out = DAG.getTargetConstant(BitOff, DL, MVT::i16);
+    return true;
+  }
+
+  if (Base.getOpcode() != ISD::TargetGlobalAddress)
+    return false;
+  auto *GA = cast<GlobalAddressSDNode>(Base);
+  const auto *GV = dyn_cast<GlobalVariable>(GA->getGlobal());
+  if (!GV || !GV->hasAttribute("c166-bitaddr"))
+    return false;
+  Out = DAG.getTargetGlobalAddress(GV, DL, MVT::i16, GA->getOffset() + Offset);
+  return true;
 }
 
 /// Match an absolute 16 bit data address.  Globals, external symbols and plain
@@ -333,21 +364,15 @@ bool C166DAGToDAGISel::trySelectBitRMW(SDNode *Node) {
   if (!matchAbsoluteAddress(*CurDAG, Ld->getBasePtr(), LdBase, LdOffset) ||
       !matchAbsoluteAddress(*CurDAG, St->getBasePtr(), StBase, StOffset))
     return false;
-  auto *LdC = dyn_cast<ConstantSDNode>(LdBase);
-  auto *StC = dyn_cast<ConstantSDNode>(StBase);
-  if (!LdC || !StC)
-    return false;
-  uint16_t LdAddr = LdC->getZExtValue() + LdOffset;
-  uint16_t StAddr = StC->getZExtValue() + StOffset;
-  if (LdAddr != StAddr)
-    return false;
-
-  int BitOff = C166::getBitOffForAddress(LdAddr);
-  if (BitOff < 0)
+  if (LdBase != StBase || LdOffset != StOffset)
     return false;
 
   SDLoc DL(Node);
-  SDValue Ops[] = {CurDAG->getTargetConstant(BitOff, DL, MVT::i16),
+  SDValue Word;
+  if (!getBitWordOperand(*CurDAG, LdBase, LdOffset, DL, Word))
+    return false;
+
+  SDValue Ops[] = {Word,
                    CurDAG->getTargetConstant(Log2_32(Bits), DL, MVT::i16),
                    Ld->getChain()};
   MachineSDNode *New = CurDAG->getMachineNode(
@@ -371,10 +396,13 @@ bool C166DAGToDAGISel::trySelectBitBranch(SDNode *Node) {
   SDValue RHS = Node->getOperand(3);
 
   // The bit instructions address words, and everything here is a comparison
-  // against a constant.
+  // against a constant.  A byte is here too: a word only one byte of which is
+  // looked at is narrowed to a byte load and a byte AND long before this, and
+  // the bit is still a bit of the word the instruction names.
   auto *CCN = dyn_cast<ConstantSDNode>(Node->getOperand(4));
   auto *RHSC = dyn_cast<ConstantSDNode>(RHS);
-  if (!CCN || !RHSC || LHS.getValueType() != MVT::i16)
+  EVT TestedVT = LHS.getValueType();
+  if (!CCN || !RHSC || (TestedVT != MVT::i16 && TestedVT != MVT::i8))
     return false;
   auto CC = static_cast<C166CC::CondCode>(CCN->getZExtValue());
   int16_t Against = static_cast<int16_t>(RHSC->getZExtValue());
@@ -384,8 +412,13 @@ bool C166DAGToDAGISel::trySelectBitBranch(SDNode *Node) {
   // sixteen bit word is negative exactly when bit 15 is set.  It spells that
   // either way round depending on how the branch was written, so both are
   // taken here and turned into the one that reads as "bit 15 is set".
+  // Only for a word: the sign of a byte is bit 7 of it and which byte of the
+  // word that is depends on the address, which is more than this shape says.
   bool TopBitSet = false, IsTopBitTest = false;
-  if (Against == 0 && (CC == C166CC::COND_SLT || CC == C166CC::COND_SGE)) {
+  if (TestedVT != MVT::i16) {
+    // fall through to the mask-and-test shape below
+  } else if (Against == 0 &&
+             (CC == C166CC::COND_SLT || CC == C166CC::COND_SGE)) {
     IsTopBitTest = true;
     TopBitSet = CC == C166CC::COND_SLT;
   } else if (Against == -1 &&
@@ -428,25 +461,44 @@ bool C166DAGToDAGISel::trySelectBitBranch(SDNode *Node) {
   }
 
   SDLoc DL(Node);
-  SDValue Pos = CurDAG->getTargetConstant(Bit, DL, MVT::i16);
 
   // A bit-addressable word in memory, which the instruction reads for itself.
   // As with the read-modify-write above, this only holds when the load feeds
   // nothing else and the branch is the next thing on its chain.
   if (auto *Ld = dyn_cast<LoadSDNode>(Tested)) {
+    // A word only one byte of which is looked at arrives here as a byte load,
+    // because that is what the combiner narrows it to and nothing about a byte
+    // load is wrong.  The bit instruction still names the word, so the low byte
+    // is the same word and the same bit, and the high byte is the same word
+    // eight bits up - which is where the odd address the byte load carries
+    // goes.  A bit variable is word aligned, so an odd offset from one is
+    // always its high byte.
+    EVT VT = Ld->getMemoryVT();
+    int64_t ByteInWord = 0;
+    if (VT == MVT::i8)
+      ByteInWord = 1;
+    else if (VT != MVT::i16)
+      ByteInWord = -1;
+
     SDValue Base;
     int64_t Offset;
-    int BitOff = -1;
-    if (ISD::isNormalLoad(Ld) && Ld->getMemoryVT() == MVT::i16 &&
-        !Ld->isAtomic() && Tested.hasOneUse() && Chain == SDValue(Ld, 1) &&
+    SDValue Word;
+    unsigned WordBit = Bit;
+    if (ByteInWord >= 0 && ISD::isNormalLoad(Ld) && !Ld->isAtomic() &&
+        Tested.hasOneUse() && Chain == SDValue(Ld, 1) &&
         Ld->hasNUsesOfValue(1, 1) &&
-        matchAbsoluteAddress(*CurDAG, Ld->getBasePtr(), Base, Offset))
-      if (auto *C = dyn_cast<ConstantSDNode>(Base))
-        BitOff = C166::getBitOffForAddress(C->getZExtValue() + Offset);
+        matchAbsoluteAddress(*CurDAG, Ld->getBasePtr(), Base, Offset)) {
+      if (ByteInWord && (Offset & 1)) {
+        Offset &= ~INT64_C(1);
+        WordBit += 8;
+      }
+      if (WordBit <= 15)
+        getBitWordOperand(*CurDAG, Base, Offset, DL, Word);
+    }
 
-    if (BitOff >= 0) {
-      SDValue Ops[] = {Dest, CurDAG->getTargetConstant(BitOff, DL, MVT::i16),
-                       Pos, Ld->getChain()};
+    if (Word) {
+      SDValue Pos = CurDAG->getTargetConstant(WordBit, DL, MVT::i16);
+      SDValue Ops[] = {Dest, Word, Pos, Ld->getChain()};
       MachineSDNode *New = CurDAG->getMachineNode(
           OnClear ? C166::JNBm : C166::JBm, DL, MVT::Other, Ops);
       CurDAG->setNodeMemRefs(New, {Ld->getMemOperand()});
@@ -461,6 +513,12 @@ bool C166DAGToDAGISel::trySelectBitBranch(SDNode *Node) {
     return false;
 
   // Otherwise the value is in a register, whose bitoff is F0H + its number.
+  // Only a word register: the byte shape above is a byte of a word in memory,
+  // and a byte register is half of a word register rather than a bitoff of its
+  // own, so there is nothing here to name.
+  if (TestedVT != MVT::i16)
+    return false;
+  SDValue Pos = CurDAG->getTargetConstant(Bit, DL, MVT::i16);
   SDValue Ops[] = {Dest, Tested, Pos, Chain};
   ReplaceNode(Node, CurDAG->getMachineNode(OnClear ? C166::JNBr : C166::JBr, DL,
                                            MVT::Other, Ops));

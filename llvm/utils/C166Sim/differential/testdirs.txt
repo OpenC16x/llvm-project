@@ -23,4 +23,6 @@ clang/test/Driver/c166-mmcu.c
 clang/test/Driver/c166-toolchain.c
 clang/test/Preprocessor/init-c166.c
 clang/test/Sema/attr-c166-interrupt.c
+clang/test/Sema/c166-bitaddr.c
+clang/test/Sema/c166-dpram.c
 clang/test/Sema/inline-asm-c166.c

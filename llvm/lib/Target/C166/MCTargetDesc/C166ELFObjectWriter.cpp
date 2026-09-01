@@ -75,6 +75,12 @@ protected:
       // that the instruction reaches without leaving the segment, which is
       // what lets the linker check the segment is the one it is in.
       return ELF::R_C166_CADDR16;
+    case C166::fixup_c166_bitoff:
+      // Not an address in the byte: the 8 bit word number of the
+      // bit-addressable space, which the linker computes from the address the
+      // symbol ends up at.  Two windows counted from two bases, so nothing
+      // linear will do.
+      return ELF::R_C166_BITOFF8;
     case FK_Data_1:
       return IsPCRel ? ELF::R_C166_PCREL8 : ELF::R_C166_ABS8;
     case FK_Data_2:

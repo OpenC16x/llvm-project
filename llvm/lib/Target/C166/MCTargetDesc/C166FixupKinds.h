@@ -31,6 +31,12 @@ enum Fixups {
   /// changing segments and can check that it is in the segment we are in.
   fixup_c166_caddr,
 
+  /// The 8 bit "bitoff" naming the word a bit lives in.  A bit instruction
+  /// takes one of these rather than an address, and the mapping from address
+  /// to bitoff is not linear - two windows from two bases - so the linker has
+  /// to be told that is what the byte is rather than being handed an ABS8.
+  fixup_c166_bitoff,
+
   LastTargetFixupKind,
   NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind
 };
