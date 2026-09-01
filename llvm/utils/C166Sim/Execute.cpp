@@ -331,6 +331,13 @@ unsigned coRepeatOperand(Sh::Shape Shape) {
 /// A program for another derivative says so with --mcpu.
 static std::string SimCPU = "xc16x";
 
+/// What the part has on top of its core, in the same spelling the compiler
+/// takes: the coprocessor is a feature rather than a core, so an ST10 that has
+/// one is "--mcpu=st10 --mattr=+mac" here exactly as it is "-mcpu=st10 -mmac"
+/// there.  Without this the decoder built for such a part would refuse the
+/// instructions the compiler had just emitted for it.
+static std::string SimFeatures;
+
 /// Everything the decoder needs, set up once.
 struct Decoder {
   std::unique_ptr<const MCRegisterInfo> MRI;
@@ -356,7 +363,7 @@ struct Decoder {
     MCTargetOptions Options;
     MAI.reset(T->createMCAsmInfo(*MRI, TT, Options));
     MII.reset(T->createMCInstrInfo());
-    STI.reset(T->createMCSubtargetInfo(TT, SimCPU, ""));
+    STI.reset(T->createMCSubtargetInfo(TT, SimCPU, SimFeatures));
     Ctx = std::make_unique<MCContext>(TT, *MAI, *MRI, *STI);
     DisAsm.reset(T->createMCDisassembler(*STI, *Ctx));
     Printer.reset(T->createMCInstPrinter(TT, 0, *MAI, *MII, *MRI));
@@ -386,7 +393,10 @@ Decoder &decoder() {
 
 } // namespace
 
-void c166sim::setSimCPU(StringRef CPU) { SimCPU = CPU.str(); }
+void c166sim::setSimCPU(StringRef CPU, StringRef Features) {
+  SimCPU = CPU.str();
+  SimFeatures = Features.str();
+}
 
 bool c166sim::simCPUHasVectorRegs() { return SimCPU == "xc16x"; }
 

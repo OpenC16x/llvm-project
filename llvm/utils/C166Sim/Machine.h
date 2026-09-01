@@ -31,7 +31,10 @@ namespace c166sim {
 /// the wrong registers and, where a name is gated, does not decode at all.
 /// Defaults to the XC164CM, which is the part this simulator models - CPUCON1's
 /// vector spacing, VECSEG, the PLL and the coprocessor are all its.
-void setSimCPU(llvm::StringRef CPU);
+/// \p Features is what the part has on top of its core, in the compiler's
+/// spelling: the coprocessor is a feature rather than a core, so an ST10 with
+/// one is "+mac" here exactly as it is -mmac there.
+void setSimCPU(llvm::StringRef CPU, llvm::StringRef Features);
 
 /// Whether that part has the two registers that place the interrupt vector
 /// table: VECSEG, which names the segment it lives in, and CPUCON1, whose

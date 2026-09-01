@@ -19,6 +19,7 @@
 #include "Arch/SystemZ.h"
 #include "Arch/VE.h"
 #include "Arch/X86.h"
+#include "C166.h"
 #include "HIPAMD.h"
 #include "Hexagon.h"
 #include "MSP430.h"
@@ -961,6 +962,9 @@ void tools::getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   case llvm::Triple::nvptx:
   case llvm::Triple::nvptx64:
     NVPTX::getNVPTXTargetFeatures(D, Triple, Args, Features);
+    break;
+  case llvm::Triple::c166:
+    c166::getC166TargetFeatures(D, Args, Features);
     break;
   case llvm::Triple::m68k:
     m68k::getM68kTargetFeatures(D, Triple, Args, Features);

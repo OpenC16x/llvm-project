@@ -45,6 +45,17 @@ static StringRef getCore(const ArgList &Args) {
   return StringRef();
 }
 
+void c166::getC166TargetFeatures(const Driver &D, const ArgList &Args,
+                                 std::vector<StringRef> &Features) {
+  // The coprocessor is a feature rather than a core: -mcpu=st10 covers parts
+  // that have it and parts that do not, and ST's own programming manual says
+  // to consult the device data sheet.  So it has to be askable for on top of
+  // whichever core was named, and -mcpu=xc16x implies it without being asked.
+  if (const Arg *A = Args.getLastArg(options::OPT_mmac, options::OPT_mno_mac))
+    Features.push_back(A->getOption().matches(options::OPT_mmac) ? "+mac"
+                                                                 : "-mac");
+}
+
 C166ToolChain::C166ToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
     : Generic_ELF(D, Triple, Args) {

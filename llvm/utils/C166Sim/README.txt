@@ -30,6 +30,8 @@ names a different symbol.
   --max-steps        give up after this many instructions
   --interrupt-at     raise an interrupt request once, at a state count
   --interrupt-every  raise one every that many states
+  --mcpu             the part, which is what the decoder reads registers for
+  --mattr            what that part has on top of its core, e.g. +mac
 
 --backtrace is the one that is a check rather than a convenience.  It walks the
 stack using the call frame information in the executable, which on this target
@@ -156,7 +158,11 @@ quiet wrong answer.
 
 Which part is being simulated matters and --mcpu says: the same short address
 is a different special function register on different derivatives, and two of
-the ones modelled here exist only on the XC16x.  FF12H is its VECSEG, which
+the ones modelled here exist only on the XC16x.  --mattr says what the part has
+on top of its core, in the compiler's spelling - the coprocessor is a feature
+rather than a core, so an ST10 that has one is "--mcpu=st10 --mattr=+mac" here
+exactly as it is "-mcpu=st10 -mmac" there, and without it the decoder refuses
+the instructions the compiler just emitted for that part.  FF12H is its VECSEG, which
 says where the interrupt vector table is, and a C167's SYSCON, which that
 part's crt0 writes on the way up; FE18H is its CPUCON1, whose VECSC field sets
 the space between slots.  On a part without them the table is four bytes a slot

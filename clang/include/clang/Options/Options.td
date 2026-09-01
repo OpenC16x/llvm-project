@@ -222,6 +222,8 @@ def m_sparc_Features_Group : OptionGroup<"<sparc features group>">,
 // These are explicitly handled.
 def m_hexagon_Features_HVX_Group : OptionGroup<"<hexagon features group>">,
                                    Group<m_Group>, DocName<"Hexagon HVX">;
+def m_c166_Features_Group : OptionGroup<"<c166 features group>">,
+                            Group<m_Group>, DocName<"C166">;
 def m_m68k_Features_Group: OptionGroup<"<m68k features group>">,
                            Group<m_Group>, DocName<"M68k">;
 def m_mips_Features_Group : OptionGroup<"<mips features group>">,
@@ -7288,6 +7290,14 @@ foreach i = 0 ... 7 in
 foreach i = 0 ... 5 in
   def ffixed_i#i : Flag<["-"], "ffixed-i"#i>, Group<m_sparc_Features_Group>,
     HelpText<"Reserve the I"#i#" register (SPARC only)">;
+} // let Flags = [TargetSpecific]
+
+// C166 feature flags
+let Flags = [TargetSpecific] in {
+def mmac : Flag<["-"], "mmac">, Group<m_c166_Features_Group>,
+  HelpText<"Use the multiply-accumulate coprocessor (C166 only)">;
+def mno_mac : Flag<["-"], "mno-mac">, Group<m_c166_Features_Group>,
+  HelpText<"Do not use the multiply-accumulate coprocessor (C166 only)">;
 } // let Flags = [TargetSpecific]
 
 // M68k features flags

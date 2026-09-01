@@ -41,6 +41,15 @@ static cl::opt<std::string>
          cl::value_desc("cpu"));
 
 static cl::opt<std::string>
+    MAttr("mattr",
+          cl::desc("What the part has on top of its core, comma separated and "
+                   "in the compiler's spelling: the coprocessor is a feature "
+                   "rather than a core, so an ST10 that has one is "
+                   "--mcpu=st10 --mattr=+mac here exactly as it is -mcpu=st10 "
+                   "-mmac there."),
+          cl::value_desc("+feature,-feature"));
+
+static cl::opt<std::string>
     ExitSymbol("exit-symbol", cl::init("__c166_exit"),
                cl::desc("halt when execution reaches this symbol "
                         "(default __c166_exit)"));
@@ -140,7 +149,7 @@ int main(int argc, char **argv) {
 
   // Before anything is decoded: the decoder is built once, on first use, and
   // which derivative's special function registers it knows is part of it.
-  c166sim::setSimCPU(MCPU);
+  c166sim::setSimCPU(MCPU, MAttr);
 
   auto Fail = [](const Twine &Msg) -> int {
     WithColor::error(errs(), "c166-sim") << Msg << "\n";

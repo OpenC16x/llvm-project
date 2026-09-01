@@ -65,14 +65,19 @@ links and does not run.
 The multiply-accumulate unit is a feature rather than a core, because
 `-mcpu=st10` covers parts that have it and parts that do not — ST's own
 programming manual says to consult the device data sheet. `-mcpu=xc16x`
-implies it. Elsewhere it has to be asked for, and at present the only
-spelling the driver accepts is the general one:
+implies it. Elsewhere it has to be asked for:
 
 ```
-clang --target=c166 -mcpu=st10 -Xclang -target-feature -Xclang +mac ...
+clang --target=c166 -mcpu=st10 -mmac ...
 ```
 
-There is no `-mmac`; that is a rough edge rather than a design.
+`-mno-mac` is the other way, and turns the unit off on a core that would
+otherwise imply it. Neither flag leaves the decision to `-mcpu=` and `-mmcu=`.
+
+The simulator takes the same thing in the same spelling — `c166-sim
+--mcpu=st10 --mattr=+mac` — because its decoder is the target's own, and
+without being told it would refuse the instructions the compiler had just
+emitted for that part.
 
 What the unit does for ordinary C, without an asm statement: `acc += a * b`
 with 16-bit operands and a 32-bit accumulator, `(a * b + 0x8000) >> 16` as one
