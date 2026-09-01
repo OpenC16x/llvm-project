@@ -193,6 +193,44 @@ number, and nothing has to be asked for: the table appears when a program has
 handlers and costs nothing when it does not. The number is 1 to 127, trap 0
 being reset, and two handlers asking for one slot is an error.
 
+### A register bank of its own
+
+```c
+__attribute__((interrupt(36), c166_bank)) void t4_isr(void) { ... }
+```
+
+`R0` to `R15` are a window into internal RAM at the address the context
+pointer holds, so moving that pointer moves the whole window. With
+`c166_bank` the handler enters with `SCXT CP, #bank` and leaves with
+`POP CP`: the interrupted code's registers are never touched, so there is
+nothing to spill and nothing to reload — one instruction in and one out,
+against up to fifteen of each.
+
+| a handler that calls a function | without | with |
+|---|---|---|
+| entry and exit | 114 states | **64** |
+| handler size | 110 bytes | **42** |
+
+A leaf handler that touches one register saves nothing — there was only one
+register to save. The win is in handlers with a lot live at once, which is
+what calling anything makes of one.
+
+The bank is 32 bytes of internal RAM, reserved by the compiler and placed by
+the linker script — the only memory a context pointer may name. The scripts
+here have room for seven; an eighth is a link error naming the region. Each
+handler gets its own, so a higher-priority handler interrupting a banked one
+cannot corrupt it.
+
+A `NOP` follows the `SCXT`: no manual to hand says whether the instruction
+after one that writes `CP` already sees the new window, and being wrong would
+put the handler's first register write in the interrupted code's bank.
+
+`MDL`, `MDH`, `MDC` and the MAC accumulator are not part of the window and are
+still saved by a handler that disturbs them. `R0` is the ABI stack pointer and
+belongs to the interrupted code, so a handler that calls anything or needs a
+frame copies it across in three instructions; a leaf that fits in registers
+pays nothing for it.
+
 Without a number the handler is still a handler, and reaching it is left to a
 hand-written vector — which is what a program with a shared interrupt node or
 its own dispatcher wants. That is the same section by another route:

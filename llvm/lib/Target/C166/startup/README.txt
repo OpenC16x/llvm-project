@@ -236,8 +236,15 @@ Above the register bank, from 00'FD00H to 00'FDFEH, is the bit-addressable RAM
 - the 128 words a bit instruction can name, and the only memory it can.  That
 is where __bitaddr places a variable, and it is a region of its own in the
 script, so a program with more than 256 bytes of them is told at the link
-rather than one relocation at a time.  Nothing else here uses that part of the
-memory: the two stacks and the register bank are all below it.
+rather than one relocation at a time.
+
+Between the two, from 00'FC20H to 00'FCFEH, are the interrupt banks: 224 bytes
+above the sixteen words the reset register bank occupies, which is seven banks
+of sixteen registers.  That is where a __attribute__((c166_bank)) handler's
+own registers go, and it has to be this memory because internal RAM is the
+only memory a context pointer may name.  Nothing else uses it: the two stacks
+and the reset register bank are all below it and the bit-addressable RAM is
+above.
 
 The variant of this part with 32 KByte of Flash has no DSRAM, and the script
 handles that without an edit: the dsram region becomes the dual-port RAM, and
@@ -250,7 +257,8 @@ special function registers.  There is no scratch register involved.
 crt0.S leaves CP where reset put it.  CP says where R0 to R15 are, so an
 instruction that changes it changes what every register operand around it
 means; a program that wants a different register bank is better off doing that
-deliberately than having the startup code do it quietly.
+deliberately than having the startup code do it quietly.  A banked interrupt
+handler is the deliberate case, and it puts CP back before it returns.
 
 The clock
 ---------
@@ -382,6 +390,20 @@ which makes it save what it uses and return with RETI.  Given a trap number it
 also claims that slot, and the compiler writes the jump that goes in it:
 
   __attribute__((interrupt(43))) void handler(void) { ... }
+
+A handler that has to be quick can have sixteen registers of its own rather
+than saving the ones it uses:
+
+  __attribute__((interrupt(43), c166_bank)) void handler(void) { ... }
+
+R0 to R15 are a window into internal RAM at the address CP holds, so SCXT CP,
+#bank moves the whole window on the way in and POP CP moves it back on the way
+out - one instruction each against up to fifteen.  The bank is thirty-two
+bytes the linker script places in the banks region, which is the 224 bytes
+between the reset register bank at FC00H and the bit-addressable RAM at FD00H:
+seven banks, and an eighth is a region overflow naming it.  It has to be that
+memory rather than any other, because internal RAM is the only memory a
+context pointer may name.
 
 A slot can be claimed by name instead, which is what a handler wired to a
 peripheral wants:

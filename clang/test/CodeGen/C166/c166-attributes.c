@@ -11,6 +11,11 @@ __attribute__((interrupt)) void handler(void) {}
 __attribute__((interrupt(26))) void slotted(void) {}
 // CHECK: define {{.*}}void @slotted() [[SLOTTED:#[0-9]+]]
 
+// And a bank of its own, which the backend reads before it decides what is
+// callee saved.
+__attribute__((interrupt(27), c166_bank)) void banked(void) {}
+// CHECK: define {{.*}}void @banked() [[BANKED:#[0-9]+]]
+
 __attribute__((far)) int distant(int x) { return x + 1; }
 // CHECK: define {{.*}}i16 @distant(i16 noundef %x) [[FAR:#[0-9]+]]
 
@@ -29,6 +34,7 @@ void caller(void) { elsewhere(); }
 
 // CHECK-DAG: attributes [[ISR]] = { noinline {{.*}}"interrupt"{{.*}} }
 // CHECK-DAG: attributes [[SLOTTED]] = { noinline {{.*}}"c166-interrupt-vector"="26"{{.*}}"interrupt"{{.*}} }
+// CHECK-DAG: attributes [[BANKED]] = { noinline {{.*}}"c166-bank"{{.*}}"c166-interrupt-vector"="27"{{.*}}"interrupt"{{.*}} }
 // CHECK-DAG: attributes [[FAR]] = { {{.*}}"far"{{.*}} }
 // CHECK-DAG: attributes [[FARDECL]] = { "far"{{.*}} }
 // CHECK-DAG: attributes [[NEAR]] = { noinline nounwind optnone "no-trapping-math"{{.*}} }

@@ -1105,6 +1105,12 @@ def C166Interrupt : InheritableAttr, TargetSpecificAttr<TargetC166> {
   let Documentation = [C166InterruptDocs];
 }
 
+def C166Bank : InheritableAttr, TargetSpecificAttr<TargetC166> {
+  let Spellings = [GCC<"c166_bank">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [C166BankDocs];
+}
+
 def C166BitAddr : InheritableAttr, TargetSpecificAttr<TargetC166> {
   let Spellings = [GCC<"c166_bitaddr">];
   let Subjects = SubjectList<[Var]>;

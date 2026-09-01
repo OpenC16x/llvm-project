@@ -11,8 +11,10 @@
    Both ways of reaching a handler are here.  One names its trap number and
    lets the compiler write the slot; the other is placed by hand in the slot's
    own section, which is what a handler behind a dispatcher or on a shared
-   node still needs.  */
-/* c166-sim-flags: --interrupt-every=1009:1:8 --interrupt-every=1447:26:9 */
+   node still needs.  A third has a register bank of its own, so that the
+   switch is checked by the same rule as everything else: the answer must not
+   move.  */
+/* c166-sim-flags: --interrupt-every=1009:1:8 --interrupt-every=1447:26:9 --interrupt-every=2213:27:10 */
 
 #ifdef __c166__
 static void put(char c) { *(__far volatile unsigned char *)0xFF0000 = c; }
@@ -68,6 +70,25 @@ __attribute__((interrupt(26))) void nested(void) {
   d += a;
   A = a; D = d;
   Ticks = Ticks + 0x10000u;
+}
+
+/* A third, with sixteen registers of its own rather than saving the ones it
+   uses: SCXT on the way in and POP CP on the way out.  It is the highest
+   priority of the three, so it lands inside either of the others, and it uses
+   the whole bank - if the switch were wrong, what it wrote would land in the
+   interrupted handler's registers and the answer below would move.  It calls
+   something too, which is what makes it need R0, the ABI stack pointer that
+   is not part of the register window.  */
+__attribute__((noinline)) static u32 mix(u32 x) { return x * 1103515245u + 7u; }
+
+__attribute__((interrupt(27), c166_bank)) void banked(void) {
+  u32 a = A, b = B, c = C, d = D;
+  a = mix(a) ^ b;
+  b = mix(b) + c;
+  c = mix(c) - d;
+  d = mix(d) ^ a;
+  A = a; B = b; C = c; D = d;
+  Ticks = Ticks + 0x1000000u;
 }
 #endif
 

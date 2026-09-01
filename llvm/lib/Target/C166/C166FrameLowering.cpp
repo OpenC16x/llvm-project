@@ -14,6 +14,7 @@
 #include "C166.h"
 #include "C166InstrInfo.h"
 #include "C166Subtarget.h"
+#include "MCTargetDesc/C166MCTargetDesc.h"
 #include "MCTargetDesc/C166UnwindRules.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -23,6 +24,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetOptions.h"
 
@@ -210,6 +212,40 @@ void C166FrameLowering::emitUnwindRules(MachineBasicBlock &MBB,
         .setMIFlag(Flag);
 }
 
+/// Whether this handler gets sixteen registers of its own rather than saving
+/// the ones it uses.
+///
+/// SCXT CP, #bank pushes the context pointer and loads a new one, which moves
+/// the whole register window somewhere nobody else is using: the interrupted
+/// code's R0 to R15 are left exactly as they were, so there is nothing to
+/// spill and nothing to reload.  POP CP hands them back.  That is one
+/// instruction in and one out against up to fifteen of each, and it is what
+/// __attribute__((c166_bank)) asks for.
+static bool usesOwnRegisterBank(const MachineFunction &MF) {
+  return MF.getFunction().hasFnAttribute("c166-bank");
+}
+
+/// The symbol naming this handler's bank.  The AsmPrinter reserves the
+/// thirty-two bytes it stands for; the linker script decides where they land,
+/// which has to be internal RAM because that is the only memory a context
+/// pointer may name.
+static const char *bankSymbolFor(MachineFunction &MF) {
+  return MF.createExternalSymbolName("__c166_bank_" + MF.getName().str());
+}
+
+/// Whether a handler with a bank of its own still needs R0.
+///
+/// R0 is the ABI stack pointer and belongs to the interrupted code, not to the
+/// register window; the new bank's copy of it holds whatever was there last
+/// time.  A handler with no frame and no calls never looks at it, and then the
+/// three instructions below are three instructions of nothing.  Anything that
+/// spills, takes a local's address or calls something does look at it.
+static bool bankedHandlerNeedsStackPointer(const MachineFunction &MF) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  return MFI.hasCalls() || MFI.getStackSize() != 0 ||
+         MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken();
+}
+
 void C166FrameLowering::emitPrologue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
   MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -224,10 +260,56 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
   // Where the return address is, before anything moves the hardware stack.
   emitUnwindRules(MBB, MBBI, DL, /*Depth=*/0, MachineInstr::FrameSetup);
 
+  unsigned SavedWords = 0;
+
+  // The register bank first, because everything after it is written in the new
+  // window rather than the old one.
+  if (usesOwnRegisterBank(MF)) {
+    BuildMI(MBB, MBBI, DL, TII.get(C166::SCXTregi))
+        .addReg(C166::CP)
+        .addExternalSymbol(bankSymbolFor(MF))
+        .setMIFlag(MachineInstr::FrameSetup);
+    ++SavedWords;
+
+    // Whether the instruction after one that writes CP already sees the new
+    // register window is not settled by any manual to hand.  The programming
+    // manual's SCXT page describes the push and the load and says nothing
+    // about it, and its pipeline section covers the SFR and stack pointer
+    // cases without covering this one.  Getting it wrong is not a slow
+    // program but a wrong one: this handler's first register write would land
+    // in the interrupted code's bank instead of its own, intermittently and
+    // with nothing to see afterwards.  The simulator cannot help either, since
+    // it applies the write at once - so this is one of the places where
+    // running it proves nothing.  Two states against the fifty the bank
+    // saves is the wrong side to economise on; if the manual turns up and says
+    // the window is live immediately, this comes out again.
+    BuildMI(MBB, MBBI, DL, TII.get(C166::NOP))
+        .setMIFlag(MachineInstr::FrameSetup);
+
+    // R0 is the ABI stack pointer, which belongs to the interrupted code and
+    // not to the register window - so the new bank's copy of it is whatever
+    // was left there.  Bring the real one across: SCXT has just pushed the old
+    // context pointer, so SP names the word holding it, and R0 is the first
+    // word of the bank that names.  R1 is scratch here because nothing in this
+    // bank is live yet; the frame pointer, if there is one, is set up further
+    // down from the R0 this leaves.
+    if (bankedHandlerNeedsStackPointer(MF)) {
+      const MCRegisterInfo &MRI = *MF.getContext().getRegisterInfo();
+      BuildMI(MBB, MBBI, DL, TII.get(C166::MOV16ra), C166::R1)
+          .addImm(C166::getSFRAddressForReg(MRI, C166::SYSSP))
+          .setMIFlag(MachineInstr::FrameSetup);
+      BuildMI(MBB, MBBI, DL, TII.get(C166::MOV16rp), C166::R1)
+          .addReg(C166::R1)
+          .setMIFlag(MachineInstr::FrameSetup);
+      BuildMI(MBB, MBBI, DL, TII.get(C166::MOV16rp), C166::R0)
+          .addReg(C166::R1)
+          .setMIFlag(MachineInstr::FrameSetup);
+    }
+  }
+
   // Save the multiply/divide unit before anything else can disturb it.  MDC
   // goes first because reading MDL - which is what pushing it does - clears
   // MDC.MDRIU, the bit that says the unit is in use.
-  unsigned SavedWords = 0;
   if (needsMulDivSave(MF)) {
     for (MCRegister Reg : {C166::MDC, C166::MDL, C166::MDH})
       BuildMI(MBB, MBBI, DL, TII.get(C166::PUSH))
@@ -338,8 +420,15 @@ void C166FrameLowering::emitEpilogue(MachineFunction &MF,
       BuildMI(MBB, MBBI, DL, TII.get(C166::POP), Reg)
           .setMIFlag(MachineInstr::FrameDestroy);
 
+  // The register window last, so that everything above it ran in this
+  // handler's own bank.  This is the whole of putting the interrupted code's
+  // registers back: they were never touched.
+  if (usesOwnRegisterBank(MF))
+    BuildMI(MBB, MBBI, DL, TII.get(C166::POP), C166::CP)
+        .setMIFlag(MachineInstr::FrameDestroy);
+
   // And back up again, so that the rules are right for the RETI as well.
-  if (!MACSaves.empty() || needsMulDivSave(MF))
+  if (!MACSaves.empty() || needsMulDivSave(MF) || usesOwnRegisterBank(MF))
     emitUnwindRules(MBB, MBBI, DL, /*Depth=*/0, MachineInstr::FrameDestroy);
 }
 

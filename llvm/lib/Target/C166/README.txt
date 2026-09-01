@@ -449,6 +449,7 @@ give one up, and nothing walks the stack anyway.
 Three things the backend reads are spelled in C as attributes:
 
   __attribute__((interrupt))  the "interrupt" function attribute
+  __attribute__((c166_bank))  the "c166-bank" function attribute
   __attribute__((far))        the "far" function attribute
   __far, i.e. address space 1 far data
 
@@ -460,6 +461,43 @@ number does - and reports two handlers claiming one slot, which the linker
 could only see as a location counter that had to move backwards.  The number
 is 1 to 127: trap 0 is reset and crt0.S owns it, which leaves zero free to
 mean that the attribute was written without one.
+
+"c166-bank" gives a handler sixteen registers of its own instead of saving the
+ones it uses.  R0 to R15 are a window into internal RAM at the address CP
+holds, so SCXT CP, #bank moves the whole window and POP CP moves it back;
+getCalleeSavedRegs then hands back an empty list, because the registers the
+handler writes are not the interrupted code's.  Measured on a handler that
+calls a function - the case that saves most - entry and exit go from 114 states
+to 64 and the handler from 110 bytes to 42.  A leaf that touches one register
+saves nothing, there having been one register to save.
+
+A NOP follows the SCXT.  Whether the instruction after one that writes CP
+already sees the new window is not settled by any manual to hand - the
+programming manual's SCXT page describes the push and the load and says
+nothing about it, and its pipeline section covers the SFR and stack pointer
+cases without covering this one.  Being wrong about it would put the handler's
+first register write in the interrupted code's bank, intermittently and with
+nothing to see afterwards, and the simulator cannot decide it either because
+it applies the write at once.  Two states against the fifty the bank saves is
+the wrong side to economise on.
+
+Three things do not follow from the window and are handled separately.  The
+multiply/divide unit and the coprocessor are not part of a bank and are still
+saved by the handler that disturbs them.  R0 is the ABI stack pointer and
+belongs to the interrupted code rather than to the window, so a handler that
+calls anything or needs a frame brings it across: SCXT has just pushed the old
+CP, so SP names the word holding it and R0 is the first word of the bank that
+names - three instructions, and only where they are needed.  Chasing CP rather
+than naming the reset bank is what makes it right when the handler interrupted
+another banked handler, whose R0 is the live one.
+
+The bank itself is thirty-two bytes the AsmPrinter reserves in a NOBITS
+section of its own per handler, so that a handler nothing keeps takes its bank
+with it, and the linker script puts them in internal RAM - the only memory a
+context pointer may name.  Each handler gets its own rather than naming a
+shared one by number: sharing is only safe between handlers that cannot
+interrupt each other, which is a fact about their priorities that the compiler
+cannot see.
 
 Emitting a slot also defines __c166_vector_table, weak and absolute, which is
 what tells the linker script the table is wanted: its 128 rows are conditional

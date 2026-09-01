@@ -135,6 +135,14 @@ that they are, the condition flags, the multiply/divide unit, the system stack
 with its STKOV and STKUN bounds, the DPP window and the EXTP/EXTS overrides
 that replace it, and bit addressing.
 
+Because the registers really are that window, moving CP moves them, which is
+what a __attribute__((c166_bank)) handler does on the way in and undoes on the
+way out.  A context pointer that does not name the internal RAM is refused: on
+the part the window would read whatever that memory is, and here it would read
+this simulator's own array and quietly work, which is worse - a bank placed
+outside the internal RAM by a linker script with no banks region is exactly
+the mistake nothing else catches.
+
 101 of the MAC unit's 180 forms run: the 89 the manual marks repeatable,
 which the repeat prefix runs as many times as its count says, and twelve
 register forms on top of them - CoLOAD and CoSTORE, CoMUL and CoMAC with

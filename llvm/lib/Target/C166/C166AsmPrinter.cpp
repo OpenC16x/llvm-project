@@ -185,6 +185,26 @@ void C166AsmPrinter::emitEndOfAsmFile(Module &M) {
   for (const Function &F : M) {
     if (F.isDeclaration())
       continue;
+
+    // The sixteen words __attribute__((c166_bank)) asked for.  Each handler
+    // gets its own section so that a handler nothing keeps takes its bank with
+    // it, and the linker script puts them in internal RAM, which is the only
+    // memory a context pointer may name.  Nothing initialises them, so they
+    // are NOBITS: the first thing the handler does with a register is write
+    // it, because the register allocator had a whole empty bank to work in.
+    if (F.hasFnAttribute("c166-bank")) {
+      MCSection *Bank = OutContext.getELFSection(
+          (".c166_banks." + F.getName()).str(), ELF::SHT_NOBITS,
+          ELF::SHF_ALLOC | ELF::SHF_WRITE);
+      OutStreamer->switchSection(Bank);
+      OutStreamer->emitValueToAlignment(Align(2));
+      MCSymbol *Sym =
+          OutContext.getOrCreateSymbol("__c166_bank_" + F.getName());
+      OutStreamer->emitLabel(Sym);
+      OutStreamer->emitELFSize(Sym, MCConstantExpr::create(32, OutContext));
+      OutStreamer->emitZeros(32);
+    }
+
     Attribute A = F.getFnAttribute("c166-interrupt-vector");
     if (!A.isStringAttribute())
       continue;

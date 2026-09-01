@@ -177,6 +177,15 @@ MEMORY
    * so it is a region of its own rather than a slice of one above. */
   bitram (rw) : ORIGIN = 0x0000FD00, LENGTH = 256
 
+  /* The interrupt banks: where __attribute__((c166_bank)) handlers get their
+   * own sixteen registers.  The reset register bank is the sixteen words at
+   * FC00H, so FC20H is the first free word above it, and FD00H is where the
+   * bit-addressable RAM starts - 224 bytes, which is seven banks.  It has to
+   * be this memory and not any other: a context pointer may only name the
+   * internal RAM.  A program that wants an eighth bank gets a region overflow
+   * naming this one. */
+  banks (rw) : ORIGIN = 0x0000FC20, LENGTH = 0x00E0
+
   /* The PSRAM, which is the only RAM here that a near address cannot reach:
    * it is data page 896 and the four pointers are spoken for.  So this is
    * where __far data goes, and it is worth knowing that the manual calls it
@@ -464,6 +473,14 @@ SECTIONS
     __data_end = .;
   } > dsram AT > rom
   __data_load = LOADADDR(.data);
+
+  /* Sixteen words apiece, in internal RAM, for the handlers that asked for a
+   * bank of their own.  Nothing initialises them - a handler's first use of a
+   * register is a write, because the allocator had a whole empty bank - so
+   * they are NOBITS and take no room in the image. */
+  .c166_banks (NOLOAD) : ALIGN(2) {
+    *(.c166_banks .c166_banks.*)
+  } > banks
 
   .bss (NOLOAD) : ALIGN(2) {
     __bss_start = .;

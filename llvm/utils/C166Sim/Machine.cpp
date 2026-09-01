@@ -31,6 +31,11 @@ static constexpr uint32_t SFR_CPUCON1 = 0xFE18, SFR_VECSEG = 0xFF12;
 // this way, so these have to be the accumulator itself and not storage that
 // happens to sit at the same addresses.  MRW is not here: nothing modelled
 // reads or writes it, so it behaves as the storage everything unmodelled does.
+// The internal dual-port RAM, which is the only memory a register bank can be
+// in and the only memory an IDX pointer reaches.  Execute.cpp says the same of
+// the second; both are the XC164CM's.
+static constexpr uint16_t DPRamStart = 0xF600, DPRamEnd = 0xFDFF;
+
 static constexpr uint32_t SFR_MAL = 0xFE5C, SFR_MAH = 0xFE5E;
 static constexpr uint32_t SFR_MCW = 0xFFDC, SFR_MSW = 0xFFDE;
 
@@ -188,6 +193,20 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
       setACC((ACC & INT64_C(0xFFFFFFFF)) | (int64_t(V & 0xFF) << 32));
       return;
     case SFR_CP:
+      // R0 to R15 are a window into the internal RAM at the address this
+      // holds, so a context pointer that names anything else does not name
+      // registers at all.  On the part the window would read whatever that
+      // memory is; here it would read the simulator's own array and quietly
+      // work, which is worse - a register bank placed outside the internal
+      // RAM by a linker script that has no banks region is exactly the
+      // mistake nothing else would catch.  The bounds are the XC164CM's
+      // dual-port RAM, which is what this simulator models throughout.
+      if (V < DPRamStart || uint32_t(V) + 32 > uint32_t(DPRamEnd) + 1) {
+        Stop = StopReason::BadAccess;
+        StopDetail = "a context pointer outside the internal RAM, where the "
+                     "register bank has to be - see c166_bank";
+        return;
+      }
       CP = V;
       return;
     case SFR_SP:

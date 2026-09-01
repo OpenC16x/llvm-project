@@ -6736,6 +6736,26 @@ static void handleC166InterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) C166InterruptAttr(S.Context, AL, Number));
 }
 
+static void handleC166BankAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (!isFuncOrMethodForAttrSubject(D)) {
+    S.Diag(D->getLocation(), diag::warn_attribute_wrong_decl_type)
+        << AL << AL.isRegularKeywordAttribute() << ExpectedFunction;
+    return;
+  }
+
+  // Switching the context pointer gives the function sixteen registers of its
+  // own, which is only meaningful where nothing was passed in them and nothing
+  // is returned in them.  That is an interrupt handler and nothing else: an
+  // ordinary function's arguments arrive in R2 and up, and would be in the
+  // bank it just left.
+  if (!D->hasAttr<C166InterruptAttr>()) {
+    S.Diag(AL.getLoc(), diag::err_attribute_only_on_interrupt) << AL;
+    return;
+  }
+
+  handleSimpleAttribute<C166BankAttr>(S, D, AL);
+}
+
 static void handleC166BitAddrAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Same reasoning as __dpram below: what is placed is an object with an
   // address of its own, and an automatic variable is on the stack.
@@ -7800,6 +7820,9 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
     break;
   case ParsedAttr::AT_C166DPRam:
     handleC166DPRamAttr(S, D, AL);
+    break;
+  case ParsedAttr::AT_C166Bank:
+    handleC166BankAttr(S, D, AL);
     break;
   case ParsedAttr::AT_C166BitAddr:
     handleC166BitAddrAttr(S, D, AL);

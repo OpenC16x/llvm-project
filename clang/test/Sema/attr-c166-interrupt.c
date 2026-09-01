@@ -23,6 +23,21 @@ __attribute__((interrupt)) int not_a_function; // expected-warning {{'interrupt'
 
 __attribute__((interrupt)) void isr_ok(void) {} // no diagnostics
 
+// A bank of its own, which is only meaningful where nothing was passed in a
+// register: an ordinary function's arguments arrive in R2 and up, which are in
+// the bank it would have just left.
+__attribute__((interrupt(40), c166_bank)) void isr_banked(void) {} // no diagnostics
+
+__attribute__((interrupt)) __attribute__((c166_bank)) void isr_banked_no_slot(void) {} // no diagnostics
+
+__attribute__((c166_bank)) void not_a_handler(void) {} // expected-error {{'c166_bank' attribute only applies to functions that also have the 'interrupt' attribute}}
+
+// The order the two are written in must not matter, and this is the one that
+// would if the check looked at the parsed attribute rather than the decl.
+__attribute__((c166_bank, interrupt)) void bank_first(void) {} // expected-error {{'c166_bank' attribute only applies to functions that also have the 'interrupt' attribute}}
+
+__attribute__((c166_bank)) int bank_not_a_function; // expected-warning {{'c166_bank' attribute only applies to functions}}
+
 __attribute__((far)) void far_ok(void) {}
 
 __attribute__((far)) int far_not_a_function; // expected-warning {{'far' attribute only applies to functions}}

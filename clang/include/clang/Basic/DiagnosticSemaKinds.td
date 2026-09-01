@@ -3501,6 +3501,9 @@ def warn_init_priority_reserved : Warning<
   InGroup<DiagGroup<"init-priority-reserved">>, DefaultError;
 def err_attribute_argument_out_of_bounds : Error<
   "%0 attribute parameter %1 is out of bounds">;
+def err_attribute_only_on_interrupt : Error<
+  "%0 attribute only applies to functions that also have the 'interrupt' "
+  "attribute">;
 def err_attribute_only_once_per_parameter : Error<
   "%0 attribute can only be applied once per parameter">;
 def err_mismatched_uuid : Error<"uuid does not match previous declaration">;

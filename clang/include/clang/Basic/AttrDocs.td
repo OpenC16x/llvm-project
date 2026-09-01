@@ -3342,6 +3342,49 @@ dispatcher of its own wants.
   }];
 }
 
+def C166BankDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "c166_bank (C166)";
+  let Content = [{
+Gives a C166 interrupt handler sixteen registers of its own instead of saving
+the ones it uses::
+
+  __attribute__((interrupt(36), c166_bank)) void t4_isr(void) { ... }
+
+The C166's ``R0`` to ``R15`` are a window into internal RAM at the address the
+context pointer holds, so moving that pointer moves the whole window. The
+handler enters with ``SCXT CP, #bank``, which pushes the old context pointer
+and loads the new one, and leaves with ``POP CP``. The interrupted code's
+registers are never touched, so there is nothing to spill and nothing to
+reload -- one instruction in and one out, against up to fifteen of each.
+
+Measured on a handler that calls a function, which is the case that saves the
+most: 114 states down to 64, and 110 bytes of handler down to 42. A leaf
+handler that touches one register saves nothing, because there was only one
+register to save.
+
+The bank is thirty-two bytes of internal RAM, reserved by the compiler and
+placed by the linker script, which is the only memory a context pointer may
+name. The scripts shipped with the backend have room for seven banks; asking
+for an eighth is a link error naming the region. Each handler gets its own
+bank -- they are never shared, so a handler cannot be corrupted by another one
+at a higher priority interrupting it.
+
+Two things are not part of the register window and are still saved by the
+handler that disturbs them: the multiply/divide unit (``MDL``, ``MDH``,
+``MDC``) and the MAC unit's accumulator.
+
+``R0`` is the ABI stack pointer and belongs to the interrupted code rather than
+to the window, so a handler that calls anything or needs a frame copies it
+across on entry -- three instructions, and only where they are needed. A leaf
+handler that fits in registers pays nothing for it.
+
+The attribute is only accepted together with ``interrupt``. An ordinary
+function's arguments arrive in ``R2`` and up, which are in the bank it would
+have just left.
+  }];
+}
+
 def C166BitAddrDocs : Documentation {
   let Category = DocCatVariable;
   let Heading = "c166_bitaddr (C166)";

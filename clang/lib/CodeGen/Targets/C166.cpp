@@ -83,6 +83,11 @@ void C166TargetCodeGenInfo::setTargetAttributes(
     // was written without one, and is not a slot: trap 0 is reset.
     if (A->getNumber())
       F->addFnAttr("c166-interrupt-vector", llvm::utostr(A->getNumber()));
+    // A handler with a bank of its own switches the context pointer rather
+    // than saving the registers it uses, so the backend has to know before it
+    // decides what is callee saved.
+    if (FD->hasAttr<C166BankAttr>())
+      F->addFnAttr("c166-bank");
   }
 }
 
