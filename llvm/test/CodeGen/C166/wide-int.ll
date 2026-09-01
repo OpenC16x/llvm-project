@@ -82,10 +82,6 @@ define i32 @add32_imm(i32 %a) {
 define i64 @add64(i64 %a, i64 %b) {
 ; CHECK-LABEL: add64:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r6, [r0]
-; CHECK-NEXT:    mov r7, [r0+#2]
-; CHECK-NEXT:    mov r8, [r0+#4]
-; CHECK-NEXT:    mov r9, [r0+#6]
 ; CHECK-NEXT:    add r2, r6
 ; CHECK-NEXT:    addc r3, r7
 ; CHECK-NEXT:    addc r4, r8
@@ -98,10 +94,6 @@ define i64 @add64(i64 %a, i64 %b) {
 define i64 @sub64(i64 %a, i64 %b) {
 ; CHECK-LABEL: sub64:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    mov r6, [r0]
-; CHECK-NEXT:    mov r7, [r0+#2]
-; CHECK-NEXT:    mov r8, [r0+#4]
-; CHECK-NEXT:    mov r9, [r0+#6]
 ; CHECK-NEXT:    sub r2, r6
 ; CHECK-NEXT:    subc r3, r7
 ; CHECK-NEXT:    subc r4, r8
@@ -119,7 +111,6 @@ define i32 @add32_operand_still_live(i32 %a, i32 %b, ptr %out) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    add r4, r2
 ; CHECK-NEXT:    addc r5, r3
-; CHECK-NEXT:    mov r6, [r0]
 ; CHECK-NEXT:    mov [r6+#2], r3
 ; CHECK-NEXT:    mov [r6], r2
 ; CHECK-NEXT:    mov r2, r4

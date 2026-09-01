@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 // This describes the calling conventions for the C166 architecture.
 //
-// Up to four word sized arguments are passed in R2-R5, everything else goes
+// Up to eight word sized arguments are passed in R2-R9, everything else goes
 // on the ABI stack addressed through R0.  Values are returned in R2-R5.
 //===----------------------------------------------------------------------===//
 
@@ -33,8 +33,28 @@ def CC_C166 : CallingConv<[
   // Promote i1/i8 arguments to i16.
   CCIfType<[i1, i8], CCPromoteToType<i16>>,
 
-  // The first four words are passed in registers.
-  CCIfType<[i16], CCAssignToReg<[R2, R3, R4, R5]>>,
+  // The first eight words are passed in registers.  Measured across the
+  // differential programs, against the four this used to be:
+  //
+  //   registers      text            states
+  //     4          62286           13659159
+  //     6          61702 (-0.9%)   13494156 (-1.2%)
+  //     8          61248 (-1.7%)   13400158 (-1.9%)
+  //    10          61248 (-1.7%)   13400158 (-1.9%)
+  //
+  // Nothing regressed at any of them, and ten is byte for byte identical to
+  // eight because nothing there passes more than eight words - so eight is
+  // where the curve stops, and the last free pair of caller saved registers
+  // is left to the allocator rather than spent for nothing.
+  //
+  // Most of the gain is in the soft float programs, which is what one would
+  // expect: a double is four words, so an operation on two of them wants
+  // exactly eight.  Fifteen of the nineteen programs are unchanged.
+  //
+  // R6 to R11 were already caller saved and already clobbered by a call, so
+  // widening into R6-R9 costs nothing in what a call destroys; and an
+  // interrupt handler saved all sixteen either way.
+  CCIfType<[i16], CCAssignToReg<[R2, R3, R4, R5, R6, R7, R8, R9]>>,
 
   // Everything else is passed in 2 byte stack slots.
   CCIfType<[i16], CCAssignToStack<2, 2>>

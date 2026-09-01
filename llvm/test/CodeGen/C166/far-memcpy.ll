@@ -14,13 +14,7 @@ declare void @llvm.memcpy.p0.p0.i16(ptr, ptr, i16, i1)
 define void @far_memcpy(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n) {
 ; CHECK-LABEL: far_memcpy:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    sub r0, #2
-; CHECK-NEXT:    .cfi_def_cfa_offset 2
-; CHECK-NEXT:    mov r6, [r0+#2]
-; CHECK-NEXT:    mov [r0], r6
 ; CHECK-NEXT:    calla cc_UC, __memcpy_far
-; CHECK-NEXT:    add r0, #2
-; CHECK-NEXT:    .cfi_def_cfa r0, 0
 ; CHECK-NEXT:    ret
   call void @llvm.memcpy.p1.p1.i16(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n, i1 false)
   ret void
@@ -29,13 +23,9 @@ define void @far_memcpy(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n) {
 define void @mixed_memcpy(ptr addrspace(1) %d, ptr %s, i16 %n) {
 ; CHECK-LABEL: mixed_memcpy:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    sub r0, #2
-; CHECK-NEXT:    .cfi_def_cfa_offset 2
-; CHECK-NEXT:    mov [r0], r5
+; CHECK-NEXT:    mov r6, r5
 ; CHECK-NEXT:    mov r5, #0
 ; CHECK-NEXT:    calla cc_UC, __memcpy_far
-; CHECK-NEXT:    add r0, #2
-; CHECK-NEXT:    .cfi_def_cfa r0, 0
 ; CHECK-NEXT:    ret
   call void @llvm.memcpy.p1.p0.i16(ptr addrspace(1) %d, ptr %s, i16 %n, i1 false)
   ret void
@@ -44,13 +34,7 @@ define void @mixed_memcpy(ptr addrspace(1) %d, ptr %s, i16 %n) {
 define void @far_memmove(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n) {
 ; CHECK-LABEL: far_memmove:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    sub r0, #2
-; CHECK-NEXT:    .cfi_def_cfa_offset 2
-; CHECK-NEXT:    mov r6, [r0+#2]
-; CHECK-NEXT:    mov [r0], r6
 ; CHECK-NEXT:    calla cc_UC, __memmove_far
-; CHECK-NEXT:    add r0, #2
-; CHECK-NEXT:    .cfi_def_cfa r0, 0
 ; CHECK-NEXT:    ret
   call void @llvm.memmove.p1.p1.i16(ptr addrspace(1) %d, ptr addrspace(1) %s, i16 %n, i1 false)
   ret void

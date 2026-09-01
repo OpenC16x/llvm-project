@@ -26,11 +26,26 @@ frame pointer when a function needs one.
 Calling convention
 ------------------
 
-Up to four word sized arguments are passed in R2-R5 and the rest on the ABI
+Up to eight word sized arguments are passed in R2-R9 and the rest on the ABI
 stack; values are returned in R2-R5.  Narrow arguments and return values are
 promoted to a full word.  Variadic functions receive every argument on the
 stack so that the callee can walk the list with a plain pointer.  R1 and
 R12-R15 are callee saved, R2-R11 are caller saved.
+
+Eight rather than four is measured rather than inherited, and the table is in
+the comment on CC_C166 in C166CallingConv.td.  Across the differential
+programs, four to six to eight takes the text down 0.9% then 1.7% and the
+state count down 1.2% then 1.9%, with nothing regressing at any of them; ten
+comes out byte for byte identical to eight, because nothing there passes more
+than eight words.  Most of it is the soft float programs, and for the obvious
+reason: a double is four words, so an operation on two of them wants exactly
+eight.
+
+There was no cost on the other side to weigh against it.  R6 to R11 were
+already caller saved and already destroyed by a call, so widening into R6-R9
+does not make a call clobber anything new, and an interrupt handler saved all
+sixteen either way.  There is no vendor psABI to match - see below - so the
+number is this backend's own, and this is the change that says so.
 
 A call in tail position becomes a jump once the frame is down, so the callee's
 RET goes straight back to our caller and no return address is ever pushed onto
