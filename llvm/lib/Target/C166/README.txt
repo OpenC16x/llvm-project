@@ -446,6 +446,17 @@ linker script: the memory map belongs to the board, so -T is not optional.
 There is no frame pointer by default.  Sixteen registers are not enough to
 give one up, and nothing walks the stack anyway.
 
+How much of a block copy or fill is written out rather than called for is set
+rather than inherited, and the figures are in the comment on
+MaxStoresPerMemcpy in C166ISelLowering.cpp.  The short of it: inline is faster
+than the runtime at every size measured out to 128 bytes, and by about three to
+one, because startup/mem.c copies a byte at a time - so there is no speed
+crossover and the limit at -O2 is a code growth budget, about sixty-four bytes
+at a call site.  Optimising for size has a real break-even, at 1.75 words for a
+copy and 3 for a fill, since a copy is eight bytes of code per word and a fill
+four against a call site's sixteen.  A faster runtime would move the first of
+those and not the second.
+
 Three things the backend reads are spelled in C as attributes:
 
   __attribute__((interrupt))  the "interrupt" function attribute
