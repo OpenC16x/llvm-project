@@ -33,6 +33,18 @@ namespace c166sim {
 /// vector spacing, VECSEG, the PLL and the coprocessor are all its.
 void setSimCPU(llvm::StringRef CPU);
 
+/// Whether that part has the two registers that place the interrupt vector
+/// table: VECSEG, which names the segment it lives in, and CPUCON1, whose
+/// VECSC field sets the space between slots.  Only the XC16x has them.
+///
+/// It matters because the addresses they occupy are a different register on a
+/// part that does not: FF12H is SYSCON on a C167, which its crt0.S writes on
+/// the way up, and reading that back as VECSEG sent every interrupt to a
+/// segment nothing was linked into.  Without them the table is four bytes a
+/// slot at the bottom of segment 0, which is what the reset values of both
+/// already say, so nothing else has to change.
+bool simCPUHasVectorRegs();
+
 /// The whole bus is 24 bits: 256 segments of 64 KByte.
 static constexpr uint32_t AddressSpaceSize = 1u << 24;
 static constexpr uint32_t AddressMask = AddressSpaceSize - 1;

@@ -76,11 +76,16 @@ static bool isCPUSFR(uint32_t Phys) {
   case SFR_STKUN:
   case SFR_MDC:
   case SFR_PSW:
-  case SFR_CPUCON1:
-  case SFR_VECSEG:
   case ESFR_PLLCON:
   case ESFR_SYSSTAT:
     return true;
+  // Only on a part that has them.  On one that does not, these two addresses
+  // are a different register - FF12H is a C167's SYSCON - and modelling them
+  // here would be reading whatever that part's startup code wrote there as a
+  // vector table location.
+  case SFR_CPUCON1:
+  case SFR_VECSEG:
+    return simCPUHasVectorRegs();
   default:
     return false;
   }

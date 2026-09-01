@@ -461,6 +461,13 @@ could only see as a location counter that had to move backwards.  The number
 is 1 to 127: trap 0 is reset and crt0.S owns it, which leaves zero free to
 mean that the attribute was written without one.
 
+Emitting a slot also defines __c166_vector_table, weak and absolute, which is
+what tells the linker script the table is wanted: its 128 rows are conditional
+on that symbol, so a program with no handlers does not pay 512 bytes of ROM for
+128 empty slots and a program with them needs no flag.  The VECTOR macros in
+startup/xc164cm-vectors.inc define the same symbol for a slot claimed by hand,
+which is why the two ways of claiming one behave alike.
+
 "far" is applied to declarations as well as definitions, because it is what
 tells a caller in another translation unit to use CALLS rather than CALL.
 Its spelling is shared with MIPS's long_call attribute, which means the same
@@ -754,10 +761,14 @@ Known limitations / things to do
   The 48 KByte a near address reaches is the same on both, because that limit
   is what the data page pointers cover rather than where the memory is.
 
-  vectors.ld serves both parts unchanged.  A C167 has no VECSEG and no
-  CPUCON1.VECSC, so its table is four bytes per vector at the bottom of segment
-  0 and it has no choice about it; c167.ld's rom region starts there, so
-  placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
+  The vector table is the same in all three scripts.  A C167 has no VECSEG and
+  no CPUCON1.VECSC, so its table is four bytes per vector at the bottom of
+  segment 0 and it has no choice about it; c167.ld's rom region starts there,
+  so placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
+  The simulator has to be told which part it is running, though, because FF12H
+  is a C167's SYSCON where it is an XC164CM's VECSEG, and its crt0 writes it -
+  read back as VECSEG that sent every interrupt to a segment nothing was
+  linked into.  differential/parts.sh passes --mcpu for that reason.
   c167-vectors.inc names that part's 56 interrupt sources and its four hardware
   traps.  Both tables pass the self-check the XC164CM's does - the location is
   four times the trap number in every row - and together they account for the

@@ -8,10 +8,11 @@
    and restores everything it touches - being checked rather than read off the
    assembly.
 
-   The handler is reached the way the documentation says to reach one: a jump
-   in the vector table, written by hand.  .vectors follows the four bytes of
-   the reset vector, so what is placed there is vector 1.  */
-/* c166-sim-flags: --interrupt-every=1009:1:8 */
+   Both ways of reaching a handler are here.  One names its trap number and
+   lets the compiler write the slot; the other is placed by hand in the slot's
+   own section, which is what a handler behind a dispatcher or on a shared
+   node still needs.  */
+/* c166-sim-flags: --interrupt-every=1009:1:8 --interrupt-every=1447:26:9 */
 
 #ifdef __c166__
 static void put(char c) { *(__far volatile unsigned char *)0xFF0000 = c; }
@@ -50,9 +51,24 @@ __attribute__((interrupt)) void handler(void) {
   Ticks = Ticks + 1;
 }
 
-asm(".section .vectors,\"ax\",@progbits\n\t"
+/* Placed by hand: slot 1, whose section is named for the trap number in
+   decimal, padded to three digits. */
+asm(".section .vectors.001,\"ax\",@progbits\n\t"
     "jmps #seg(handler), sof(handler)\n\t"
     ".text");
+
+/* And the same thing said with a trap number, which is what puts the jump in
+   slot 26 without anyone writing it out.  It runs at a higher priority than
+   the one above and is timed to land inside it now and then, so the two nest:
+   the outer handler's registers have to survive the inner one on top of
+   everything else. */
+__attribute__((interrupt(26))) void nested(void) {
+  u32 a = A, d = D;
+  a ^= 0x0F0F0F0Fu;
+  d += a;
+  A = a; D = d;
+  Ticks = Ticks + 0x10000u;
+}
 #endif
 
 int main(void) {

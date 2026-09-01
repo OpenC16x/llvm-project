@@ -3326,9 +3326,10 @@ Given one, the backend also emits the contents of the slot: a ``JMPS`` to the
 handler, in a section named ``.vectors.026`` after the trap number in decimal,
 padded to three digits. A slot holds a jump rather than an address because the
 hardware branches to the slot instead of reading through it. The linker script
-places that section at four times the trap number; ``vectors.ld`` beside the
-C166 startup files does so for all 128 slots, and a script without it rejects
-the program rather than putting the section somewhere plausible and wrong.
+places that section at four times the trap number; the three scripts beside
+the C166 startup files do so for all 128 slots, and the table appears only in
+a program that has handlers, so nothing has to be asked for and a program
+without any pays nothing for it.
 
 The number is 1 to 127. Trap 0 is reset and the startup code owns it. Two
 handlers asking for the same slot is an error, since the second jump would

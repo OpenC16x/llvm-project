@@ -32,6 +32,11 @@ SKIPPED=0
 ${CC:-cc} -O2 -w -o "$TMP/host" "$SRC"
 "$TMP/host" > "$TMP/expected"
 
+# A program that needs the simulator set up a particular way says so in a line
+# of its own, the same way it does for run.sh.  The host is not told: the point
+# of the host side is to be the reference, and it has no interrupts to inject.
+SIMFLAGS=$(sed -n 's,^/\* c166-sim-flags: \(.*\) \*/$,\1,p' "$SRC")
+
 # The parts come from the table itself rather than from the driver's error
 # message, so that this does not quietly test nothing if that wording changes.
 DEF=$(cd "$HERE/../../../include/llvm/TargetParser" && pwd)/C166TargetParser.def
@@ -69,7 +74,12 @@ for PART in $PARTS; do
     continue
   fi
 
-  if ! "$BIN/c166-sim" --max-steps=200000000 "$TMP/$PART.elf" \
+  # The core, so that the simulator reads the part's special function
+  # registers rather than another derivative's: the same short address is a
+  # different register on each, and FF12H in particular is a C167's SYSCON
+  # where it is an XC164CM's VECSEG.
+  if ! "$BIN/c166-sim" --mcpu="$CORE" --max-steps=200000000 $SIMFLAGS \
+      "$TMP/$PART.elf" \
       > "$TMP/$PART.got" 2> "$TMP/$PART.run"; then
     echo "FAIL $PART (run)"
     cat "$TMP/$PART.run"

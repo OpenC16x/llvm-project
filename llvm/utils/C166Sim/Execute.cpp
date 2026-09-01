@@ -388,6 +388,8 @@ Decoder &decoder() {
 
 void c166sim::setSimCPU(StringRef CPU) { SimCPU = CPU.str(); }
 
+bool c166sim::simCPUHasVectorRegs() { return SimCPU == "xc16x"; }
+
 // ---------------------------------------------------------------------------
 // Flag helpers.  Each one names the manual's wording for the flag it sets.
 // ---------------------------------------------------------------------------

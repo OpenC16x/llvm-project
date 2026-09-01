@@ -187,16 +187,25 @@ __attribute__((interrupt(26))) void t3_isr(void) { ... }
 A slot holds a jump rather than an address, because the hardware branches to
 the slot instead of reading through it, so what is emitted is a `JMPS` to the
 handler in a section named `.vectors.026` — the trap number in decimal, padded
-to three digits. `llvm/lib/Target/C166/startup/vectors.ld` places all 128 of
-them at four times their number; a script without it makes the program a link
-error rather than putting the section somewhere plausible and wrong. The
-number is 1 to 127, trap 0 being reset, and two handlers asking for one slot
-is an error.
+to three digits. The three linker scripts under
+`llvm/lib/Target/C166/startup/` place all 128 of them at four times their
+number, and nothing has to be asked for: the table appears when a program has
+handlers and costs nothing when it does not. The number is 1 to 127, trap 0
+being reset, and two handlers asking for one slot is an error.
 
 Without a number the handler is still a handler, and reaching it is left to a
 hand-written vector — which is what a program with a shared interrupt node or
-its own dispatcher wants. The `.vectors` section follows the four bytes of the
-reset vector, so a `jmps #seg(handler), sof(handler)` placed there is vector 1.
+its own dispatcher wants. That is the same section by another route:
+
+```c
+asm(".section .vectors.026,\"ax\",@progbits\n\t"
+    "jmps #seg(t3_isr), sof(t3_isr)\n\t"
+    ".text");
+```
+
+or, better, the `VECTOR_` macros in `startup/xc164cm-vectors.inc`, which name
+every source the part has after its interrupt control register rather than
+after a number that has to be looked up.
 
 That the saving and restoring is right is checked rather than assumed:
 `llvm/utils/C166Sim/differential/interrupts.c` runs a computation whose every

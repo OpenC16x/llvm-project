@@ -14,9 +14,6 @@ copied into a project and adjusted rather than installed.
   st10.ld              a linker script for an ST10, whose Flash arrives in
                        blocks with a hole in the middle and whose extension
                        RAM is not where a C167's is
-  vectors.ld           the interrupt vector table, for a program with handlers;
-                       it serves both parts, since a C167 has the layout an
-                       XC164CM comes up with and no registers to change it
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
   c167-vectors.inc     the same for a C167
@@ -411,28 +408,30 @@ The hardware traps are in that file too, under the names the manual gives them
 underflow, VECTOR_SBRKTRAP, and VECTOR_BTRAP for the four class B traps, which
 share one vector and leave TFR to say which of them it was.  They sit in every
 other slot rather than consecutive ones.  Vector 0 is reset and crt0.S claims
-it, so there is no macro for that one.  vectors.ld
-places each of the 128 slots at the address it has to be at, so slots that
-nothing claims can be left out rather than counted:
+it, so there is no macro for that one.
 
-  SECTIONS
-  {
-    INCLUDE vectors.ld
-    .text : { ... }
-  }
+All three scripts place each of the 128 slots at the address it has to be at,
+so slots that nothing claims can be left out rather than counted; unclaimed
+ones end up holding LLD's trap pattern, JMPR cc_UC, -1, so a spurious
+interrupt stops rather than running into whatever follows.
 
-It replaces the .reset section of c166.ld, and is a separate file because the
-table is 512 bytes of ROM whether its slots are filled or not, which a program
-with no handlers should not pay.  Unclaimed slots end up holding LLD's trap
-pattern, JMPR cc_UC, -1, so a spurious interrupt stops rather than running into
-whatever follows.
+The table is 512 bytes of ROM whether its slots are filled or not, which a
+program with no handlers should not pay - so each row of it is conditional on
+__c166_vector_table, a weak absolute symbol that anything claiming a slot
+defines and nothing else does.  Both the compiler and the VECTOR macro define
+it, so nothing has to be asked for: a program with handlers gets the table and
+a program without one gets four bytes.
 
-Claiming a slot and then linking with a script that has no table in it would
-otherwise be silent: the section would be an orphan, LLD would place it
-somewhere plausible, and the program would link and go somewhere nobody wrote
-when the interrupt arrived.  So c166.ld, c167.ld and st10.ld gather the
-numbered sections into one of their own and assert that nothing landed there,
-which turns that into a link error naming this file.
+It is in all three scripts rather than in a file they include because LLD
+resolves INCLUDE against the working directory and the -L paths rather than
+against the script doing the including, so a shared file would mean every link
+needed a -L that no link needs today.  Three copies is the price;
+test/CodeGen/C166/vector-table-scripts.test is what keeps them from drifting -
+every row four bytes above the last, all 127 present, and the three identical.
+
+A vector goes in the slot named for its trap number.  ".vectors" with no
+number is not a slot, and a program still using it gets told so rather than
+having the section placed somewhere plausible and wrong.
 
 On an XC164CM this is the layout the part has at reset.  Two of its registers
 can change it: CPUCON1.VECSC sets the space between vectors, and resets to 00,

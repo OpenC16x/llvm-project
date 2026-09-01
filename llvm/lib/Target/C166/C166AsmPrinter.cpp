@@ -180,6 +180,7 @@ void C166AsmPrinter::emitInstruction(const MachineInstr *MI) {
 /// can see rather than something the linker trips over later.
 void C166AsmPrinter::emitEndOfAsmFile(Module &M) {
   StringRef ClaimedBy[128] = {};
+  bool SaidTableIsWanted = false;
 
   for (const Function &F : M) {
     if (F.isDeclaration())
@@ -209,6 +210,19 @@ void C166AsmPrinter::emitEndOfAsmFile(Module &M) {
       continue;
     }
     ClaimedBy[Number] = F.getName();
+
+    // What tells the linker script the table is wanted.  Its rows are
+    // conditional on this symbol, so that a program with no handlers does not
+    // pay 512 bytes of ROM for 128 empty slots.  Weak and absolute, because
+    // every translation unit with a handler in it defines one and they must
+    // not clash; the VECTOR macros in startup/xc164cm-vectors.inc define the
+    // same symbol for a slot claimed by hand.
+    if (!SaidTableIsWanted) {
+      MCSymbol *Wanted = OutContext.getOrCreateSymbol("__c166_vector_table");
+      OutStreamer->emitSymbolAttribute(Wanted, MCSA_Weak);
+      OutStreamer->emitAssignment(Wanted, MCConstantExpr::create(1, OutContext));
+      SaidTableIsWanted = true;
+    }
 
     MCSection *Slot = OutContext.getELFSection(
         formatv(".vectors.{0:3}", Number).str(), ELF::SHT_PROGBITS,
