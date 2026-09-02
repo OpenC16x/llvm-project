@@ -60,8 +60,15 @@ cp "$STARTUP"/include/*.h "$SYSROOT/c166-elf/include/"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-"$BIN/clang" -target c166 -O2 -c "$STARTUP/mem.c" -o "$TMP/mem.o"
-"$BIN/clang" -target c166 -O2 -c "$STARTUP/runtime.c" -o "$TMP/runtime.o"
+# -ffunction-sections on these two, because the driver already passes
+# --gc-sections and a member of an archive is pulled whole.  Without it a
+# program that calls memcpy also carries memmove, memset, memcmp, strlen and
+# the three far entry points, which is most of a kilobyte of a part that has
+# 48; with it each program carries the block functions it actually calls.
+"$BIN/clang" -target c166 -O2 -ffunction-sections -c "$STARTUP/mem.c" \
+    -o "$TMP/mem.o"
+"$BIN/clang" -target c166 -O2 -ffunction-sections -c "$STARTUP/runtime.c" \
+    -o "$TMP/runtime.o"
 
 # The unwinder and the C++ ABI, which are what a thrown exception runs on.
 # They are built with unwind tables of their own: an exception is thrown from

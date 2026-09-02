@@ -192,17 +192,20 @@ own once they are too big or too dynamic to expand inline:
 Both pointers are far, so a near operand is widened on the way in under the
 same DPP assumption as an addrspacecast, and the size stays 16 bit.
 
-The three live in startup/mem.c beside the near ones, and are the same byte at
-a time loops with the pointer type changed.  That is deliberate: stepping a far
-pointer is a 32 bit add whose carry out of the offset lands in the segment, so
-the crossing is the compiler's arithmetic rather than something to open code,
-and writing them any other way would be reimplementing it by hand.
+The three live in startup/mem.c beside the near ones, and are the same loops
+with the pointer type changed.  That is deliberate: stepping a far pointer is a
+32 bit add whose carry out of the offset lands in the segment, so the crossing
+is the compiler's arithmetic rather than something to open code, and writing
+them any other way would be reimplementing it by hand.
 
 Each one carries a no_builtin, without which it calls itself.  Loop idiom
-recognition turns a byte at a time copy or fill back into a memcpy or a memset,
-and declines to do so only inside a function actually named memcpy or memset -
-which is how the near versions escape it.  These are not named that, so the
-loop becomes a block move through far pointers, which is a call to the function
+recognition turns a copy or fill loop back into a memcpy or a memset, and
+declines to do so only inside a function actually named memcpy or memset.  The
+whole of mem.c carries the attribute rather than the far entry points alone, so
+that no function in it depends on what it is called; before it moved a word at
+a time the near pair escaped by their names, which memmove never did.  These
+are not named that, so the loop becomes a block move through far pointers,
+which is a call to the function
 it is the body of.  It builds and links; it is an infinite recursion at run
 time.  The attribute keeps that fixed wherever the file is compiled, which a
 flag in the script that builds it would not.
@@ -465,12 +468,15 @@ How much of a block copy or fill is written out rather than called for is set
 rather than inherited, and the figures are in the comment on
 MaxStoresPerMemcpy in C166ISelLowering.cpp.  The short of it: inline is faster
 than the runtime at every size measured out to 128 bytes, and by about three to
-one, because startup/mem.c copies a byte at a time - so there is no speed
-crossover and the limit at -O2 is a code growth budget, about sixty-four bytes
-at a call site.  Optimising for size has a real break-even, at 1.75 words for a
-copy and 3 for a fill, since a copy is eight bytes of code per word and a fill
-four against a call site's sixteen.  A faster runtime would move the first of
-those and not the second.
+one - so there is no speed crossover and the limit at -O2 is a code growth
+budget, about sixty-four bytes at a call site.  Optimising for size has a real
+break-even, at 1.75 words for a copy and 3 for a fill, since a copy is eight
+bytes of code per word and a fill four against a call site's sixteen.
+
+startup/mem.c used to copy a byte at a time, and the ratio was six to one
+rather than three.  Making it a word at a time halved the runtime and left both
+limits where they were: the -O2 one because inline still wins everywhere, and
+the -Os one because it is about code size on both sides, which did not move.
 
 Three things the backend reads are spelled in C as attributes:
 
@@ -948,6 +954,18 @@ Known limitations / things to do
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between
   them.
+* The block loops in startup/mem.c are two instructions of work and two of
+  bookkeeping per word, and two things the machine can already do would take
+  one off each.  MOV [Rwn], [Rwm+] and MOV [Rwn+], [Rwm] copy memory to memory
+  with one of the two pointers stepping, which would make the copy loop's load
+  and store a single instruction; neither is defined in C166InstrInfo.td, and
+  selecting one means matching a store whose value is a load, which is not
+  something the tables express on their own.  The fill loop wants something
+  smaller: memset puts its byte in both halves of a word, which is MOVB Rhn,
+  Rln, and comes out as AND, MOV #257, MUL, MOV MDL, because instcombine
+  canonicalises every way of writing that splat - a shift and an or, two byte
+  stores, a multiply - into the multiply, and nothing turns it back.  It is
+  about twenty states once per call, which only a short fill notices.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * Two far accesses to the same object share one EXTS, and two to different

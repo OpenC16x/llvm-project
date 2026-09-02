@@ -60,24 +60,28 @@ C166TargetLowering::C166TargetLowering(const TargetMachine &TM,
   // the runtime in startup/mem.c, per word of a block, with the state counter:
   //
   //                      inline                  library
-  //   memcpy    8 bytes of code, 4.3 states   16 bytes at the call site,
-  //                                           13 states, and 20 bytes once
-  //   memset    4 bytes of code, 2.2 states   16 bytes at the call site,
-  //                                           11.5 states, and 18 bytes once
+  //   memcpy    8 bytes of code, 4 states    16 bytes at the call site,
+  //                                          13 states, and 82 bytes once
+  //   memset    4 bytes of code, 2 states    16 bytes at the call site,
+  //                                          11 states, and 62 bytes once
   //
-  // Two things follow.  Inline is faster at every size measured, out to 128
-  // bytes, and by about three to one - the library routines are a byte at a
-  // time - so there is no speed crossover to find and the limit is a budget
-  // rather than a break-even.  The budget here is roughly sixty-four bytes of
-  // code at a call site, which is eight words copied or sixteen filled: a fill
-  // is one instruction per word where a copy is two, so twice as many fit.
+  // The library column is what a word at a time runtime costs; the byte at a
+  // time one it replaced was twice that, 26 and 22.  Halving it did not move
+  // the decision, because inline is still faster at every size measured, out
+  // to 128 bytes, and now by about three to one rather than six.  So there is
+  // still no speed crossover to find and the limit is a budget rather than a
+  // break-even.  The budget here is roughly sixty-four bytes of code at a call
+  // site, which is eight words copied or sixteen filled: a fill is one
+  // instruction per word where a copy is two, so twice as many fit.
   //
   // Optimising for size is the other way round, and there the break-even is
   // real: 8n + 2 bytes against the call's 16 puts it at n = 1.75 for a copy,
   // and 4n + 4 against 16 puts it at n = 3 for a fill.  Rounding up costs two
-  // bytes on a copy of two words and four on a fill of four, and buys four to
+  // bytes on a copy of two words and four on a fill of four, and buys two to
   // five times the speed, which is the trade -Os is usually willing to make.
-  // ARM chose the same four numbers for a machine of the same shape.
+  // Those four numbers are about code size on both sides, so the faster
+  // runtime left them where they were.  ARM chose the same four for a machine
+  // of the same shape.
   MaxStoresPerMemcpy = MaxStoresPerMemmove = 8;
   MaxStoresPerMemset = 16;
   MaxStoresPerMemcpyOptSize = MaxStoresPerMemmoveOptSize = 2;

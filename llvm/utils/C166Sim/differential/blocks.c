@@ -55,6 +55,58 @@ static const u16 sizes[] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  10, 12,
                             14, 16, 17, 18, 20, 24, 31, 32, 33, 34, 40,
                             48, 63, 64};
 
+/* The same moves again with the length out of reach, which is what makes them
+   calls into the runtime instead of code the compiler wrote out.  Those
+   routines move a word at a time, and a word here is an even address access,
+   so which of their paths runs is decided by the parity of the two pointers
+   and not by the size: equal and even goes straight to the word loop, equal
+   and odd copies a byte first, and unequal never words at all.  All four
+   combinations are below at every size, and a size that is odd leaves a byte
+   over at the far end of each of them.
+
+   The length has to be volatile rather than merely unknown: a plain variable
+   the compiler can see is a constant is one it expands inline again, which
+   would leave this half testing the same thing as the half above.  */
+static volatile u16 vn;
+
+static void library(void) {
+  fill_src();
+  for (unsigned k = 0; k < sizeof sizes / sizeof sizes[0]; k++) {
+    for (unsigned off = 0; off < 4; off++) {
+      unsigned d = off & 1, s = (off >> 1) & 1;
+      for (unsigned i = 0; i < BUF; i++)
+        dst[i] = 0xA5;
+      vn = sizes[k];
+      __builtin_memcpy(dst + d, src + s, vn);
+      puthex(sum(dst, BUF), 4);
+    }
+
+    for (unsigned off = 0; off < 2; off++) {
+      for (unsigned i = 0; i < BUF; i++)
+        dst[i] = 0x5A;
+      vn = sizes[k];
+      __builtin_memset(dst + off, (int)(sizes[k] & 0xFF), vn);
+      puthex(sum(dst, BUF), 4);
+    }
+
+    /* Overlapping in both directions, at both parities of the pair.  The
+       backward walk is the one that has to align its far end rather than its
+       near one, so the odd distance is not the same case as the even one. */
+    for (unsigned dist = 2; dist <= 3; dist++) {
+      for (unsigned i = 0; i < BUF; i++)
+        dst[i] = src[i];
+      vn = sizes[k];
+      __builtin_memmove(dst + dist, dst, vn);
+      puthex(sum(dst, BUF), 4);
+      for (unsigned i = 0; i < BUF; i++)
+        dst[i] = src[i];
+      vn = sizes[k];
+      __builtin_memmove(dst, dst + dist, vn);
+      puthex(sum(dst, BUF), 4);
+    }
+  }
+}
+
 int main(void) {
   fill_src();
 
@@ -87,5 +139,6 @@ int main(void) {
     __builtin_memmove(dst, dst + 2, n);
     puthex(sum(dst, BUF), 4);
   }
+  library();
   return 0;
 }

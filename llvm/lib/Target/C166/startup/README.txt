@@ -524,6 +524,17 @@ or anything else should build picolibc or newlib for c166 and link that
 instead; mem.c exists so that a program can be linked and run with nothing
 else present at all.
 
+The four move a word at a time where they can, which on this part means where
+the two addresses have the same parity: a word access is an even address
+access, the hardware ignoring bit 0 rather than trapping, so two pointers of
+different parity are copied a byte at a time and nothing can be done about it.
+That doubled their speed and roughly tripled their size, which is why
+mksysroot.sh compiles this file and runtime.c with -ffunction-sections: the
+driver already passes --gc-sections, and an archive member is pulled whole, so
+without it a program that calls memcpy also carries memmove, memset, memcmp,
+strlen and the three far entry points.  A project building its own libc.a
+should do the same.
+
 None of this has been executed on hardware.  It has been executed on a
 simulator: llvm/utils/C166Sim runs it, and the differential tests there link
 this crt0.S and this mem.c into every program they check, so the startup
