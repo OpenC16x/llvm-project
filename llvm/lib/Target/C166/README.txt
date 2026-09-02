@@ -1106,6 +1106,81 @@ Known limitations / things to do
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
   win, being self-consistent across all 180.
+* Nothing generates a repeated coprocessor instruction, and the design note
+  for doing so is below.  It was written for CoMACM - the form that multiplies,
+  accumulates, and writes the word it read one step back down the buffer, so
+  that an FIR filter's delay line shifts for free - and the measuring said to
+  do something else first.
+
+  What it is worth.  Two loops, N = 16, 200 calls each with an empty-bodied
+  version subtracted, on the state counter:
+
+                                        compiler   by hand   ratio
+    fused FIR, CoMACM + repeat          516         51       10.1x
+    plain dot product, CoMAC + repeat   455         59        7.7x
+
+  and the FIR's function goes from 78 bytes to 44.  Both hand written versions
+  agree with the compiler's answer, which is what says the shapes are the same
+  computation.  differential/firdelay.c is the FIR row of that table kept: it
+  runs the filter both ways over forty samples and prints the accumulator and
+  both delay lines, so a dropped write back or a count one short is a different
+  answer rather than a quiet one.
+
+  The first thing that says is that almost all of the win is the repeat prefix
+  and not the M.  A plain dot product - no delay line, no fused store, the
+  commonest MAC loop there is - already gets 7.7 times, because the prefix
+  turns thirteen instructions of index arithmetic, two address computations, a
+  compare and a branch into one instruction that runs sixteen times.  CoMACM
+  adds the shift on top of that, and by then the shift is free.  So the general
+  form is worth more than the special one and should come first; CoMACM is then
+  a peephole on a loop that already became a repeat.
+
+  The second is that the pattern CoMACM matches is not the pattern anyone
+  writes.  The textbook FIR - accumulate over the taps, then shift the delay
+  line down - never reaches the backend as two loops: loop idiom recognition
+  turns the shift into llvm.memmove, at -O1, -O2 and -Os alike.  There is no
+  shift loop left to fuse with anything.  Only a source loop with the store
+  already inside it presents the shape, and it has to shift in the direction
+  CoMACM shifts - each word moves toward index 0, so the newest sample is at
+  the end - which is the opposite of how most references write it.
+
+  The third is the one that bounds the whole idea.  IDXi reaches the dual-port
+  RAM and nothing else (PM0036 section 2.1), so a repeated form can only be
+  selected where the compiler can prove one of the two streams is in that
+  memory.  The only thing that says so today is __dpram, which is an attribute
+  on a global object.  A pointer parameter carries nothing - "fir(const s16 *h,
+  s16 *x, int n)" is a plain address space 0 pointer however it is written - so
+  a filter that takes its delay line as an argument can never qualify, and that
+  is how a filter is usually written.  What is selectable is a loop over a
+  __dpram global with a trip count the compiler knows.  That is a real program,
+  and it is a narrow one.
+
+  What a pass would have to establish, none of which is a peephole's business:
+
+    - a trip count that is constant and fits, the field being MRW[12:0] + 1;
+      a variable count is "repeat mrw times" and needs the count in MRW
+    - both streams walking one word per iteration, in step
+    - one of them provably in the dual-port RAM, which today means a __dpram
+      global rather than anything a pointer can carry
+    - no other memory access that could alias either stream
+    - nothing else in the loop at all, because the prefix repeats exactly one
+      instruction - so the pass replaces the loop rather than transforming it,
+      and has to build the address setup itself
+
+  The accumulator part is already done and is not what makes this hard.
+  C166MACChain keeps the running total in the unit across a single block,
+  single exit loop with no call and no other user of the unit, and a handler
+  that touches the coprocessor saves it - so a repeated CoMAC would inherit a
+  loop whose CoLOAD is already in the preheader and whose CoSTOREs are already
+  past the exit.  What is missing is the loop-level facts above, which want
+  MachineLoopInfo and SCEV rather than a look at neighbouring instructions.
+
+  So: the repeated CoMAC over a __dpram global with a known trip count is the
+  piece worth writing, and CoMACM is a two line addition to it once it exists.
+  Widening either beyond a global would need a way to say "this pointer is in
+  the dual-port RAM" in the type system, which __dpram deliberately is not -
+  that decision is written up under __dpram above, and it was the right one for
+  placement even though it is what stops this.
 * The instruction forms nothing generates are assembled and disassembled but
   their encodings are derived rather than read off the page.  Each ALU group's
   columns were already fixed by the forms the compiler emits - x0 register, x2
