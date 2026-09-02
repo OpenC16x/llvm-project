@@ -533,7 +533,7 @@ struct Executor {
       return 0xFD00 + 2 * BitOff;
     if (BitOff < 0xF0)
       return 0xFF00 + 2 * (BitOff - 0x80);
-    return uint16_t(M.CP + 2 * (BitOff - 0xF0));
+    return M.gprAddress(2 * (BitOff - 0xF0));
   }
 
   bool getBit(unsigned BitOff, unsigned Pos) {
@@ -757,6 +757,70 @@ static void enterVector(Machine &M, unsigned Vector) {
   M.IP = uint16_t(Space * (Vector & 0x7F));
 }
 
+/// The three pipeline effects of section 4.2 that a program has to leave a gap
+/// for, checked against the instruction that has just run.
+///
+/// Each is reported rather than reproduced.  The part does not report them: it
+/// uses the value the pipeline still holds and carries on, so a program that
+/// gets one wrong gets a wrong answer with nothing said.  What can be checked
+/// is the sequence the manual says must not be written, and that is what this
+/// does - which is the whole reason it exists, because the two hazards the
+/// compiler already avoids were avoided on the strength of reading the manual
+/// and nothing in this tree could tell whether the avoidance worked.
+static void checkPipelineGap(Machine &M, Op O) {
+  if (!M.PipelineEffects)
+    return;
+
+  const char *Why = nullptr;
+  switch (M.LastWrite.What) {
+  case PipelineWrite::Nothing:
+    break;
+  case PipelineWrite::ContextPointer:
+    // "An instruction, which calculates a physical GPR operand address via the
+    // CP register, is mostly not capable of using a new CP value, which is to
+    // be updated by an immediately preceding instruction."
+    if (M.UsedGPR)
+      Why = "a general purpose register is read or written by the instruction "
+            "after the one that wrote CP, so it is the old context that is "
+            "addressed; at least one instruction has to come between them "
+            "(C167CR Derivatives User's Manual V3.1, section 4.2, Context "
+            "Pointer Updating)";
+    break;
+  case PipelineWrite::DataPage:
+    // "An instruction, which calculates a physical operand address via a
+    // particular DPPn register, is mostly not capable of using a new DPPn
+    // register value, which is to be updated by an immediately preceding
+    // instruction."
+    if (M.UsedDPPMask & (1u << M.LastWrite.Which))
+      Why = "a long or indirect address goes through the data page pointer "
+            "that the instruction before this one wrote, so it is the old page "
+            "that is addressed; at least one instruction has to come between "
+            "them (C167CR Derivatives User's Manual V3.1, section 4.2, Data "
+            "Page Pointer Updating)";
+    break;
+  case PipelineWrite::StackPointer:
+    // "None of the RET, RETI, RETS, RETP or POP instructions is capable of
+    // correctly using a new SP register value, which is to be updated by an
+    // immediately preceding instruction."
+    if (O == Op::RET || O == Op::RETI || O == Op::RETS || O == Op::RETP ||
+        O == Op::POP)
+      Why = "this pops the system stack immediately after SP was written, so "
+            "it is the old stack pointer that is used; at least one "
+            "instruction has to come between them (C167CR Derivatives User's "
+            "Manual V3.1, section 4.2, Explicit Stack Pointer Updating)";
+    break;
+  }
+
+  if (Why) {
+    M.Stop = StopReason::BadSequence;
+    M.StopDetail = Why;
+    return;
+  }
+
+  M.LastWrite = M.ThisWrite;
+  M.ThisWrite = PipelineWrite();
+}
+
 /// What accepting an interrupt costs, in states.
 ///
 /// It does exactly what TRAP does, so it is charged what TRAP is charged.  The
@@ -842,7 +906,13 @@ bool Machine::serviceInterrupts() {
   // and is taken once the sequence has run out.
   if (ExtendCount > 0 || Extend != ExtendKind::None)
     return false;
-  if (!flag(PSW_IEN))
+  // Both of these are read from PSW as it stood one instruction ago, because
+  // "the current interrupt prioritization round does not consider" a change
+  // the instruction that has just retired made to either.  That one
+  // instruction of delay is why the compare-and-exchange sequence needs a NOP
+  // between clearing IEN and the read it protects.
+  uint16_t Arb = PipelineEffects ? IntPSW : PSW;
+  if (!((Arb >> PSW_IEN) & 1))
     return false;
 
   // Arbitration: the highest priority pending request wins, and a tie goes to
@@ -885,7 +955,7 @@ bool Machine::serviceInterrupts() {
   // equal) interrupt priority than the current CPU task, it remains pending."
   // (C166S V2 Architecture Overview Handbook, section 7.2.)  So the comparison
   // is strict, and losing it is not losing the request.
-  if (Winner.Level <= cpuPriority())
+  if (Winner.Level <= ((Arb >> PSWILVLShift) & 0xF))
     return false;
 
   // "It is cleared automatically upon entry into the interrupt service
@@ -904,6 +974,11 @@ bool Machine::serviceInterrupts() {
   // handler that wants no interrupts at all raises the level rather than
   // clearing the enable.  RETI puts back the pushed PSW, and with it both.
   setCPUPriority(Winner.Level);
+  // Entering a handler is the hardware's doing rather than a software write to
+  // PSW, so the level it sets is arbitrated on at once; letting it lag would
+  // let a second request of the same level in before the handler's first
+  // instruction.
+  IntPSW = PSW;
   ++InterruptsTaken;
   States += InterruptEntryStates;
   // Nothing was decoded, so nothing can be covered by an extend and nothing
@@ -1004,7 +1079,18 @@ bool Machine::step() {
   // simulator actually models.
   WrotePSW = false;
 
+  // What arbitration will see after this instruction has run, which is PSW as
+  // it stands before it does.
+  uint16_t PSWBefore = PSW;
+  UsedGPR = false;
+  UsedDPPMask = 0;
+
   executeOne(*this, MI, O, PC);
+
+  IntPSW = PSWBefore;
+  // Not an early return: the instruction ran, so it is charged for below the
+  // same way one that stopped the machine for any other reason is.
+  checkPipelineGap(*this, O);
 
   // A branch was taken if control did not fall through to the next
   // instruction.  That is what separates the two figures Table 11 gives for
@@ -1153,7 +1239,7 @@ unsigned byteRegIndex(const MCRegisterInfo &MRI, MCRegister R) {
 uint32_t reg8Address(Machine &M, const MCRegisterInfo &MRI, MCRegister R) {
   unsigned W = wordRegIndex(MRI, R);
   if (W != ~0u)
-    return uint16_t(M.CP + 2 * W);
+    return M.gprAddress(2 * W);
   return M.regFieldAddress(MRI.getEncodingValue(R));
 }
 
@@ -1458,7 +1544,7 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     MCRegister R = Reg(I);
     unsigned B = byteRegIndex(MRI, R);
     if (B != ~0u)
-      return uint16_t(M.CP + B);
+      return M.gprAddress(B);
     return M.regFieldAddress(MRI.getEncodingValue(R));
   };
   auto RB8 = [&](unsigned I) { return M.read8(ByteReg8Address(I)); };

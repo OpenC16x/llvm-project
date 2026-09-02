@@ -1404,6 +1404,12 @@ C166TargetLowering::emitCmpXchg(MachineInstr &MI, MachineBasicBlock *BB) const {
   // boundary after it lands between the read and the write this exists to
   // keep together.  The manual's own remedy is an instruction that is not
   // part of the sequence.
+  //
+  // The delay itself is modelled in the simulator - a change to PSW.IEN or
+  // PSW.ILVL is not arbitrated on until the instruction after the one that
+  // made it - so the window this closes is one that now exists there rather
+  // than only in the manual; llvm/test/tools/c166-sim/pipeline.s is where that
+  // is checked.
   BuildMI(BB, DL, TII.get(C166::NOP));
   BuildMI(BB, DL, TII.get(Byte ? C166::MOVB8rp : C166::MOV16rp), Dst)
       .addReg(Addr);

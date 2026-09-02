@@ -169,8 +169,9 @@ the space between slots.  On a part without them the table is four bytes a slot
 at the bottom of segment 0, which is what both registers say out of reset, so
 nothing else changes.
 
-One peripheral is modelled: GPT1, the block of three timers, which is under
-Interrupts below.  Not modelled: every other peripheral, and the extended SFR
+The particular pipeline effects of section 4.2 are checked and modelled; see
+Pipeline effects below.  One peripheral is modelled: GPT1, the block of three
+timers, which is under Interrupts below.  Not modelled: every other peripheral, and the extended SFR
 space that EXTR selects.  Of the MAC unit, MSW's flags and guard bits, the
 limiter and the shifter are not modelled either.  A peripheral register that
 is not GPT1's reads back what was written to it, which is enough to run code
@@ -227,6 +228,53 @@ by definition enabled, arbitrates as group 0, and is gated by PSW.IEN and the
 priority alone.  A timer's request has all of them, because it has the
 register.  The PEC is the other absence - a request here is always serviced by
 the CPU.
+
+Pipeline effects
+----------------
+
+Section 4.2 of the C167CR Derivatives User's Manual V3.1 names four places
+where "the circumstance that the C167CR is a pipelined machine requires
+attention by the programmer".  Nothing else about the pipeline is modelled -
+there are no stages here and every instruction retires whole - but these four
+are, because each of them changes what a correct program may be written as.
+
+Three are a rule about what not to write, and those are checked rather than
+emulated:
+
+  - an instruction that reaches a general purpose register must not be the one
+    immediately after an instruction that wrote CP, or it addresses the old
+    register bank;
+  - a long or indirect address must not go through a DPPn the instruction
+    immediately before wrote, or it addresses the old page;
+  - RET, RETI, RETS, RETP and POP must not be the instruction immediately after
+    an explicit write to SP.  A write to the stack is exempt, because the
+    manual says so: "conflicts with instructions writing to the stack (PUSH,
+    CALL, SCXT) are solved internally by the CPU logic".
+
+A program that writes one of these stops with the manual's own sentence.
+Checking rather than emulating is the point: the part does not report any of
+them, it uses the value the pipeline still holds and carries on, so the wrong
+answer a program gets there is not one this could reproduce - "mostly not
+capable of using a new CP value" does not say which cases "mostly" leaves out.
+What can be checked exactly is the sequence the manual says must not appear.
+
+The fourth is behaviour rather than a rule, so it is modelled: a change to
+PSW.IEN or PSW.ILVL is not arbitrated on until one instruction later, because
+"the current interrupt prioritization round does not consider these changes",
+and the same delay applies to enabling as to disabling.  That is why the
+compare-and-exchange sequence the compiler emits has a NOP between clearing
+IEN and the load it protects, and why a BSET PSW.11 immediately followed by an
+ATOMIC leaves no window for a request at all.
+
+--no-pipeline-effects turns all four off, for running a program written before
+they were here.  The part would run such a program wrongly rather than refuse
+it; refusing is the more useful answer and not the only one that should be
+available.
+
+Two of these were put into the compiler on the strength of reading the manual,
+at a time when nothing here could tell whether they were needed: the NOP after
+SCXT CP in a banked handler's prologue, and the one after crt0's write to
+DPP3.  Taking either out now stops a program that used to run.
 
 GPT1
 ----

@@ -511,9 +511,7 @@ least one instruction must be inserted between a CP-changing and a subsequent
 GPR-using instruction" - C167CR Derivatives User's Manual V3.1, section 4.2,
 Context Pointer Updating, whose worked example is SCXT CP, #0FC00h followed by
 a line reading "must not be an instruction using a GPR".  Without it the
-handler's first register write would land in the interrupted code's bank, and
-nothing here would show it: the simulator applies the CP write at once, so no
-test can find it.
+handler's first register write would land in the interrupted code's bank.
 
 That section is worth reading whole rather than for the one rule, and doing so
 found a second thing.  The compare and exchange sequence cleared PSW.IEN and
@@ -536,6 +534,24 @@ and POP after an explicit write to SP, and crt0.S follows its write with more
 SFR writes, while the note that conflicts with PUSH, CALL and SCXT are resolved
 internally covers the rest.  Port direction, SYSCON mapping and BUSCON are
 startup concerns this backend generates no code for.
+
+All four of those effects are now in the simulator, which is what turned that
+reading into something checkable.  The three that are rules about what not to
+write are checked - a GPR reached one instruction after CP is written, a long
+or indirect address through a data page pointer one instruction after it is
+written, and a pop one instruction after an explicit write to SP each stop the
+program with the manual's own sentence - and the fourth, the one instruction of
+delay before a change to PSW.IEN or PSW.ILVL is arbitrated on, is modelled.
+Checking rather than emulating is deliberate: the part reports none of them and
+carries on with the value the pipeline still holds, and "mostly not capable"
+does not say which cases "mostly" leaves out, so the wrong answer a program
+gets there is not one a simulator can reproduce.  The sequence the manual says
+must not be written is what can be checked exactly.
+
+That closes the gap both NOPs above were written into.  Taking the SCXT one out
+stops differential/interrupts.c, and taking crt0's out stops every program that
+links it; llvm/test/tools/c166-sim/pipeline.s has both, the stack pointer rule,
+the exemption for PUSH, and the delay with and without.
 
 Three things do not follow from the window and are handled separately.  The
 multiply/divide unit and the coprocessor are not part of a bank and are still
@@ -1281,6 +1297,11 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
+  Setting it from the branch probabilities is a small change and is not made,
+  because nothing here could measure it: the simulator charges a taken branch
+  what Table 11 says and a mispredicted one the same, so the number after the
+  change would equal the number before by construction.  A taken-branch penalty
+  in the simulator is what this waits on.
 * Three SFR maps are modelled and the subtarget picks between them, because
   the same short address names different registers on different derivatives.
   What they all agree about - 97 names at the same short address, which is the
@@ -1430,6 +1451,16 @@ Known limitations / things to do
   stdout - registers, memory, breakpoints, stepping - with the registers
   described to the client rather than assumed.  A port of GDB or LLDB to this
   target is what is left.
+* The pipeline is not modelled beyond the four effects section 4.2 names.
+  Those four are there - three as checks and one as behaviour, under Pipeline
+  effects in llvm/utils/C166Sim/README.txt - because each changes what a
+  correct program may be written as.  Everything else about it is not: an
+  instruction retires whole, a taken branch costs what Table 11 says rather
+  than what a thrown-away pipeline costs, and the forwarding that "resolves
+  most of the possible conflicts in a time optimized way" is not there to
+  resolve anything.  The one thing that wants is a taken-branch penalty, which
+  is what the prediction bit of JMPA and CALLA would be measured against; the
+  bullet on that bit above says the rest.
 * One peripheral is modelled in the simulator and the rest are not.  GPT1's
   three timers count on the clock at the manual's rate and raise their requests
   through their own interrupt control registers, which is what makes the whole

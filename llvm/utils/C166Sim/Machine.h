@@ -129,6 +129,34 @@ struct Timer {
   uint16_t LastConfig = 0; ///< TxCON's mode, prescaler and run bit, as last set
 };
 
+/// What the instruction that has just retired did that the pipeline will not
+/// have finished with by the time the next one wants it.
+///
+/// Section 4.2 of the C167CR Derivatives User's Manual V3.1, "Particular
+/// Pipeline Effects", names four of these and three are of this shape: the
+/// program has to leave a gap, and one that does not is not told so - the
+/// instruction simply uses the old value.  So they are checked here rather
+/// than emulated.  Emulating them would mean inventing what "mostly not
+/// capable of using a new CP value" covers, and the wrong answer a program
+/// gets on the part is not a wrong answer this could reproduce; refusing the
+/// sequence the manual says must not be written is exactly what can be
+/// checked.
+///
+/// The fourth effect, the one instruction of delay before a change to PSW.IEN
+/// or PSW.ILVL is arbitrated on, is not of this shape - the manual says what
+/// happens rather than what not to write - so that one is modelled.  See
+/// IntPSW.
+struct PipelineWrite {
+  enum Kind {
+    Nothing,
+    ContextPointer, ///< CP, so the next instruction must not use a GPR
+    DataPage,       ///< a DPPn, so the next must not address through that one
+    StackPointer,   ///< SP, so the next must not be a RET or a POP
+  };
+  Kind What = Nothing;
+  unsigned Which = 0; ///< which DPP, when What is DataPage
+};
+
 /// Why the machine stopped.
 enum class StopReason {
   Running,
@@ -168,6 +196,19 @@ public:
 
   // -- registers ---------------------------------------------------------
 
+  /// The address of a byte of the register window, and the one place the CP
+  /// register is turned into an address.
+  ///
+  /// Everything that reaches a GPR goes through here - the accessors below,
+  /// the "reg" field's own encoding, the bit-addressable form - so that the
+  /// dependency section 4.2 describes is recorded in one place rather than in
+  /// each of them.  The first attempt instrumented the accessors and missed
+  /// the shortest path of all, which is a register named in a reg8 field.
+  uint16_t gprAddress(unsigned ByteOffset) const {
+    UsedGPR = true;
+    return uint16_t(CP + ByteOffset);
+  }
+
   /// R0 to R15 are a window into internal RAM at CP, so they are storage
   /// rather than registers and code may reach them either way.
   uint16_t getWordReg(unsigned N) const;
@@ -197,6 +238,37 @@ public:
   void setCPUPriority(unsigned L) {
     PSW = (PSW & 0x0FFF) | (uint16_t(L & 0xF) << PSWILVLShift);
   }
+
+  /// Whether the pipeline effects of section 4.2 are checked and modelled.
+  /// On by default; --no-pipeline-effects turns it off, which is how a program
+  /// that predates the check can still be run.
+  bool PipelineEffects = true;
+
+  /// What the previous instruction wrote, and what this one is writing.
+  PipelineWrite LastWrite, ThisWrite;
+  /// What this instruction reached, which is what the previous one's write is
+  /// checked against.  Both are mutable because the accessors that set them
+  /// are const: reading a GPR does not change the machine, but it is the thing
+  /// being recorded.
+  mutable bool UsedGPR = false;
+  mutable unsigned UsedDPPMask = 0;
+
+  /// PSW as arbitration sees it, which is one instruction behind.
+  ///
+  /// "Software modifications (implicit or explicit) of the PSW are done in the
+  /// execute phase of the respective instructions.  In order to maintain fast
+  /// interrupt responses, however, the current interrupt prioritization round
+  /// does not consider these changes, i.e. an interrupt request may be
+  /// acknowledged after the instruction that disables interrupts via IEN or
+  /// ILVL or after the following instructions." (section 4.2, Controlling
+  /// Interrupts.)  Only IEN and ILVL are read from this; every other field of
+  /// PSW is read by instructions, which see it at once.
+  ///
+  /// Entering a handler is not a software modification - it is the hardware
+  /// doing it - so acceptance sets this to the new value rather than letting
+  /// it lag, which is what stops a second request of the same level walking
+  /// straight into the handler.
+  uint16_t IntPSW = 0;
 
   bool flag(PSWBit B) const { return (PSW >> B) & 1; }
   void setFlag(PSWBit B, bool V) {

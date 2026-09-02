@@ -403,15 +403,19 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
   if (isCPUSFR(Phys)) {
     switch (Phys) {
     case SFR_DPP0:
+      ThisWrite = {PipelineWrite::DataPage, 0};
       DPP[0] = V & 0x3FF;
       return;
     case SFR_DPP1:
+      ThisWrite = {PipelineWrite::DataPage, 1};
       DPP[1] = V & 0x3FF;
       return;
     case SFR_DPP2:
+      ThisWrite = {PipelineWrite::DataPage, 2};
       DPP[2] = V & 0x3FF;
       return;
     case SFR_DPP3:
+      ThisWrite = {PipelineWrite::DataPage, 3};
       DPP[3] = V & 0x3FF;
       return;
     case SFR_CSP:
@@ -454,9 +458,14 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
                      "register bank has to be - see c166_bank";
         return;
       }
+      ThisWrite = {PipelineWrite::ContextPointer, 0};
       CP = V;
       return;
     case SFR_SP:
+      // An explicit write, which is the one the manual's rule is about;
+      // PUSH, CALL and SCXT reach SP through push() and "are solved
+      // internally by the CPU logic".
+      ThisWrite = {PipelineWrite::StackPointer, 0};
       SP = V;
       return;
     case SFR_STKOV:
@@ -546,32 +555,35 @@ uint32_t Machine::mapData(uint16_t Addr) const {
     break;
   }
   // The standard scheme: the top two bits pick a DPP, whose ten bits are
-  // address bits 23..14.
-  return (uint32_t(DPP[(Addr >> 14) & 3] & 0x3FF) << 14) | (Addr & 0x3FFF);
+  // address bits 23..14.  Which one is what the write before this is checked
+  // against; an EXTP or EXTS access returned above and used none of them.
+  unsigned N = (Addr >> 14) & 3;
+  UsedDPPMask |= 1u << N;
+  return (uint32_t(DPP[N] & 0x3FF) << 14) | (Addr & 0x3FFF);
 }
 
 uint16_t Machine::getWordReg(unsigned N) const {
-  uint32_t A = uint16_t(CP + 2 * N);
+  uint32_t A = gprAddress(2 * N);
   return uint16_t(Mem[A]) | (uint16_t(Mem[A + 1]) << 8);
 }
 
 void Machine::setWordReg(unsigned N, uint16_t V) {
-  uint32_t A = uint16_t(CP + 2 * N);
+  uint32_t A = gprAddress(2 * N);
   Mem[A] = V & 0xFF;
   Mem[A + 1] = V >> 8;
 }
 
 uint8_t Machine::getByteReg(unsigned N) const {
   // RL0, RH0, RL1, RH1 ... are consecutive bytes of the same window.
-  return Mem[uint16_t(CP + N)];
+  return Mem[gprAddress(N)];
 }
 
-void Machine::setByteReg(unsigned N, uint8_t V) { Mem[uint16_t(CP + N)] = V; }
+void Machine::setByteReg(unsigned N, uint8_t V) { Mem[gprAddress(N)] = V; }
 
 uint32_t Machine::regFieldAddress(unsigned Reg) const {
   Reg &= 0xFF;
   if (Reg >= 0xF0)
-    return uint16_t(CP + 2 * (Reg - 0xF0));
+    return gprAddress(2 * (Reg - 0xF0));
   if (Reg < 0x80)
     return 0xFE00 + 2 * Reg;
   return 0xFF00 + 2 * (Reg - 0x80);
