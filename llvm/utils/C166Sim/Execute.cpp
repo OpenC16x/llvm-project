@@ -766,8 +766,58 @@ static void enterVector(Machine &M, unsigned Vector) {
 /// is a lower bound, which is what everything else in States already is.
 static constexpr unsigned InterruptEntryStates = 4;
 
+/// The interrupt control registers of the sources this simulator has
+/// peripherals for, and the vector each reaches.  Everything else in the
+/// interrupt table is still a command line injection.
+///
+/// The register itself is storage, which is what an unmodelled peripheral
+/// register already was; what makes these different is that something sets the
+/// request flag in them and that arbitration reads them.  So the layout below
+/// is the manual's - xxIR at bit 7, xxIE at 6, GLVL at 5-4 and ILVL at 3-0 -
+/// and a program configures one exactly as it would on the part.
+struct PeripheralSource {
+  uint32_t IC;
+  unsigned Vector;
+};
+static constexpr PeripheralSource PeripheralSources[] = {
+    {0xFF60, 34}, // T2IC, GPT1 timer 2
+    {0xFF62, 35}, // T3IC, GPT1 timer 3
+    {0xFF64, 36}, // T4IC, GPT1 timer 4
+};
+
+/// One request in the running, whichever kind of source raised it.
+///
+/// A peripheral has a group level and an injected source does not, so an
+/// injected one arbitrates as group 0, the lowest.  That is the honest
+/// reading: the group level is a field of a control register, and a source
+/// declared on the command line has no control register to put one in.
+struct Candidate {
+  unsigned Level = 0;
+  unsigned Group = 0;
+  unsigned Vector = 0;
+  InterruptSource *Injected = nullptr;
+  uint32_t IC = 0;
+
+  /// "Defines the internal order for simultaneous requests of the same
+  /// priority.  3: Highest group priority" - so a higher group wins a tie, and
+  /// what is left after that is the order these were collected in, which
+  /// stands in for the node number the part breaks the last tie with.
+  bool beats(const Candidate &O) const {
+    return Level != O.Level ? Level > O.Level : Group > O.Group;
+  }
+};
+
 bool Machine::serviceInterrupts() {
-  if (Interrupts.empty())
+  // The peripherals run on the clock whether or not anything is listening, so
+  // they are advanced before the question of whether an interrupt can be taken
+  // is asked at all.
+  if (TimersOn) {
+    advanceTimers();
+    if (Stop != StopReason::Running)
+      return false;
+  }
+
+  if (Interrupts.empty() && !TimersOn)
     return false;
 
   // Raise whatever is due.  A source that is still pending when its period
@@ -795,15 +845,38 @@ bool Machine::serviceInterrupts() {
   if (!flag(PSW_IEN))
     return false;
 
-  // Arbitration: the highest priority pending request wins.  A tie goes to
-  // the source declared first, which stands in for the group level and the
-  // node number the part breaks ties with - neither of which exists here,
-  // since a source here is a command line argument and not a peripheral.
-  InterruptSource *Winner = nullptr;
+  // Arbitration: the highest priority pending request wins, and a tie goes to
+  // the higher group level.  Both kinds of source are in it together - an
+  // injected request and a timer's are the same thing by the time they reach
+  // the CPU, which is the point of the peripheral half existing at all.
+  Candidate Winner;
+  bool Any = false;
+  auto consider = [&](const Candidate &C) {
+    if (!Any || C.beats(Winner)) {
+      Winner = C;
+      Any = true;
+    }
+  };
   for (InterruptSource &S : Interrupts)
-    if (S.Pending && (!Winner || S.Level > Winner->Level))
-      Winner = &S;
-  if (!Winner)
+    if (S.Pending) {
+      Candidate C;
+      C.Level = S.Level;
+      C.Vector = S.Vector;
+      C.Injected = &S;
+      consider(C);
+    }
+  for (const PeripheralSource &P : PeripheralSources) {
+    uint16_t IC = read16(P.IC);
+    if (!((IC >> 7) & 1) || !((IC >> 6) & 1))
+      continue;
+    Candidate C;
+    C.Level = IC & 0xF;
+    C.Group = (IC >> 4) & 3;
+    C.Vector = P.Vector;
+    C.IC = P.IC;
+    consider(C);
+  }
+  if (!Any)
     return false;
 
   // "On receipt of the arbitration interrupt request winner, the CPU accepts
@@ -812,11 +885,17 @@ bool Machine::serviceInterrupts() {
   // equal) interrupt priority than the current CPU task, it remains pending."
   // (C166S V2 Architecture Overview Handbook, section 7.2.)  So the comparison
   // is strict, and losing it is not losing the request.
-  if (Winner->Level <= cpuPriority())
+  if (Winner.Level <= cpuPriority())
     return false;
 
-  Winner->Pending = false;
-  enterVector(*this, Winner->Vector);
+  // "It is cleared automatically upon entry into the interrupt service
+  // routine" - so the request flag goes down here, and a handler that wants
+  // another one does not have to clear anything itself.
+  if (Winner.Injected)
+    Winner.Injected->Pending = false;
+  else
+    write16(Winner.IC, read16(Winner.IC) & ~uint16_t(1u << 7));
+  enterVector(*this, Winner.Vector);
   if (Stop != StopReason::Running)
     return true;
   // The CPU now runs at the accepted source's priority, which is what stops a
@@ -824,7 +903,7 @@ bool Machine::serviceInterrupts() {
   // on this core the priority level is the whole of the nesting rule, and a
   // handler that wants no interrupts at all raises the level rather than
   // clearing the enable.  RETI puts back the pushed PSW, and with it both.
-  setCPUPriority(Winner->Level);
+  setCPUPriority(Winner.Level);
   ++InterruptsTaken;
   States += InterruptEntryStates;
   // Nothing was decoded, so nothing can be covered by an extend and nothing

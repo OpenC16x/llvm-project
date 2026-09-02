@@ -196,8 +196,10 @@ int main(int argc, char **argv) {
     if (Stats) {
       errs() << formatv("instructions {0}  states {1}", M.Steps, M.States);
       // Only when there were sources, so that a program with none reads the
-      // same as it always has.
-      if (!M.Interrupts.empty())
+      // same as it always has.  A peripheral is a source the command line did
+      // not declare, so a timer that fired counts too - and one configured but
+      // never reached still reads as it always has.
+      if (!M.Interrupts.empty() || M.InterruptsTaken)
         errs() << formatv("  interrupts {0}", M.InterruptsTaken);
       errs() << "\n";
     }

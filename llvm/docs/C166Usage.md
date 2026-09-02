@@ -254,9 +254,30 @@ That the saving and restoring is right is checked rather than assumed:
 `llvm/utils/C166Sim/differential/interrupts.c` runs a computation whose every
 step depends on the last while the simulator fires a handler into it a few
 dozen times, and the answer has to match the host's, which had no interrupts
-at all. The simulator raises the requests itself — see `--interrupt-at` and
-`--interrupt-every` in `llvm/utils/C166Sim/README.txt`, since there are no
-peripherals to raise them.
+at all. There the requests come from `--interrupt-at` and `--interrupt-every`,
+which the simulator raises on the clock for the sources it has no peripheral
+for — see `llvm/utils/C166Sim/README.txt`.
+
+`differential/timer.c` is the same check driven the way a program on the part
+drives it. The GPT1 timers are modelled, so a handler for trap 23H is reached
+by writing the same registers real code writes:
+
+```c
+#define SFR(a) (*(volatile unsigned short *)(a))
+
+__attribute__((interrupt(35))) void tick(void) { Ticks = Ticks + 1; }
+
+SFR(0xFE40) = 0xFFC0;          /* T2, the reload value              */
+SFR(0xFF40) = 0x0027;          /* T2CON: reload mode, on T3OTL      */
+SFR(0xFE42) = 0xFFC0;          /* T3                                */
+SFR(0xFF62) = 0x0048;          /* T3IC: enable, priority 8          */
+__asm__ volatile("bset psw.11" ::: "memory");
+SFR(0xFF42) = 0x0043;          /* T3CON: timer mode, running        */
+```
+
+Nothing else in the vector table has a peripheral behind it yet, and a mode of
+the timers that would be driven by a pin stops the simulator by name rather
+than never counting.
 
 Both attributes are described in Clang's attribute reference alongside every
 other target's.

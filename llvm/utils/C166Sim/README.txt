@@ -169,18 +169,30 @@ the space between slots.  On a part without them the table is four bytes a slot
 at the bottom of segment 0, which is what both registers say out of reset, so
 nothing else changes.
 
-Not modelled: the peripherals, and the extended SFR space that EXTR selects.
-Of the MAC unit, MSW's flags and guard bits, the limiter and the shifter are
-not modelled either.  A peripheral register reads back what was written to it,
-which is enough to run code that configures a peripheral it then never waits
-on.  EXTR is accepted and counted so that the length of an EXTend sequence
-stays right, but the SFR space it selects is not switched.
+One peripheral is modelled: GPT1, the block of three timers, which is under
+Interrupts below.  Not modelled: every other peripheral, and the extended SFR
+space that EXTR selects.  Of the MAC unit, MSW's flags and guard bits, the
+limiter and the shifter are not modelled either.  A peripheral register that
+is not GPT1's reads back what was written to it, which is enough to run code
+that configures a peripheral it then never waits on.  EXTR is accepted and
+counted so that the length of an EXTend sequence stays right, but the SFR
+space it selects is not switched.
 
 Interrupts
 ----------
 
-There are no peripherals, so there is nothing to raise a request on its own.
-A source is declared on the command line instead and fires on the clock:
+A request reaches the CPU from one of two places.
+
+The GPT1 timers raise one the way the part does.  A program writes T2CON,
+T3CON or T4CON to start a timer, the timer counts on the clock, and an overflow
+or underflow sets the request flag in its own interrupt control register -
+T2IC, T3IC or T4IC, at bit 7, with the enable at bit 6, the group level at 5-4
+and the priority at 3-0.  Nothing on the command line takes part, and a
+program written for the part is written the same way here.  What GPT1 does and
+does not do is below.
+
+Everything else in the vector table is declared on the command line instead
+and fires on the clock:
 
   --interrupt-at=<states>:<vector>[:<level>]
   --interrupt-every=<states>:<vector>[:<level>]
@@ -197,7 +209,10 @@ is accepted - "if the requesting source has a lower (or equal) interrupt
 priority than the current CPU task, it remains pending" (C166S V2 Architecture
 Overview Handbook, section 7.2), so a request that arrives while interrupts
 are off is not lost.  The highest priority pending request wins arbitration,
-and is accepted when PSW.IEN is set and its level is strictly above PSW.ILVL.
+with a tie going to the higher group level, and is accepted when PSW.IEN is
+set and its level is strictly above PSW.ILVL.  A source's request flag is
+cleared on entry, which is what the manual says happens and is why a handler
+does not have to clear one itself.
 Entry saves PSW, CSP and IP on the system stack and branches to the vector
 table entry, which is exactly what TRAP does - they share the code - and then
 sets PSW.ILVL to the accepted source's level, which is what stops a handler
@@ -205,19 +220,60 @@ being re-entered by its own level or below.  RETI puts back all three, and
 with PSW both the level and the condition flags.  An ATOMIC or an EXTend locks
 the request out for the instructions it covers, which is what ATOMIC is for.
 
-Two things are deliberately absent.  The source's own enable bit is one: it
-lives in a peripheral control register that does not exist here, and which
-register belongs to which vector is a property of the derivative rather than
-of the core, so an injected request is by definition enabled and PSW.IEN and
-the priority are what gate it.  The PEC is the other - a request here is
-always serviced by the CPU.
+Two things are deliberately absent.  An injected source has no enable bit and
+no group level: both are fields of a control register, and a source declared on
+the command line has no control register to put them in, so such a request is
+by definition enabled, arbitrates as group 0, and is gated by PSW.IEN and the
+priority alone.  A timer's request has all of them, because it has the
+register.  The PEC is the other absence - a request here is always serviced by
+the CPU.
+
+GPT1
+----
+
+The three timers of the general purpose timer block: the core timer T3 and the
+auxiliary timers T2 and T4, at the addresses and with the bit layouts of the
+C167CR Derivatives User's Manual V3.1 chapter 10.  All nine registers are in
+the set the three SFR maps in this tree agree about, so this is the same block
+at the same addresses on every part, and none of it is gated on which one is
+selected.
+
+Timer mode is modelled for all three.  The rate is the manual's:
+
+  fT3 = fCPU / (8 x 2^<T3I>)
+
+which is a count every 8 << TxI states, a state being a CPU clock period.  The
+direction is TxUD, an overflow or underflow raises the timer's own request, and
+T3's toggles T3OTL as well.
+
+Reload mode is modelled for the two auxiliary timers, triggered by a T3OTL
+transition: "upon a trigger signal T3 is loaded with the contents of the
+respective timer register (T2 or T4) and the interrupt request flag (T2IR or
+T4IR) is set".  That is how a periodic interrupt is actually written, and it
+is why the handler in test/tools/c166-sim/timer.s has nothing to do but count.
+
+Counter mode, the two gated modes, capture mode, incremental interface mode, a
+reload triggered by the TxIN pin and the external up/down control are not
+modelled, because all of them are driven by a pin and this simulator has none.
+A program that asks for one of them while the timer is running stops with the
+reason, at the write that asked - never counting would be a worse answer than
+saying so.  A timer configured for one of them and left stopped is left alone,
+because it does nothing on the part either.
+
+The prescaler starts again whenever what a timer is doing changes, which is a
+choice: the manual gives the rate and says nothing about the phase.  The rate
+is what a program can observe.
 
 Entering a handler costs four states, TRAP's figure for the same work, and is
 not counted as an instruction.  The real response time is longer, because of
 arbitration and the pipeline being thrown away, in the same way and for the
 same reason as the other lower bounds in the state count below.
 
-test/tools/c166-sim/interrupt.s is the check.  Its last case is the one that
+test/tools/c166-sim/interrupt.s and timer.s are the checks, the first for what
+the core does with a request and the second for where a timer's comes from;
+differential/timer.c is the whole chain from C, where the handler is written
+with the interrupt attribute and the vector slot and the linker script row are
+the compiler's.  interrupt.s's last case is the one that
 matters most: a hundred rounds of arithmetic ending in a conditional branch,
 run against four unrelated interrupt rhythms and once against none, all of
 which have to give the same answer - which they only can if the condition

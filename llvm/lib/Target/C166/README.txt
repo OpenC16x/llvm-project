@@ -1430,6 +1430,18 @@ Known limitations / things to do
   stdout - registers, memory, breakpoints, stepping - with the registers
   described to the client rather than assumed.  A port of GDB or LLDB to this
   target is what is left.
+* One peripheral is modelled in the simulator and the rest are not.  GPT1's
+  three timers count on the clock at the manual's rate and raise their requests
+  through their own interrupt control registers, which is what makes the whole
+  interrupt chain - the attribute, the vector slot, the linker script row, the
+  register bank, the arbitration - reachable from a C program that configures a
+  timer the way it would on the part; llvm/utils/C166Sim/differential/timer.c is
+  that program.  Everything else in the vector table still needs a request
+  injected from the command line, because a peripheral register that is not
+  GPT1's reads back what was written to it and does nothing.  The serial
+  channels and the A/D converter are the ones a program would notice next, and
+  the PEC is the one that would change what an accepted request does rather
+  than where it came from.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the

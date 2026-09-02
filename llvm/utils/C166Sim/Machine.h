@@ -92,20 +92,20 @@ enum ResetValue : uint16_t {
 /// follow it.
 enum class ExtendKind { None, Page, Segment };
 
-/// An interrupt source, as far as this simulator has one.
+/// An interrupt source declared from the command line.
 ///
 /// A real source is a peripheral: it raises its request flag when something
 /// happens to it, and its own control register holds the enable bit and the
-/// priority.  None of that is modelled - the peripherals are not here, and
-/// which control register belongs to which vector is a property of the
-/// derivative rather than of the core.  So a source here is declared from the
-/// command line and fires on the clock: at a state count, once or over and
-/// over.  That is deterministic, which is what a test needs, and it is enough
-/// to exercise everything the *core* does with an interrupt.
+/// priority.  Three of them are modelled - the GPT1 timers, in Machine.cpp -
+/// and everything else in the vector table is still one of these, which fires
+/// on the clock at a state count, once or over and over.  That is
+/// deterministic, which is what a test needs, and it exercises everything the
+/// *core* does with an interrupt without a peripheral behind it.
 ///
 /// Consequently the source's own enable bit does not appear: an injected
-/// request is by definition enabled.  What gates it is PSW.IEN and the
-/// priority comparison, both of which are the core's.
+/// request is by definition enabled, and its group level is zero because a
+/// group level is a field of a control register it does not have.  What gates
+/// it is PSW.IEN and the priority comparison, both of which are the core's.
 struct InterruptSource {
   /// Never raise again, which is where a one shot goes after it has fired.
   static constexpr uint64_t Never = ~uint64_t(0);
@@ -115,6 +115,18 @@ struct InterruptSource {
   unsigned Vector = 0; ///< which vector table entry, 0 to 127
   unsigned Level = 0;  ///< the source's priority, 1 to 15
   bool Pending = false; ///< raised and not yet accepted
+};
+
+/// One of the three timers of the GPT1 block, as far as this models them.
+///
+/// The registers themselves are storage like every other peripheral register -
+/// the program reads and writes T2, T3 and T4 at their own addresses - so what
+/// is here is only the part the program cannot see: when the timer next counts,
+/// and what it was configured as last time anything looked, which is what says
+/// whether the prescaler has to start again.
+struct Timer {
+  uint64_t NextTick = 0;   ///< the state count at which it next counts
+  uint16_t LastConfig = 0; ///< TxCON's mode, prescaler and run bit, as last set
 };
 
 /// Why the machine stopped.
@@ -220,6 +232,35 @@ public:
   /// How many requests have been accepted, which is what a test asserts on
   /// when the program itself cannot see the difference.
   uint64_t InterruptsTaken = 0;
+
+  /// Run the GPT1 timers forward to the current state count, raising the
+  /// request flags of any that overflowed on the way.  Called from
+  /// serviceInterrupts, which is where a request becomes an interrupt.
+  void advanceTimers();
+
+  /// Set a peripheral's interrupt request flag, which is bit 7 of its own
+  /// interrupt control register.  The enable and the priority beside it there
+  /// are the CPU's business and are read during arbitration.
+  void raiseRequest(uint32_t IC);
+
+  /// Write T2CON, T3CON or T4CON - 0, 1 and 2 - and take from it whatever the
+  /// timer now does.  A configuration that needs a pin stops the program here,
+  /// where the write is, rather than by never counting.
+  void setTimerControl(unsigned N, uint16_t V);
+
+  /// What an overflow or underflow of the core timer does: its own request,
+  /// the toggle latch, and any reload an auxiliary timer is watching for.
+  void coreTimerWrapped();
+
+  /// T2CON, T3CON and T4CON, which are registers rather than storage because
+  /// this simulator writes one of them: T3OTL toggles on every overflow of T3,
+  /// and an auxiliary timer in reload mode watches it.
+  uint16_t TCON[3] = {0, 0, 0};
+  Timer Timers[3];
+  /// Whether any of the three is doing anything, so that a program with no
+  /// timers - which is every program in this tree until now - pays one test
+  /// per instruction and not three register reads.
+  bool TimersOn = false;
 
   /// Count down an EXTend sequence.  Called once per instruction, after the
   /// instruction has used the override.
