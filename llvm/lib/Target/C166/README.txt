@@ -1451,6 +1451,16 @@ Known limitations / things to do
   stdout - registers, memory, breakpoints, stepping - with the registers
   described to the client rather than assumed.  A port of GDB or LLDB to this
   target is what is left.
+* What the corpus costs is recorded and checked, and what any one function
+  costs is not.  llvm/utils/C166Sim/corpus/sizes.sh holds text bytes and states
+  for four programs at four optimisation levels against a baseline in the tree,
+  which is what would notice a change that gave back a win somebody measured by
+  hand.  What it would not notice is a regression confined to something the
+  corpus does not reach - the block functions at a size it never copies, a
+  handler's prologue, the coprocessor - because those move a few bytes in
+  programs of five to twenty five kilobytes.  Per function rows would catch
+  them and would need a list of which functions are worth watching, which is a
+  thing to choose rather than to derive.
 * The pipeline is not modelled beyond the four effects section 4.2 names.
   Those four are there - three as checks and one as behaviour, under Pipeline
   effects in llvm/utils/C166Sim/README.txt - because each changes what a

@@ -132,6 +132,15 @@ jobs:
           ./llvm/utils/C166Sim/differential/run.sh ./build/bin \
             "$HOME/c166-sysroot" llvm/lib/Target/C166/startup/c166.ld
 
+      # What the corpus costs, against the recorded baseline.  This is where a
+      # change that quietly gives back a size or speed win somebody measured by
+      # hand is noticed; it builds only for the target, because whether the
+      # answers are right is the differential tests' job above.
+      - name: Code size and state counts
+        run: |
+          ./llvm/utils/C166Sim/corpus/sizes.sh ./build/bin \
+            "$HOME/c166-sysroot" llvm/lib/Target/C166/startup/c166.ld
+
       # Programs nobody wrote, so that the cover is not limited to what
       # somebody thought of.  The seed range moves with the run number, so
       # each run tries programs the last one did not.
