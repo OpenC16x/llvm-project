@@ -992,6 +992,23 @@ def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
                            (C166mac GR16:$acclo, GR16:$acchi,
                                     GR16:$a, GR16:$b, timm:$kind))]>;
 
+// A whole dot product: the accumulator into the unit, one repeated CoMAC that
+// walks both streams, and the two words back out.  What it stands for is a
+// loop, so it has no pattern - C166MACRepeat builds it from the intrinsic it
+// leaves behind, having established the facts an instruction cannot check.
+//
+// $idx is where IDX0 starts, which has to be in the dual-port RAM, and $ptr
+// where the general purpose pointer starts.  The instruction steps both, so
+// $ptr is written as well as read - tied to $ptrend, which nothing uses - and
+// IDX0 is written outright.  $count is how many products are added and $kind
+// is a C166MAC::Kind.
+let Predicates = [HasMAC], Defs = [MAL, MAH, MSW, IDX0], mayLoad = 1,
+    Constraints = "$ptr = $ptrend" in
+def MACREP32 : Pseudo<(outs GR16:$lo, GR16:$hi, GR16:$ptrend),
+                      (ins GR16:$idx, GR16:$ptr, GR16:$acclo, GR16:$acchi,
+                       i16imm:$count, i16imm:$kind),
+                      "#MACREP32", []>;
+
 //===----------------------------------------------------------------------===//
 // Move Instructions
 //===----------------------------------------------------------------------===//

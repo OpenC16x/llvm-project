@@ -32,8 +32,13 @@ C166RegisterInfo::C166RegisterInfo() : C166GenRegisterInfo(C166::R0) {}
 
 const MCPhysReg *
 C166RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  if (MF->getFunction().hasFnAttribute("interrupt"))
+  if (MF->getFunction().hasFnAttribute("interrupt")) {
+    // With a bank of its own the handler saves nothing: the registers it uses
+    // are not the ones the interrupted code was using.
+    if (MF->getFunction().hasFnAttribute("c166-bank"))
+      return CSR_C166_Bank_SaveList;
     return CSR_C166_Interrupt_SaveList;
+  }
   return CSR_C166_SaveList;
 }
 
@@ -69,6 +74,10 @@ BitVector C166RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(C166::MSW);
   Reserved.set(C166::MCW);
   Reserved.set(C166::MRW);
+  // IDX0 and IDX1 are the same kind of thing: the unit's two pointers, placed
+  // by whatever emits a form that walks them and read by that form alone.
+  Reserved.set(C166::IDX0);
+  Reserved.set(C166::IDX1);
 
   Reserved.set(C166::SYSSP);
   Reserved.set(C166::CP);

@@ -31,7 +31,22 @@ namespace c166sim {
 /// the wrong registers and, where a name is gated, does not decode at all.
 /// Defaults to the XC164CM, which is the part this simulator models - CPUCON1's
 /// vector spacing, VECSEG, the PLL and the coprocessor are all its.
-void setSimCPU(llvm::StringRef CPU);
+/// \p Features is what the part has on top of its core, in the compiler's
+/// spelling: the coprocessor is a feature rather than a core, so an ST10 with
+/// one is "+mac" here exactly as it is -mmac there.
+void setSimCPU(llvm::StringRef CPU, llvm::StringRef Features);
+
+/// Whether that part has the two registers that place the interrupt vector
+/// table: VECSEG, which names the segment it lives in, and CPUCON1, whose
+/// VECSC field sets the space between slots.  Only the XC16x has them.
+///
+/// It matters because the addresses they occupy are a different register on a
+/// part that does not: FF12H is SYSCON on a C167, which its crt0.S writes on
+/// the way up, and reading that back as VECSEG sent every interrupt to a
+/// segment nothing was linked into.  Without them the table is four bytes a
+/// slot at the bottom of segment 0, which is what the reset values of both
+/// already say, so nothing else has to change.
+bool simCPUHasVectorRegs();
 
 /// The whole bus is 24 bits: 256 segments of 64 KByte.
 static constexpr uint32_t AddressSpaceSize = 1u << 24;
@@ -60,6 +75,9 @@ enum PSWBit {
   PSW_IEN = 11,
 };
 
+/// The CPU's own priority level, which is PSW bits 15..12.
+static constexpr unsigned PSWILVLShift = 12;
+
 /// Reset values, from the SAB 80C166 register table.  The register bank sits
 /// at 00'FC00H with the system stack growing down into 00'FA00H below it, so
 /// the two do not overlap even though CP and SP come up equal.
@@ -73,6 +91,31 @@ enum ResetValue : uint16_t {
 /// What an EXTend instruction did to the addressing of the instructions that
 /// follow it.
 enum class ExtendKind { None, Page, Segment };
+
+/// An interrupt source, as far as this simulator has one.
+///
+/// A real source is a peripheral: it raises its request flag when something
+/// happens to it, and its own control register holds the enable bit and the
+/// priority.  None of that is modelled - the peripherals are not here, and
+/// which control register belongs to which vector is a property of the
+/// derivative rather than of the core.  So a source here is declared from the
+/// command line and fires on the clock: at a state count, once or over and
+/// over.  That is deterministic, which is what a test needs, and it is enough
+/// to exercise everything the *core* does with an interrupt.
+///
+/// Consequently the source's own enable bit does not appear: an injected
+/// request is by definition enabled.  What gates it is PSW.IEN and the
+/// priority comparison, both of which are the core's.
+struct InterruptSource {
+  /// Never raise again, which is where a one shot goes after it has fired.
+  static constexpr uint64_t Never = ~uint64_t(0);
+
+  uint64_t At = Never; ///< the state count at which the request is raised
+  uint64_t Period = 0; ///< 0 for a one shot, else raise again this often
+  unsigned Vector = 0; ///< which vector table entry, 0 to 127
+  unsigned Level = 0;  ///< the source's priority, 1 to 15
+  bool Pending = false; ///< raised and not yet accepted
+};
 
 /// Why the machine stopped.
 enum class StopReason {
@@ -133,6 +176,16 @@ public:
       ACC -= 0x10000000000ll;
   }
 
+  /// The priority of the task the CPU is running, which an interrupt has to
+  /// beat to be accepted.  It is zero out of reset and becomes the accepted
+  /// source's priority on entry, which is what keeps a handler from being
+  /// interrupted by its own level or below; RETI puts back the PSW that was
+  /// pushed, and with it the level.
+  unsigned cpuPriority() const { return (PSW >> PSWILVLShift) & 0xF; }
+  void setCPUPriority(unsigned L) {
+    PSW = (PSW & 0x0FFF) | (uint16_t(L & 0xF) << PSWILVLShift);
+  }
+
   bool flag(PSWBit B) const { return (PSW >> B) & 1; }
   void setFlag(PSWBit B, bool V) {
     PSW = (PSW & ~(uint16_t(1) << B)) | (uint16_t(V) << B);
@@ -150,6 +203,23 @@ public:
 
   /// Run one instruction.  Returns false once Stop is no longer Running.
   bool step();
+
+  // -- interrupts --------------------------------------------------------
+
+  /// Raise every declared source whose time has come, then hand the CPU the
+  /// arbitration winner if it is allowed to take it.  Called at the top of
+  /// each step, because between instructions is where the core accepts one.
+  /// Returns true if a handler was entered, in which case no instruction ran
+  /// this step.
+  bool serviceInterrupts();
+
+  /// The sources declared on the command line.  Empty unless the harness put
+  /// something here, and then nothing below costs anything.
+  std::vector<InterruptSource> Interrupts;
+
+  /// How many requests have been accepted, which is what a test asserts on
+  /// when the program itself cannot see the difference.
+  uint64_t InterruptsTaken = 0;
 
   /// Count down an EXTend sequence.  Called once per instruction, after the
   /// instruction has used the override.
@@ -193,10 +263,9 @@ public:
   /// the product shift and the saturation both off - which is plain integer
   /// multiply-accumulate, and is why nothing has to configure it first.
   ///
-  /// Only the handful of MAC instructions a multiply-accumulate needs are
-  /// modelled.  MSW's flags and guard bits are not, and neither is the
-  /// repeat prefix, the limiter or the shifter; anything using them stops the
-  /// simulator by name, as any unimplemented instruction does.
+  /// MSW's flags and guard bits are not modelled, and neither is the limiter
+  /// or the shifter; anything using them stops the simulator by name, as any
+  /// unimplemented instruction does.
   int64_t ACC = 0;
   uint16_t MCW = 0;
 

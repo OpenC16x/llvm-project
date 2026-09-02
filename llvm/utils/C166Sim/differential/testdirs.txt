@@ -19,6 +19,7 @@ llvm/test/DebugInfo/C166
 llvm/test/tools/c166-sim
 llvm/test/Analysis/CostModel/C166
 clang/test/CodeGen/C166
+clang/test/Driver/c166-mac.c
 clang/test/Driver/c166-mmcu.c
 clang/test/Driver/c166-toolchain.c
 clang/test/Preprocessor/init-c166.c

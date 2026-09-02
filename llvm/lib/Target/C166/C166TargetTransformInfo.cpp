@@ -7,9 +7,47 @@
 //===----------------------------------------------------------------------===//
 
 #include "C166TargetTransformInfo.h"
+#include "C166.h"
 #include "llvm/IR/Instructions.h"
 
 using namespace llvm;
+
+void C166TTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
+                                          TTI::UnrollingPreferences &UP,
+                                          OptimizationRemarkEmitter *ORE) const {
+  BaseT::getUnrollingPreferences(L, SE, UP, ORE);
+
+  if (!ST->hasMAC() || !C166::isRepeatedCoMACLoop(L, SE))
+    return;
+
+  // Every way a loop can be unrolled, refused.  A trip count above
+  // FullUnrollMaxCount is what stops the full decision - that one is a count
+  // and not a cost, so a threshold alone would not settle it - and the rest
+  // stop the partial and runtime ones.
+  UP.MaxCount = 1;
+  UP.MaxUpperBound = 1;
+  UP.FullUnrollMaxCount = 1;
+  UP.Threshold = 0;
+  UP.OptSizeThreshold = 0;
+  UP.PartialThreshold = 0;
+  UP.PartialOptSizeThreshold = 0;
+  UP.Partial = false;
+  UP.Runtime = false;
+  UP.UpperBound = false;
+  UP.Force = false;
+}
+
+void C166TTIImpl::getPeelingPreferences(Loop *L, ScalarEvolution &SE,
+                                        TTI::PeelingPreferences &PP) const {
+  BaseT::getPeelingPreferences(L, SE, PP);
+
+  // Peeling is decided before unrolling and would take the first product out
+  // of the loop, which leaves a run of one fewer and a stray MAC beside it.
+  if (ST->hasMAC() && C166::isRepeatedCoMACLoop(L, SE)) {
+    PP.PeelCount = 0;
+    PP.AllowPeeling = false;
+  }
+}
 
 /// The number of 16 bit registers a value of this many bits occupies.  The
 /// machine has nothing narrower than a word to compute in - a byte operation

@@ -1,9 +1,9 @@
 /* Compiled twice: once for c166 and run in the simulator, once for the host
    and run natively.  The two outputs must match exactly.
 
-   This one is about how values get from one function to another.  Four words
+   This one is about how values get from one function to another.  Eight words
    go in registers and the rest on the ABI stack, so anything wider than a word
-   is already split across registers before the fifth argument makes it a stack
+   is already split across registers before the ninth argument makes it a stack
    one, and a struct is whatever shape it is.  None of that is visible in the
    result of any single call - it shows up as a wrong answer three calls later,
    which is what a differential test is for.
@@ -22,6 +22,12 @@ static void put(char c) { putchar(c); }
 #endif
 #include <stdarg.h>
 
+/* These functions exist to be called, so they have to survive being called:
+   inlined away, an argument never travels and the convention is not the thing
+   under test.  At -O0 that happened anyway; at -O2 it did not, which meant the
+   levels that matter most were checking the least. */
+#define NOINLINE __attribute__((noinline))
+
 typedef __UINT16_TYPE__ u16; typedef __INT16_TYPE__ s16;
 typedef __UINT32_TYPE__ u32; typedef __INT32_TYPE__ s32;
 typedef __UINT64_TYPE__ u64; typedef __INT64_TYPE__ s64;
@@ -33,21 +39,21 @@ static void puthex(u32 v, int d) {
 
 /* --- arguments past the registers, in every width ------------------- */
 
-static u32 w8(u16 a, u16 b, u16 c, u16 d, u16 e, u16 f, u16 g, u16 h) {
+static NOINLINE u32 w8(u16 a, u16 b, u16 c, u16 d, u16 e, u16 f, u16 g, u16 h) {
   return ((u32)a << 24) ^ ((u32)b << 20) ^ ((u32)c << 16) ^ ((u32)d << 12) ^
          ((u32)e << 8) ^ ((u32)f << 4) ^ (u32)g ^ ((u32)h * 0x10001u);
 }
 
 /* Mixed widths, so that a 32 bit value straddles the boundary between the
    registers and the stack rather than landing tidily on one side. */
-static u32 mixed(u16 a, u32 b, u16 c, u64 d, u16 e, u32 f, u16 g) {
+static NOINLINE u32 mixed(u16 a, u32 b, u16 c, u64 d, u16 e, u32 f, u16 g) {
   return (u32)a * 2 + b * 3 + (u32)c * 5 + (u32)d * 7 + (u32)(d >> 32) * 11 +
          (u32)e * 13 + f * 17 + (u32)g * 19;
 }
 
 /* A byte argument is promoted to a word, and a signed one has to arrive sign
    extended rather than merely narrow. */
-static s32 bytes(signed char a, unsigned char b, signed char c,
+static NOINLINE s32 bytes(signed char a, unsigned char b, signed char c,
                  unsigned char d, signed char e, unsigned char f,
                  signed char g, unsigned char h) {
   return (s32)a + b * 3 + (s32)c * 5 + d * 7 + (s32)e * 11 + f * 13 +
@@ -66,32 +72,34 @@ struct s9 { u32 a, b; char c; };
 struct s16 { u32 a, b, c, d; };
 struct nested { struct s4 inner; u32 x; struct s2 tail; };
 
-static u32 take1(struct s1 s) { return (u32)(unsigned char)s.a; }
-static u32 take2(struct s2 s) { return (u32)(unsigned char)s.a * 3 + (unsigned char)s.b; }
-static u32 take3(struct s3 s) { return ((u32)(unsigned char)s.a * 3 + (unsigned char)s.b) * 5 + (unsigned char)s.c; }
-static u32 take4(struct s4 s) { return (u32)s.a * 7 + s.b; }
-static u32 take5(struct s5 s) { return s.a * 11 + (unsigned char)s.b; }
-static u32 take8(struct s8 s) { return (((u32)s.a * 3 + s.b) * 5 + s.c) * 7 + s.d; }
-static u32 take9(struct s9 s) { return s.a * 13 + s.b * 17 + (unsigned char)s.c; }
-static u32 take16(struct s16 s) { return ((s.a * 3 + s.b) * 5 + s.c) * 7 + s.d; }
-static u32 takenested(struct nested s) {
+static NOINLINE u32 take1(struct s1 s) { return (u32)(unsigned char)s.a; }
+static NOINLINE u32 take2(struct s2 s) { return (u32)(unsigned char)s.a * 3 + (unsigned char)s.b; }
+static NOINLINE u32 take3(struct s3 s) { return ((u32)(unsigned char)s.a * 3 + (unsigned char)s.b) * 5 + (unsigned char)s.c; }
+static NOINLINE u32 take4(struct s4 s) { return (u32)s.a * 7 + s.b; }
+static NOINLINE u32 take5(struct s5 s) { return s.a * 11 + (unsigned char)s.b; }
+static NOINLINE u32 take8(struct s8 s) { return (((u32)s.a * 3 + s.b) * 5 + s.c) * 7 + s.d; }
+static NOINLINE u32 take9(struct s9 s) { return s.a * 13 + s.b * 17 + (unsigned char)s.c; }
+static NOINLINE u32 take16(struct s16 s) { return ((s.a * 3 + s.b) * 5 + s.c) * 7 + s.d; }
+static NOINLINE u32 takenested(struct nested s) {
   return take4(s.inner) * 3 + s.x * 5 + take2(s.tail);
 }
-/* And a struct behind seven other arguments, so it lands on the stack. */
-static u32 late_struct(u16 a, u16 b, u16 c, u16 d, u16 e, u16 f, u16 g,
-                       struct s8 s) {
-  return (u32)(a + b + c + d + e + f + g) * 31 + take8(s);
+/* And a struct behind nine other arguments, so it lands on the stack: eight
+   words go in registers, so the ninth is what puts the boundary before the
+   struct rather than after it. */
+static NOINLINE u32 late_struct(u16 a, u16 b, u16 c, u16 d, u16 e, u16 f, u16 g,
+                                u16 i, u16 j, struct s8 s) {
+  return (u32)(a + b + c + d + e + f + g + i + j) * 31 + take8(s);
 }
 
-static struct s1  make1(char v)  { struct s1 s = {v}; return s; }
-static struct s2  make2(char v)  { struct s2 s = {v, (char)(v + 1)}; return s; }
-static struct s3  make3(char v)  { struct s3 s = {v, (char)(v+1), (char)(v+2)}; return s; }
-static struct s4  make4(u16 v)   { struct s4 s = {v, (u16)(v * 3)}; return s; }
-static struct s5  make5(u32 v)   { struct s5 s = {v, (char)v}; return s; }
-static struct s8  make8(u16 v)   { struct s8 s = {v, (u16)(v+1), (u16)(v*7), (u16)~v}; return s; }
-static struct s9  make9(u32 v)   { struct s9 s = {v, ~v, (char)(v >> 8)}; return s; }
-static struct s16 make16(u32 v)  { struct s16 s = {v, v*3, v*5, ~v}; return s; }
-static struct nested makenested(u16 v) {
+static NOINLINE struct s1  make1(char v)  { struct s1 s = {v}; return s; }
+static NOINLINE struct s2  make2(char v)  { struct s2 s = {v, (char)(v + 1)}; return s; }
+static NOINLINE struct s3  make3(char v)  { struct s3 s = {v, (char)(v+1), (char)(v+2)}; return s; }
+static NOINLINE struct s4  make4(u16 v)   { struct s4 s = {v, (u16)(v * 3)}; return s; }
+static NOINLINE struct s5  make5(u32 v)   { struct s5 s = {v, (char)v}; return s; }
+static NOINLINE struct s8  make8(u16 v)   { struct s8 s = {v, (u16)(v+1), (u16)(v*7), (u16)~v}; return s; }
+static NOINLINE struct s9  make9(u32 v)   { struct s9 s = {v, ~v, (char)(v >> 8)}; return s; }
+static NOINLINE struct s16 make16(u32 v)  { struct s16 s = {v, v*3, v*5, ~v}; return s; }
+static NOINLINE struct nested makenested(u16 v) {
   struct nested s; s.inner = make4(v); s.x = (u32)v * 65537u; s.tail = make2((char)v);
   return s;
 }
@@ -109,7 +117,8 @@ static u32 structs(void) {
     h = h * 31 + take16(make16((u32)v * 70001u));
     h = h * 31 + takenested(makenested(v));
     h = h * 31 + late_struct(v, (u16)(v+1), (u16)(v+2), (u16)(v+3), (u16)(v+4),
-                             (u16)(v+5), (u16)(v+6), make8(v));
+                             (u16)(v+5), (u16)(v+6), (u16)(v+7), (u16)(v+8),
+                             make8(v));
     /* A struct assigned through a pointer, and one copied whole. */
     struct s16 a = make16(v), b;
     b = a;

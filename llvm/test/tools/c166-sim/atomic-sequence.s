@@ -11,7 +11,9 @@
 ## The compiler has to remember that when it builds an atomic sequence.  This
 ## is what holds it to it: every program the differential suite runs goes
 ## through this check, so a sequence that breaks the rule stops rather than
-## quietly working on a simulator that does not model interrupts anyway.
+## quietly working.  What the sequence is protecting the code from is in
+## interrupt.s, which injects a request into one and shows it held off until
+## the last covered instruction has run.
 
 # RUN: llvm-mc -filetype=obj -triple=c166 %t/flow.s -o %t/flow.o
 # RUN: llvm-objcopy -O binary %t/flow.o %t/flow.bin

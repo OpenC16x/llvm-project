@@ -12,6 +12,8 @@
 #include "Gnu.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
+#include "llvm/ADT/StringRef.h"
+#include <vector>
 
 namespace clang {
 namespace driver {
@@ -63,6 +65,14 @@ private:
 
 namespace tools {
 namespace c166 {
+
+/// Turn the target specific -m flags into target features.
+///
+/// There is one: the multiply-accumulate coprocessor, which is a feature
+/// rather than a core because -mcpu=st10 covers parts that have it and parts
+/// that do not.
+void getC166TargetFeatures(const Driver &D, const llvm::opt::ArgList &Args,
+                           std::vector<llvm::StringRef> &Features);
 
 /// LLD is the only linker that knows the C166 relocations, so that is what
 /// this drives unless -fuse-ld= says otherwise.

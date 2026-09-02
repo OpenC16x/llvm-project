@@ -67,6 +67,22 @@ public:
     return ClassID == 0 ? 14 : 0;
   }
 
+  /// Leave a dot product over the dual-port RAM alone, because it is about to
+  /// become one instruction.
+  ///
+  /// The unroller would otherwise write out the whole of a short one: eight
+  /// taps at -O2 come to fifty instructions, against the nine the repeated
+  /// coprocessor form takes, and the loop the pass looks for is gone by the
+  /// time it runs.  Nothing else here is worth unrolling either - there is no
+  /// pipeline to fill and no second issue slot - but this is the case where
+  /// unrolling actively takes something away, so it is the one that is said.
+  void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
+                               TTI::UnrollingPreferences &UP,
+                               OptimizationRemarkEmitter *ORE) const override;
+
+  void getPeelingPreferences(Loop *L, ScalarEvolution &SE,
+                             TTI::PeelingPreferences &PP) const override;
+
   TypeSize
   getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const override {
     if (K == TargetTransformInfo::RGK_Scalar)

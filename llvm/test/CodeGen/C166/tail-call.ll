@@ -136,19 +136,12 @@ define i16 @from_interrupt(i16 %a) #0 {
 define i16 @stack_arguments(i16 %a) {
 ; CHECK-LABEL: stack_arguments:
 ; CHECK:       ; %bb.0:
-; CHECK-NEXT:    sub r0, #4
-; CHECK-NEXT:    .cfi_def_cfa_offset 4
-; CHECK-NEXT:    mov r3, #5
-; CHECK-NEXT:    mov [r0+#2], r3
-; CHECK-NEXT:    mov r3, #4
-; CHECK-NEXT:    mov [r0], r3
 ; CHECK-NEXT:    mov r3, #1
 ; CHECK-NEXT:    mov r4, #2
 ; CHECK-NEXT:    mov r5, #3
-; CHECK-NEXT:    calla cc_UC, many
-; CHECK-NEXT:    add r0, #4
-; CHECK-NEXT:    .cfi_def_cfa r0, 0
-; CHECK-NEXT:    ret
+; CHECK-NEXT:    mov r6, #4
+; CHECK-NEXT:    mov r7, #5
+; CHECK-NEXT:    jmpa cc_UC, many
   %r = tail call i16 @many(i16 %a, i16 1, i16 2, i16 3, i16 4, i16 5)
   ret i16 %r
 }
@@ -215,19 +208,12 @@ define i16 @far_stack_arguments(i16 %a) #1 {
 ; CHECK-NEXT:    .cfi_escape 0x16, 0x2d, 0x0e, 0x92, 0x24, 0x02, 0x94, 0x02, 0x08, 0x10, 0x24, 0x92, 0x24, 0x00, 0x94, 0x02, 0x21 ; return address, from the hardware stack
 ; CHECK-NEXT:    .cfi_escape 0x16, 0x24, 0x03, 0x92, 0x24, 0x04 ; caller's hardware stack pointer
 ; CHECK-NEXT:    .cfi_escape 0x10, 0x2c, 0x03, 0x92, 0x24, 0x02 ; caller's CSP
-; CHECK-NEXT:    sub r0, #4
-; CHECK-NEXT:    .cfi_def_cfa_offset 4
-; CHECK-NEXT:    mov r3, #5
-; CHECK-NEXT:    mov [r0+#2], r3
-; CHECK-NEXT:    mov r3, #4
-; CHECK-NEXT:    mov [r0], r3
 ; CHECK-NEXT:    mov r3, #1
 ; CHECK-NEXT:    mov r4, #2
 ; CHECK-NEXT:    mov r5, #3
-; CHECK-NEXT:    calls #seg(far_many), sof(far_many)
-; CHECK-NEXT:    add r0, #4
-; CHECK-NEXT:    .cfi_def_cfa r0, 0
-; CHECK-NEXT:    rets
+; CHECK-NEXT:    mov r6, #4
+; CHECK-NEXT:    mov r7, #5
+; CHECK-NEXT:    jmps #seg(far_many), sof(far_many)
   %r = tail call i16 @far_many(i16 %a, i16 1, i16 2, i16 3, i16 4, i16 5)
   ret i16 %r
 }

@@ -44,6 +44,28 @@ inline unsigned getMACOpcode(unsigned Kind) {
   llvm_unreachable("Unknown C166MAC::Kind");
 }
 
+/// The same multiply-accumulate in the form that walks two pointers, which is
+/// what a MACREP32 expands to.
+///
+/// Only the four kinds above have one here, and all four are symmetric in
+/// their two operands - both signed or both unsigned - so which stream goes
+/// behind IDX0 is free.  That is what lets C166MACRepeat put whichever of the
+/// two is in the dual-port RAM there.  CoMACsu and CoMACus would take that
+/// freedom away, and there is no kind for them; see combineMAC.
+inline unsigned getMACIdxOpcode(unsigned Kind) {
+  switch (Kind) {
+  case C166MAC::Signed:
+    return C166::CoMAC_xp;
+  case C166MAC::Unsigned:
+    return C166::CoMACu_xp;
+  case C166MAC::SignedNegate:
+    return C166::CoMACN_xp;
+  case C166MAC::UnsignedNegate:
+    return C166::CoMACuN_xp;
+  }
+  llvm_unreachable("Unknown C166MAC::Kind");
+}
+
 /// The comparison a MINMAX32rr's $kind operand stands for.
 inline unsigned getMinMaxOpcode(unsigned Kind) {
   switch (Kind) {

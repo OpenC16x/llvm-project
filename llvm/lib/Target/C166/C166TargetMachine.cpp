@@ -33,6 +33,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166Target() {
   initializeC166MergeExtendPass(PR);
   initializeC166FoldComparePass(PR);
   initializeC166MACChainPass(PR);
+  initializeC166MACRepeatPass(PR);
   initializeC166LowerThreadLocalPass(PR);
 }
 
@@ -98,6 +99,13 @@ void C166PassConfig::addIRPasses() {
   // to have an opinion about it.
   addPass(createC166LowerThreadLocalPass());
   addPass(createAtomicExpandLegacyPass());
+
+  // While the loops are still loops and scalar evolution can still say what
+  // their trip counts are, which is what a repeated coprocessor instruction
+  // needs to know and what nothing after selection could work out again.
+  if (getOptLevel() != CodeGenOptLevel::None)
+    addPass(createC166MACRepeatPass());
+
   TargetPassConfig::addIRPasses();
 }
 

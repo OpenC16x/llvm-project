@@ -1,0 +1,44 @@
+## The interrupt vector table is in c166.ld, c167.ld and st10.ld rather than in
+## a file they all include, because LLD resolves INCLUDE against the working
+## directory and the -L paths rather than against the script doing the
+## including - so a shared file would mean every link needed a -L that no link
+## needs today.  Three copies is the price, and this is what keeps them from
+## drifting: each row four bytes above the last, all 127 slots present, and the
+## three tables identical.
+##
+## The table itself is checked by lld/test/ELF/c166-vectors.s, which links a
+## program through it and runs it.  This checks only that all three scripts say
+## the same thing.
+
+# RUN: %python %s %S/../../../lib/Target/C166/startup
+
+import sys, os, re
+
+Startup = sys.argv[1]
+Row = re.compile(
+    r"^\s*\. = DEFINED\(__c166_vector_table\) \? ORIGIN\(rom\) \+ (0x[0-9A-F]+) : \.;"
+    r"(?: KEEP\(\*\(\.vectors\.(\d\d\d)\)\))?$")
+
+Tables = {}
+for Name in ["c166.ld", "c167.ld", "st10.ld"]:
+    Rows = []
+    with open(os.path.join(Startup, Name)) as F:
+        for Line in F:
+            M = Row.match(Line.rstrip("\n"))
+            if M:
+                Rows.append((int(M.group(1), 16), M.group(2)))
+    Tables[Name] = Rows
+
+    # 127 slots and the assignment that ends the table, which is what makes it
+    # 512 bytes rather than stopping after the last slot anything claims.
+    assert len(Rows) == 128, "%s has %d rows, expected 128" % (Name, len(Rows))
+    assert Rows[-1] == (0x200, None), "%s does not close the table" % Name
+    for I, (Addr, Slot) in enumerate(Rows[:-1]):
+        Number = I + 1
+        assert Slot == "%03d" % Number, \
+            "%s row %d claims .vectors.%s" % (Name, Number, Slot)
+        assert Addr == 4 * Number, \
+            "%s puts slot %d at 0x%X, not 4 * %d" % (Name, Number, Addr, Number)
+
+assert Tables["c166.ld"] == Tables["c167.ld"] == Tables["st10.ld"], \
+    "the three scripts do not hold the same vector table"

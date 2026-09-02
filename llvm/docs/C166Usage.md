@@ -65,14 +65,19 @@ links and does not run.
 The multiply-accumulate unit is a feature rather than a core, because
 `-mcpu=st10` covers parts that have it and parts that do not — ST's own
 programming manual says to consult the device data sheet. `-mcpu=xc16x`
-implies it. Elsewhere it has to be asked for, and at present the only
-spelling the driver accepts is the general one:
+implies it. Elsewhere it has to be asked for:
 
 ```
-clang --target=c166 -mcpu=st10 -Xclang -target-feature -Xclang +mac ...
+clang --target=c166 -mcpu=st10 -mmac ...
 ```
 
-There is no `-mmac`; that is a rough edge rather than a design.
+`-mno-mac` is the other way, and turns the unit off on a core that would
+otherwise imply it. Neither flag leaves the decision to `-mcpu=` and `-mmcu=`.
+
+The simulator takes the same thing in the same spelling — `c166-sim
+--mcpu=st10 --mattr=+mac` — because its decoder is the target's own, and
+without being told it would refuse the instructions the compiler had just
+emitted for that part.
 
 What the unit does for ordinary C, without an asm statement: `acc += a * b`
 with 16-bit operands and a 32-bit accumulator, `(a * b + 0x8000) >> 16` as one
@@ -175,9 +180,83 @@ __attribute__((interrupt)) void timer0(void) { ... }
 
 The handler saves and restores every register it touches and returns with
 `RETI`. It must take no parameters and return `void`, cannot be called from
-C, and is never inlined. Putting it in the vector table is the linker
-script's business or a hand-written vector's, exactly as with the vendor
-toolchains.
+C, and is never inlined.
+
+An optional trap number claims that slot of the vector table and has the
+compiler write what goes in it:
+
+```c
+__attribute__((interrupt(26))) void t3_isr(void) { ... }
+```
+
+A slot holds a jump rather than an address, because the hardware branches to
+the slot instead of reading through it, so what is emitted is a `JMPS` to the
+handler in a section named `.vectors.026` — the trap number in decimal, padded
+to three digits. The three linker scripts under
+`llvm/lib/Target/C166/startup/` place all 128 of them at four times their
+number, and nothing has to be asked for: the table appears when a program has
+handlers and costs nothing when it does not. The number is 1 to 127, trap 0
+being reset, and two handlers asking for one slot is an error.
+
+### A register bank of its own
+
+```c
+__attribute__((interrupt(36), c166_bank)) void t4_isr(void) { ... }
+```
+
+`R0` to `R15` are a window into internal RAM at the address the context
+pointer holds, so moving that pointer moves the whole window. With
+`c166_bank` the handler enters with `SCXT CP, #bank` and leaves with
+`POP CP`: the interrupted code's registers are never touched, so there is
+nothing to spill and nothing to reload — one instruction in and one out,
+against up to fifteen of each.
+
+| a handler that calls a function | without | with |
+|---|---|---|
+| entry and exit | 114 states | **64** |
+| handler size | 110 bytes | **42** |
+
+A leaf handler that touches one register saves nothing — there was only one
+register to save. The win is in handlers with a lot live at once, which is
+what calling anything makes of one.
+
+The bank is 32 bytes of internal RAM, reserved by the compiler and placed by
+the linker script — the only memory a context pointer may name. The scripts
+here have room for seven; an eighth is a link error naming the region. Each
+handler gets its own, so a higher-priority handler interrupting a banked one
+cannot corrupt it.
+
+A `NOP` follows the `SCXT`: no manual to hand says whether the instruction
+after one that writes `CP` already sees the new window, and being wrong would
+put the handler's first register write in the interrupted code's bank.
+
+`MDL`, `MDH`, `MDC` and the MAC accumulator are not part of the window and are
+still saved by a handler that disturbs them. `R0` is the ABI stack pointer and
+belongs to the interrupted code, so a handler that calls anything or needs a
+frame copies it across in three instructions; a leaf that fits in registers
+pays nothing for it.
+
+Without a number the handler is still a handler, and reaching it is left to a
+hand-written vector — which is what a program with a shared interrupt node or
+its own dispatcher wants. That is the same section by another route:
+
+```c
+asm(".section .vectors.026,\"ax\",@progbits\n\t"
+    "jmps #seg(t3_isr), sof(t3_isr)\n\t"
+    ".text");
+```
+
+or, better, the `VECTOR_` macros in `startup/xc164cm-vectors.inc`, which name
+every source the part has after its interrupt control register rather than
+after a number that has to be looked up.
+
+That the saving and restoring is right is checked rather than assumed:
+`llvm/utils/C166Sim/differential/interrupts.c` runs a computation whose every
+step depends on the last while the simulator fires a handler into it a few
+dozen times, and the answer has to match the host's, which had no interrupts
+at all. The simulator raises the requests itself — see `--interrupt-at` and
+`--interrupt-every` in `llvm/utils/C166Sim/README.txt`, since there are no
+peripherals to raise them.
 
 Both attributes are described in Clang's attribute reference alongside every
 other target's.
@@ -246,9 +325,37 @@ All three are still fine in a clobber list, which asks for no move.
 
 ### Reaching the coprocessor
 
-Nothing selects the coprocessor's repeatable forms, so an asm statement is how
-they are used. Two things have to be right, and only one of them is about the
-assembly.
+One repeatable form is selected from ordinary C: a dot product over an array
+declared `__dpram`, with a trip count the compiler knows.
+
+```c
+__dpram short x[40];
+static const short h[40] = {…};
+
+long dot(void) {
+  long acc = 0;
+  for (int i = 0; i < 40; i++)
+    acc += (long)x[i] * h[i];   /* one "repeat mrw times comac" */
+  return acc;
+}
+```
+
+The accumulator has to be 32 bit, the product a widening one — both operands
+signed or both unsigned — and the loop has to contain nothing else, because
+the prefix repeats exactly one instruction. `acc -= …` works too. Which of the
+two arrays is written first does not matter: whichever is the `__dpram` one
+goes behind IDX0. Up to 31 taps go in the repeat field and more go through
+MRW, to a limit of 8192. A trip count only the running program knows, a stream
+walked backwards or with a stride, an array that is not in the dual-port RAM,
+or anything else in the loop body leaves it an ordinary loop.
+
+The count has to be a constant because "repeat this many times" is the whole
+instruction. The `__dpram` has to be on a global because that attribute is a
+property of the object rather than of a pointer, so a filter that takes its
+delay line as an argument cannot be recognised however it is written.
+
+Everything else the coprocessor does is reached with an asm statement. Two
+things have to be right, and only one of them is about the assembly.
 
 **Where the data is.** IDX0 and IDX1 reach the internal dual-port RAM and
 nothing else — PM0036 section 2.1, with `CoMOV` the one exception. Ordinary
@@ -262,7 +369,8 @@ static const short coef[8] = {…};   /* a register walks this, so anywhere */
 ```
 
 The second operand goes through a general purpose register, which reaches the
-whole memory space, so a coefficient table needs no attribute. The dual-port
+whole memory space, so a coefficient table needs no attribute.  That is the
+same rule the dot product above follows, and for the same reason. The dual-port
 RAM is 2 KByte on the parts here and the stacks are in it, so what goes there
 should be what has to.
 

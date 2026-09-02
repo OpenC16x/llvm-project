@@ -135,6 +135,15 @@ MEMORY
    * so it is a region of its own rather than a slice of one above. */
   bitram (rw) : ORIGIN = 0x0000FD00, LENGTH = 256
 
+  /* The interrupt banks: where __attribute__((c166_bank)) handlers get their
+   * own sixteen registers.  The reset register bank is the sixteen words at
+   * FC00H, so FC20H is the first free word above it, and FD00H is where the
+   * bit-addressable RAM starts - 224 bytes, which is seven banks.  It has to
+   * be this memory and not any other: a context pointer may only name the
+   * internal RAM.  A program that wants an eighth bank gets a region overflow
+   * naming this one. */
+  banks (rw) : ORIGIN = 0x0000FC20, LENGTH = 0x00E0
+
   /* The internal RAM under the system stack.  This is the dual-port RAM, which
    * is the only memory the multiply-accumulate unit's IDX pointers reach, so it
    * is where __dpram places things as well as where the ABI stack lives.  On a
@@ -170,6 +179,16 @@ ASSERT(LENGTH(farrom2) == 0 ||
 
 ASSERT(__system_stack_top <= 0x0000F600 + __c166_iram_length,
        "the system stack is above the end of this part's internal RAM")
+
+/* An interrupt bank has to be in the internal RAM, because that is the only
+ * memory a context pointer may name.  On a part whose internal RAM stops
+ * before the banks region does, there is nowhere to put one - which is a fact
+ * about the part rather than about the program, so it is said here rather than
+ * left to a region that reads as RAM and is not.  A program with no banked
+ * handlers is not asked. */
+ASSERT(SIZEOF(.c166_banks) == 0 ||
+       ORIGIN(banks) + SIZEOF(.c166_banks) <= 0x0000F600 + __c166_iram_length,
+       "an interrupt bank is above the end of this part's internal RAM")
 /* The __dpram data shares the internal RAM with the ABI stack coming down.
  * How much room that leaves the stack is not a thing a link can know; running
  * past where the stack starts is. */
@@ -190,7 +209,173 @@ SECTIONS
    * part executes.  Anything else in the vector table goes here too. */
   .reset : {
     KEEP(*(.reset))
+
+    /* The interrupt vector table.  A slot is one double word at 4 * the trap
+     * number, and what goes in it is a jump rather than an address, because
+     * TRAP and a hardware interrupt both branch to the slot instead of
+     * reading through it.  __attribute__((interrupt(n))) emits one, and so do
+     * the VECTOR macros in xc164cm-vectors.inc; either way the section is
+     * named .vectors.NNN after the trap number in decimal, padded to three
+     * digits.  Trap 0 is reset and is the KEEP above.
+     *
+     * The whole table is 512 bytes of ROM whether its slots are filled or
+     * not, which a program with no handlers should not pay - so each row is
+     * conditional on __c166_vector_table, a weak absolute symbol that
+     * anything claiming a slot defines and nothing else does.  Without it
+     * every row leaves the location counter where it found it and the table
+     * takes no room at all.
+     *
+     * The location counter inside an output section is an absolute address
+     * rather than an offset into the section, so each row names ORIGIN(rom):
+     * the table is at the low end of the segment the part fetches vectors
+     * from, which is where this script puts the ROM.
+     *
+     * This is the layout an XC164CM has at reset - CPUCON1.VECSC resets to
+     * 00, which is two words between vectors, and VECSEG selects the segment
+     * - and the only layout a C167 or an ST10 has, neither having those
+     * registers.  A program that writes either one wants a different script.
+     *
+     * The three scripts here hold the same table, which
+     * test/CodeGen/C166/vector-table-scripts.test checks: every row four
+     * bytes above the last, all 127 present, and the three identical. */
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x004 : .; KEEP(*(.vectors.001))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x008 : .; KEEP(*(.vectors.002))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x00C : .; KEEP(*(.vectors.003))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x010 : .; KEEP(*(.vectors.004))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x014 : .; KEEP(*(.vectors.005))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x018 : .; KEEP(*(.vectors.006))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x01C : .; KEEP(*(.vectors.007))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x020 : .; KEEP(*(.vectors.008))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x024 : .; KEEP(*(.vectors.009))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x028 : .; KEEP(*(.vectors.010))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x02C : .; KEEP(*(.vectors.011))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x030 : .; KEEP(*(.vectors.012))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x034 : .; KEEP(*(.vectors.013))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x038 : .; KEEP(*(.vectors.014))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x03C : .; KEEP(*(.vectors.015))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x040 : .; KEEP(*(.vectors.016))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x044 : .; KEEP(*(.vectors.017))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x048 : .; KEEP(*(.vectors.018))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x04C : .; KEEP(*(.vectors.019))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x050 : .; KEEP(*(.vectors.020))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x054 : .; KEEP(*(.vectors.021))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x058 : .; KEEP(*(.vectors.022))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x05C : .; KEEP(*(.vectors.023))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x060 : .; KEEP(*(.vectors.024))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x064 : .; KEEP(*(.vectors.025))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x068 : .; KEEP(*(.vectors.026))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x06C : .; KEEP(*(.vectors.027))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x070 : .; KEEP(*(.vectors.028))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x074 : .; KEEP(*(.vectors.029))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x078 : .; KEEP(*(.vectors.030))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x07C : .; KEEP(*(.vectors.031))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x080 : .; KEEP(*(.vectors.032))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x084 : .; KEEP(*(.vectors.033))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x088 : .; KEEP(*(.vectors.034))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x08C : .; KEEP(*(.vectors.035))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x090 : .; KEEP(*(.vectors.036))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x094 : .; KEEP(*(.vectors.037))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x098 : .; KEEP(*(.vectors.038))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x09C : .; KEEP(*(.vectors.039))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0A0 : .; KEEP(*(.vectors.040))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0A4 : .; KEEP(*(.vectors.041))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0A8 : .; KEEP(*(.vectors.042))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0AC : .; KEEP(*(.vectors.043))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0B0 : .; KEEP(*(.vectors.044))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0B4 : .; KEEP(*(.vectors.045))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0B8 : .; KEEP(*(.vectors.046))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0BC : .; KEEP(*(.vectors.047))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0C0 : .; KEEP(*(.vectors.048))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0C4 : .; KEEP(*(.vectors.049))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0C8 : .; KEEP(*(.vectors.050))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0CC : .; KEEP(*(.vectors.051))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0D0 : .; KEEP(*(.vectors.052))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0D4 : .; KEEP(*(.vectors.053))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0D8 : .; KEEP(*(.vectors.054))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0DC : .; KEEP(*(.vectors.055))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0E0 : .; KEEP(*(.vectors.056))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0E4 : .; KEEP(*(.vectors.057))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0E8 : .; KEEP(*(.vectors.058))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0EC : .; KEEP(*(.vectors.059))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0F0 : .; KEEP(*(.vectors.060))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0F4 : .; KEEP(*(.vectors.061))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0F8 : .; KEEP(*(.vectors.062))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x0FC : .; KEEP(*(.vectors.063))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x100 : .; KEEP(*(.vectors.064))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x104 : .; KEEP(*(.vectors.065))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x108 : .; KEEP(*(.vectors.066))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x10C : .; KEEP(*(.vectors.067))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x110 : .; KEEP(*(.vectors.068))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x114 : .; KEEP(*(.vectors.069))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x118 : .; KEEP(*(.vectors.070))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x11C : .; KEEP(*(.vectors.071))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x120 : .; KEEP(*(.vectors.072))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x124 : .; KEEP(*(.vectors.073))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x128 : .; KEEP(*(.vectors.074))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x12C : .; KEEP(*(.vectors.075))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x130 : .; KEEP(*(.vectors.076))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x134 : .; KEEP(*(.vectors.077))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x138 : .; KEEP(*(.vectors.078))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x13C : .; KEEP(*(.vectors.079))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x140 : .; KEEP(*(.vectors.080))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x144 : .; KEEP(*(.vectors.081))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x148 : .; KEEP(*(.vectors.082))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x14C : .; KEEP(*(.vectors.083))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x150 : .; KEEP(*(.vectors.084))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x154 : .; KEEP(*(.vectors.085))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x158 : .; KEEP(*(.vectors.086))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x15C : .; KEEP(*(.vectors.087))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x160 : .; KEEP(*(.vectors.088))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x164 : .; KEEP(*(.vectors.089))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x168 : .; KEEP(*(.vectors.090))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x16C : .; KEEP(*(.vectors.091))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x170 : .; KEEP(*(.vectors.092))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x174 : .; KEEP(*(.vectors.093))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x178 : .; KEEP(*(.vectors.094))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x17C : .; KEEP(*(.vectors.095))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x180 : .; KEEP(*(.vectors.096))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x184 : .; KEEP(*(.vectors.097))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x188 : .; KEEP(*(.vectors.098))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x18C : .; KEEP(*(.vectors.099))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x190 : .; KEEP(*(.vectors.100))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x194 : .; KEEP(*(.vectors.101))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x198 : .; KEEP(*(.vectors.102))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x19C : .; KEEP(*(.vectors.103))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1A0 : .; KEEP(*(.vectors.104))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1A4 : .; KEEP(*(.vectors.105))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1A8 : .; KEEP(*(.vectors.106))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1AC : .; KEEP(*(.vectors.107))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1B0 : .; KEEP(*(.vectors.108))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1B4 : .; KEEP(*(.vectors.109))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1B8 : .; KEEP(*(.vectors.110))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1BC : .; KEEP(*(.vectors.111))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1C0 : .; KEEP(*(.vectors.112))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1C4 : .; KEEP(*(.vectors.113))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1C8 : .; KEEP(*(.vectors.114))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1CC : .; KEEP(*(.vectors.115))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1D0 : .; KEEP(*(.vectors.116))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1D4 : .; KEEP(*(.vectors.117))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1D8 : .; KEEP(*(.vectors.118))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1DC : .; KEEP(*(.vectors.119))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1E0 : .; KEEP(*(.vectors.120))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1E4 : .; KEEP(*(.vectors.121))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1E8 : .; KEEP(*(.vectors.122))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1EC : .; KEEP(*(.vectors.123))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1F0 : .; KEEP(*(.vectors.124))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1F4 : .; KEEP(*(.vectors.125))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1F8 : .; KEEP(*(.vectors.126))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x1FC : .; KEEP(*(.vectors.127))
+    . = DEFINED(__c166_vector_table) ? ORIGIN(rom) + 0x200 : .;
+  } > rom
+
+  /* A vector goes in the slot named for its trap number.  ".vectors" with no
+   * number was the spelling before the table above existed and has no slot of
+   * its own now, so it is caught here and named rather than left to LLD's
+   * orphan placement, which would put it somewhere plausible and wrong. */
+  .vectors.unnumbered : {
+    __c166_unnumbered_vectors_start = .;
     KEEP(*(.vectors))
+    __c166_unnumbered_vectors_end = .;
   } > rom
 
   .text : {
@@ -243,6 +428,14 @@ SECTIONS
     __data_end = .;
   } > xram AT > rom
   __data_load = LOADADDR(.data);
+
+  /* Sixteen words apiece, in internal RAM, for the handlers that asked for a
+   * bank of their own.  Nothing initialises them - a handler's first use of a
+   * register is a write, because the allocator had a whole empty bank - so
+   * they are NOBITS and take no room in the image. */
+  .c166_banks (NOLOAD) : ALIGN(2) {
+    *(.c166_banks .c166_banks.*)
+  } > banks
 
   .bss (NOLOAD) : ALIGN(2) {
     __bss_start = .;
@@ -324,3 +517,6 @@ SECTIONS
 
   /DISCARD/ : { *(.comment) *(.note.*) }
 }
+
+ASSERT(__c166_unnumbered_vectors_start == __c166_unnumbered_vectors_end,
+       "a vector goes in .vectors.NNN, named for its trap number in decimal padded to three digits; plain .vectors has no slot")

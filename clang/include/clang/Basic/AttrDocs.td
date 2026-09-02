@@ -3317,8 +3317,71 @@ A C166 interrupt handler must take no parameters and return ``void``. Because
 the handler runs on top of arbitrary interrupted code, it may not be called
 directly from C, and it is never inlined.
 
-Placing the handler in the vector table is left to the linker script or to a
-hand written vector, exactly as it is for the vendor toolchains.
+The attribute takes an optional trap number, which is the vector table slot the
+hardware branches to for that source::
+
+  __attribute__((interrupt(26))) void t3_isr(void) { ... }
+
+Given one, the backend also emits the contents of the slot: a ``JMPS`` to the
+handler, in a section named ``.vectors.026`` after the trap number in decimal,
+padded to three digits. A slot holds a jump rather than an address because the
+hardware branches to the slot instead of reading through it. The linker script
+places that section at four times the trap number; the three scripts beside
+the C166 startup files do so for all 128 slots, and the table appears only in
+a program that has handlers, so nothing has to be asked for and a program
+without any pays nothing for it.
+
+The number is 1 to 127. Trap 0 is reset and the startup code owns it. Two
+handlers asking for the same slot is an error, since the second jump would
+otherwise displace the next slot.
+
+Without a number the handler is still a handler -- the entry and exit sequence
+is what the attribute is mainly for -- and reaching it is left to a hand
+written vector, which is what a program with a shared interrupt node or a
+dispatcher of its own wants.
+  }];
+}
+
+def C166BankDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "c166_bank (C166)";
+  let Content = [{
+Gives a C166 interrupt handler sixteen registers of its own instead of saving
+the ones it uses::
+
+  __attribute__((interrupt(36), c166_bank)) void t4_isr(void) { ... }
+
+The C166's ``R0`` to ``R15`` are a window into internal RAM at the address the
+context pointer holds, so moving that pointer moves the whole window. The
+handler enters with ``SCXT CP, #bank``, which pushes the old context pointer
+and loads the new one, and leaves with ``POP CP``. The interrupted code's
+registers are never touched, so there is nothing to spill and nothing to
+reload -- one instruction in and one out, against up to fifteen of each.
+
+Measured on a handler that calls a function, which is the case that saves the
+most: 114 states down to 64, and 110 bytes of handler down to 42. A leaf
+handler that touches one register saves nothing, because there was only one
+register to save.
+
+The bank is thirty-two bytes of internal RAM, reserved by the compiler and
+placed by the linker script, which is the only memory a context pointer may
+name. The scripts shipped with the backend have room for seven banks; asking
+for an eighth is a link error naming the region. Each handler gets its own
+bank -- they are never shared, so a handler cannot be corrupted by another one
+at a higher priority interrupting it.
+
+Two things are not part of the register window and are still saved by the
+handler that disturbs them: the multiply/divide unit (``MDL``, ``MDH``,
+``MDC``) and the MAC unit's accumulator.
+
+``R0`` is the ABI stack pointer and belongs to the interrupted code rather than
+to the window, so a handler that calls anything or needs a frame copies it
+across on entry -- three instructions, and only where they are needed. A leaf
+handler that fits in registers pays nothing for it.
+
+The attribute is only accepted together with ``interrupt``. An ordinary
+function's arguments arrive in ``R2`` and up, which are in the bank it would
+have just left.
   }];
 }
 

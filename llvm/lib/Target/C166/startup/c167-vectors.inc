@@ -6,9 +6,9 @@
  *   VECTOR_S0RIC  uart_rx_isr
  *
  * which puts a jump to uart_rx_isr in the slot ASC0 raises on a received
- * character.  vectors.ld places the slot and works unchanged for this part:
- * it puts vector n at ORIGIN(rom) + 4n, and c167.ld's rom starts at 00'0000H,
- * which is where a C167's vector table is.
+ * character.  The linker script places the slot: it puts vector n at
+ * ORIGIN(rom) + 4n, and c167.ld's rom starts at 00'0000H, which is where a
+ * C167's vector table is.  See README.txt in this directory.
  *
  * Claiming a slot by number works too, and the number is the decimal one:
  *
@@ -53,10 +53,17 @@
  */
 
 /* Claim a slot by number.  The number is decimal, padded to three digits,
-   which is what vectors.ld places. */
+   which is what the linker scripts place. */
 .macro VECTOR num, handler
         .section .vectors.\num,"ax",@progbits
         jmps    #seg(\handler), sof(\handler)
+/* What tells the linker script the vector table is wanted; its rows are
+   conditional on this so that a program with no handlers does not pay 512
+   bytes of ROM for 128 empty slots.  Weak and absolute, because every file
+   claiming a slot defines one - including the ones the compiler writes for
+   __attribute__((interrupt(n))) - and they must not clash. */
+        .weak   __c166_vector_table
+__c166_vector_table = 1
 .endm
 
 

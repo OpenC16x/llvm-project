@@ -14,9 +14,6 @@ copied into a project and adjusted rather than installed.
   st10.ld              a linker script for an ST10, whose Flash arrives in
                        blocks with a hole in the middle and whose extension
                        RAM is not where a C167's is
-  vectors.ld           the interrupt vector table, for a program with handlers;
-                       it serves both parts, since a C167 has the layout an
-                       XC164CM comes up with and no registers to change it
   xc164cm.h            the special function registers, for C
   xc164cm-vectors.inc  the interrupt vector numbers, for assembly
   c167-vectors.inc     the same for a C167
@@ -239,8 +236,15 @@ Above the register bank, from 00'FD00H to 00'FDFEH, is the bit-addressable RAM
 - the 128 words a bit instruction can name, and the only memory it can.  That
 is where __bitaddr places a variable, and it is a region of its own in the
 script, so a program with more than 256 bytes of them is told at the link
-rather than one relocation at a time.  Nothing else here uses that part of the
-memory: the two stacks and the register bank are all below it.
+rather than one relocation at a time.
+
+Between the two, from 00'FC20H to 00'FCFEH, are the interrupt banks: 224 bytes
+above the sixteen words the reset register bank occupies, which is seven banks
+of sixteen registers.  That is where a __attribute__((c166_bank)) handler's
+own registers go, and it has to be this memory because internal RAM is the
+only memory a context pointer may name.  Nothing else uses it: the two stacks
+and the reset register bank are all below it and the bit-addressable RAM is
+above.
 
 The variant of this part with 32 KByte of Flash has no DSRAM, and the script
 handles that without an edit: the dsram region becomes the dual-port RAM, and
@@ -253,7 +257,8 @@ special function registers.  There is no scratch register involved.
 crt0.S leaves CP where reset put it.  CP says where R0 to R15 are, so an
 instruction that changes it changes what every register operand around it
 means; a program that wants a different register bank is better off doing that
-deliberately than having the startup code do it quietly.
+deliberately than having the startup code do it quietly.  A banked interrupt
+handler is the deliberate case, and it puts CP back before it returns.
 
 The clock
 ---------
@@ -381,8 +386,27 @@ A handler is declared
 
   __attribute__((interrupt)) void handler(void) { ... }
 
-which makes it save what it uses and return with RETI, and its slot is claimed
-by name:
+which makes it save what it uses and return with RETI.  Given a trap number it
+also claims that slot, and the compiler writes the jump that goes in it:
+
+  __attribute__((interrupt(43))) void handler(void) { ... }
+
+A handler that has to be quick can have sixteen registers of its own rather
+than saving the ones it uses:
+
+  __attribute__((interrupt(43), c166_bank)) void handler(void) { ... }
+
+R0 to R15 are a window into internal RAM at the address CP holds, so SCXT CP,
+#bank moves the whole window on the way in and POP CP moves it back on the way
+out - one instruction each against up to fifteen.  The bank is thirty-two
+bytes the linker script places in the banks region, which is the 224 bytes
+between the reset register bank at FC00H and the bit-addressable RAM at FD00H:
+seven banks, and an eighth is a region overflow naming it.  It has to be that
+memory rather than any other, because internal RAM is the only memory a
+context pointer may name.
+
+A slot can be claimed by name instead, which is what a handler wired to a
+peripheral wants:
 
   #include "xc164cm-vectors.inc"
   VECTOR_ASC0_RIC  uart_rx_isr
@@ -390,34 +414,46 @@ by name:
 That claims the slot ASC0 raises on a received character.  Every source the
 part has is in that file, named after its interrupt control register, so
 nothing has to be looked up and typed - a handler wired to the wrong source is
-not a failure anyone sees quickly.  A slot can be claimed by number instead,
-if the number is already known:
+not a failure anyone sees quickly.  Underneath, both spellings come to the same
+thing, and it can be written out where neither fits - in assembly, say, or for
+a slot whose handler is picked at link time:
 
   .section .vectors.043,"ax",@progbits
   jmps    #seg(handler), sof(handler)
 
-where the number is the trap number in decimal, padded to three digits.
+where the number is the trap number in decimal, padded to three digits.  Two
+handlers claiming one slot is an error the compiler reports, since the second
+jump would otherwise sit on top of the next slot.
 
 The hardware traps are in that file too, under the names the manual gives them
 - VECTOR_NMITRAP, VECTOR_STOTRAP for stack overflow, VECTOR_STUTRAP for stack
 underflow, VECTOR_SBRKTRAP, and VECTOR_BTRAP for the four class B traps, which
 share one vector and leave TFR to say which of them it was.  They sit in every
 other slot rather than consecutive ones.  Vector 0 is reset and crt0.S claims
-it, so there is no macro for that one.  vectors.ld
-places each of the 128 slots at the address it has to be at, so slots that
-nothing claims can be left out rather than counted:
+it, so there is no macro for that one.
 
-  SECTIONS
-  {
-    INCLUDE vectors.ld
-    .text : { ... }
-  }
+All three scripts place each of the 128 slots at the address it has to be at,
+so slots that nothing claims can be left out rather than counted; unclaimed
+ones end up holding LLD's trap pattern, JMPR cc_UC, -1, so a spurious
+interrupt stops rather than running into whatever follows.
 
-It replaces the .reset section of c166.ld, and is a separate file because the
-table is 512 bytes of ROM whether its slots are filled or not, which a program
-with no handlers should not pay.  Unclaimed slots end up holding LLD's trap
-pattern, JMPR cc_UC, -1, so a spurious interrupt stops rather than running into
-whatever follows.
+The table is 512 bytes of ROM whether its slots are filled or not, which a
+program with no handlers should not pay - so each row of it is conditional on
+__c166_vector_table, a weak absolute symbol that anything claiming a slot
+defines and nothing else does.  Both the compiler and the VECTOR macro define
+it, so nothing has to be asked for: a program with handlers gets the table and
+a program without one gets four bytes.
+
+It is in all three scripts rather than in a file they include because LLD
+resolves INCLUDE against the working directory and the -L paths rather than
+against the script doing the including, so a shared file would mean every link
+needed a -L that no link needs today.  Three copies is the price;
+test/CodeGen/C166/vector-table-scripts.test is what keeps them from drifting -
+every row four bytes above the last, all 127 present, and the three identical.
+
+A vector goes in the slot named for its trap number.  ".vectors" with no
+number is not a slot, and a program still using it gets told so rather than
+having the section placed somewhere plausible and wrong.
 
 On an XC164CM this is the layout the part has at reset.  Two of its registers
 can change it: CPUCON1.VECSC sets the space between vectors, and resets to 00,
@@ -487,6 +523,17 @@ mem.c is four functions, not a C library.  A project that needs printf, malloc
 or anything else should build picolibc or newlib for c166 and link that
 instead; mem.c exists so that a program can be linked and run with nothing
 else present at all.
+
+The four move a word at a time where they can, which on this part means where
+the two addresses have the same parity: a word access is an even address
+access, the hardware ignoring bit 0 rather than trapping, so two pointers of
+different parity are copied a byte at a time and nothing can be done about it.
+That doubled their speed and roughly tripled their size, which is why
+mksysroot.sh compiles this file and runtime.c with -ffunction-sections: the
+driver already passes --gc-sections, and an archive member is pulled whole, so
+without it a program that calls memcpy also carries memmove, memset, memcmp,
+strlen and the three far entry points.  A project building its own libc.a
+should do the same.
 
 None of this has been executed on hardware.  It has been executed on a
 simulator: llvm/utils/C166Sim runs it, and the differential tests there link

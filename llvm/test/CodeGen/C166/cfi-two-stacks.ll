@@ -70,16 +70,18 @@
 ;; the frame size and the CFA follows it, which is what makes -2 the slot at the
 ;; top of the frame.
 ; CHECK-LABEL: spills:
-; CHECK: sub r0, #8
-; CHECK-NEXT: .cfi_def_cfa_offset 8
-; CHECK: mov [r0+#6], r12
+; CHECK: sub r0, #10
+; CHECK-NEXT: .cfi_def_cfa_offset 10
+; CHECK: mov [r0+#8], r1
+; CHECK-NEXT: mov [r0+#6], r12
 ; CHECK-NEXT: mov [r0+#4], r13
 ; CHECK-NEXT: mov [r0+#2], r14
 ; CHECK-NEXT: mov [r0], r15
-; CHECK-NEXT: .cfi_offset r12, -2
-; CHECK-NEXT: .cfi_offset r13, -4
-; CHECK-NEXT: .cfi_offset r14, -6
-; CHECK-NEXT: .cfi_offset r15, -8
+; CHECK-NEXT: .cfi_offset r1, -2
+; CHECK-NEXT: .cfi_offset r12, -4
+; CHECK-NEXT: .cfi_offset r13, -6
+; CHECK-NEXT: .cfi_offset r14, -8
+; CHECK-NEXT: .cfi_offset r15, -10
 
 ; ModuleID = 'cfikinds.c'
 source_filename = "cfikinds.c"

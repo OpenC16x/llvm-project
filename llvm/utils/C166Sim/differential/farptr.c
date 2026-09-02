@@ -209,6 +209,31 @@ static void blocks(void) {
   count = 1;
   __builtin_memset(AT(0x040000ul), 0x22, count);
   puthex(checksum(0x03FFFCul, 8), 8);
+
+  /* The far routines move a word at a time, and a word is an even address
+     access, so the parity of the two addresses decides which of their paths
+     runs.  Everything above is even to even, which is one of four; the odd
+     lengths here also leave a byte over at the end of each.  The parity is
+     the parity of the whole linear address, so a segment boundary in the
+     middle of a move does not change which path it is on. */
+  for (u16 i = 0; i < SPAN; i++)
+    AT(BASE)[i] = pattern((u16)(i + 5));
+  for (u16 dd = 0; dd < 2; dd++) {
+    for (u16 ss = 0; ss < 2; ss++) {
+      count = 401;
+      __builtin_memcpy(AT(0x03FE00ul) + dd, AT(0x03FF00ul) + ss, count);
+      puthex(checksum(BASE, SPAN), 8);
+      count = 401;
+      __builtin_memmove(AT(0x03FF00ul) + dd, AT(0x03FE80ul) + ss, count);
+      puthex(checksum(BASE, SPAN), 8);
+      count = 401;
+      __builtin_memmove(AT(0x03FE80ul) + dd, AT(0x03FF00ul) + ss, count);
+      puthex(checksum(BASE, SPAN), 8);
+    }
+    count = 401;
+    __builtin_memset(AT(0x03FF00ul) + dd, 0x77, count);
+    puthex(checksum(BASE, SPAN), 8);
+  }
 }
 
 int main(void) {

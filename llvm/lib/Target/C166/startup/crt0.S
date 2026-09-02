@@ -61,6 +61,19 @@ _start:
         mov     dpp2, #__dpp2_page
         mov     dpp3, #__dpp3_page
 
+        // A data page pointer is not usable by the instruction immediately
+        // after the one that writes it: "an instruction, which calculates a
+        // physical operand address via a particular DPPn register, is mostly
+        // not capable of using a new DPPn register value, which is to be
+        // updated by an immediately preceding instruction" (C167CR Derivatives
+        // User's Manual V3.1, section 4.2, Data Page Pointer Updating).  The
+        // next instruction below reads SYSCON1 as memory at F1DCH, which is
+        // page 3 and so goes through the pointer just written.  It happens to
+        // be written with the value it already held, so nothing would go
+        // wrong today; a board whose script gave DPP3 another page would find
+        // that out the hard way.
+        nop
+
         // The clock.  Out of reset the CPU runs on the oscillator rather than
         // on the PLL, so everything above has been running at a fraction of
         // fOSC and everything below runs at fCPU.  The linker script is what

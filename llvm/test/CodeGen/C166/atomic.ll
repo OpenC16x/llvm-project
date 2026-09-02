@@ -74,9 +74,17 @@ define i8 @add8(ptr %p, i8 %v) {
 ; instruction counter keeps running across it.  This one clears PSW.IEN instead
 ; and puts the word back afterwards, which restores the bit along with flags
 ; that are dead by then.
+;
+; The NOP is not padding.  Clearing IEN takes effect one instruction late - "a
+; time critical instruction sequence should not begin directly after the
+; instruction disabling interrupts", C167CR Derivatives User's Manual V3.1
+; section 4.2 - so without it the load below is still interruptible, and a
+; request taken at the boundary after it lands between the read and the write
+; this sequence exists to keep together.
 ; CHECK-LABEL: cas:
 ; CHECK:      mov [[SAVE:r[0-9]+]], psw
 ; CHECK-NEXT: bclr psw.11
+; CHECK-NEXT: nop
 ; CHECK-NEXT: mov [[OLD:r[0-9]+]], [r2]
 ; CHECK-NEXT: cmp [[OLD]], r3
 ; CHECK-NEXT: jmpr cc_NE, [[OUT:\.LBB[0-9_]+]]

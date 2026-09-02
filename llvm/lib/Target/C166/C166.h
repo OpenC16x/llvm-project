@@ -190,8 +190,10 @@ inline ArrayRef<std::pair<const char *, CondCode>> getCondCodeAliases() {
 
 class C166TargetMachine;
 class FunctionPass;
+class Loop;
 class ModulePass;
 class PassRegistry;
+class ScalarEvolution;
 
 FunctionPass *createC166ISelDag(C166TargetMachine &TM,
                                 CodeGenOptLevel OptLevel);
@@ -205,6 +207,19 @@ void initializeC166FoldComparePass(PassRegistry &);
 
 FunctionPass *createC166MACChainPass();
 void initializeC166MACChainPass(PassRegistry &);
+
+FunctionPass *createC166MACRepeatPass();
+void initializeC166MACRepeatPass(PassRegistry &);
+
+namespace C166 {
+/// True where this loop is a dot product one repeated coprocessor instruction
+/// does in a single go, which C166MACRepeat is about to make it.
+///
+/// It is asked twice: once by that pass, and once by the unrolling preferences,
+/// because a loop that is about to become one instruction must not be unrolled
+/// into forty first.  C166MACRepeat.cpp holds the reasoning and both answers.
+bool isRepeatedCoMACLoop(Loop *L, ScalarEvolution &SE);
+} // end namespace C166
 
 /// Take the thread-local marker off every global that has one.  This part runs
 /// one thread, so per-thread storage and static storage are the same storage.

@@ -26,11 +26,26 @@ frame pointer when a function needs one.
 Calling convention
 ------------------
 
-Up to four word sized arguments are passed in R2-R5 and the rest on the ABI
+Up to eight word sized arguments are passed in R2-R9 and the rest on the ABI
 stack; values are returned in R2-R5.  Narrow arguments and return values are
 promoted to a full word.  Variadic functions receive every argument on the
 stack so that the callee can walk the list with a plain pointer.  R1 and
 R12-R15 are callee saved, R2-R11 are caller saved.
+
+Eight rather than four is measured rather than inherited, and the table is in
+the comment on CC_C166 in C166CallingConv.td.  Across the differential
+programs, four to six to eight takes the text down 0.9% then 1.7% and the
+state count down 1.2% then 1.9%, with nothing regressing at any of them; ten
+comes out byte for byte identical to eight, because nothing there passes more
+than eight words.  Most of it is the soft float programs, and for the obvious
+reason: a double is four words, so an operation on two of them wants exactly
+eight.
+
+There was no cost on the other side to weigh against it.  R6 to R11 were
+already caller saved and already destroyed by a call, so widening into R6-R9
+does not make a call clobber anything new, and an interrupt handler saved all
+sixteen either way.  There is no vendor psABI to match - see below - so the
+number is this backend's own, and this is the change that says so.
 
 A call in tail position becomes a jump once the frame is down, so the callee's
 RET goes straight back to our caller and no return address is ever pushed onto
@@ -177,17 +192,20 @@ own once they are too big or too dynamic to expand inline:
 Both pointers are far, so a near operand is widened on the way in under the
 same DPP assumption as an addrspacecast, and the size stays 16 bit.
 
-The three live in startup/mem.c beside the near ones, and are the same byte at
-a time loops with the pointer type changed.  That is deliberate: stepping a far
-pointer is a 32 bit add whose carry out of the offset lands in the segment, so
-the crossing is the compiler's arithmetic rather than something to open code,
-and writing them any other way would be reimplementing it by hand.
+The three live in startup/mem.c beside the near ones, and are the same loops
+with the pointer type changed.  That is deliberate: stepping a far pointer is a
+32 bit add whose carry out of the offset lands in the segment, so the crossing
+is the compiler's arithmetic rather than something to open code, and writing
+them any other way would be reimplementing it by hand.
 
 Each one carries a no_builtin, without which it calls itself.  Loop idiom
-recognition turns a byte at a time copy or fill back into a memcpy or a memset,
-and declines to do so only inside a function actually named memcpy or memset -
-which is how the near versions escape it.  These are not named that, so the
-loop becomes a block move through far pointers, which is a call to the function
+recognition turns a copy or fill loop back into a memcpy or a memset, and
+declines to do so only inside a function actually named memcpy or memset.  The
+whole of mem.c carries the attribute rather than the far entry points alone, so
+that no function in it depends on what it is called; before it moved a word at
+a time the near pair escaped by their names, which memmove never did.  These
+are not named that, so the loop becomes a block move through far pointers,
+which is a call to the function
 it is the body of.  It builds and links; it is an infinite recursion at run
 time.  The attribute keeps that fixed wherever the file is compiled, which a
 flag in the script that builds it would not.
@@ -446,11 +464,103 @@ linker script: the memory map belongs to the board, so -T is not optional.
 There is no frame pointer by default.  Sixteen registers are not enough to
 give one up, and nothing walks the stack anyway.
 
+How much of a block copy or fill is written out rather than called for is set
+rather than inherited, and the figures are in the comment on
+MaxStoresPerMemcpy in C166ISelLowering.cpp.  The short of it: inline is faster
+than the runtime at every size measured out to 128 bytes, and by about three to
+one - so there is no speed crossover and the limit at -O2 is a code growth
+budget, about sixty-four bytes at a call site.  Optimising for size has a real
+break-even, at 1.75 words for a copy and 3 for a fill, since a copy is eight
+bytes of code per word and a fill four against a call site's sixteen.
+
+startup/mem.c used to copy a byte at a time, and the ratio was six to one
+rather than three.  Making it a word at a time halved the runtime and left both
+limits where they were: the -O2 one because inline still wins everywhere, and
+the -Os one because it is about code size on both sides, which did not move.
+
 Three things the backend reads are spelled in C as attributes:
 
   __attribute__((interrupt))  the "interrupt" function attribute
+  __attribute__((c166_bank))  the "c166-bank" function attribute
   __attribute__((far))        the "far" function attribute
   __far, i.e. address space 1 far data
+
+"interrupt" takes an optional trap number, which travels as a second string
+attribute, "c166-interrupt-vector".  The AsmPrinter turns that into the
+contents of the slot - a JMPS to the handler in a section named .vectors.NNN
+after the trap number, padded to three digits so the name sorts the way the
+number does - and reports two handlers claiming one slot, which the linker
+could only see as a location counter that had to move backwards.  The number
+is 1 to 127: trap 0 is reset and crt0.S owns it, which leaves zero free to
+mean that the attribute was written without one.
+
+"c166-bank" gives a handler sixteen registers of its own instead of saving the
+ones it uses.  R0 to R15 are a window into internal RAM at the address CP
+holds, so SCXT CP, #bank moves the whole window and POP CP moves it back;
+getCalleeSavedRegs then hands back an empty list, because the registers the
+handler writes are not the interrupted code's.  Measured on a handler that
+calls a function - the case that saves most - entry and exit go from 114 states
+to 64 and the handler from 110 bytes to 42.  A leaf that touches one register
+saves nothing, there having been one register to save.
+
+A NOP follows the SCXT, and the manual says it has to.  "An instruction, which
+calculates a physical GPR operand address via the CP register, is mostly not
+capable of using a new CP value, which is to be updated by an immediately
+preceding instruction.  Thus, to make sure that the new CP value is used, at
+least one instruction must be inserted between a CP-changing and a subsequent
+GPR-using instruction" - C167CR Derivatives User's Manual V3.1, section 4.2,
+Context Pointer Updating, whose worked example is SCXT CP, #0FC00h followed by
+a line reading "must not be an instruction using a GPR".  Without it the
+handler's first register write would land in the interrupted code's bank, and
+nothing here would show it: the simulator applies the CP write at once, so no
+test can find it.
+
+That section is worth reading whole rather than for the one rule, and doing so
+found a second thing.  The compare and exchange sequence cleared PSW.IEN and
+read the word in the very next instruction - but "an interrupt request may be
+acknowledged after the instruction that disables interrupts via IEN or ILVL or
+after the following instructions.  Timecritical instruction sequences therefore
+should not begin directly after the instruction disabling interrupts."  So a
+request could be taken at the boundary after that load, which is between the
+read and the write the sequence exists to keep together.  It has a NOP after
+the BCLR now, which is the manual's own remedy.  The read-modify-writes that
+use ATOMIC rather than IEN are not affected: the same section's example uses
+ATOMIC precisely to cover this delay, so ATOMIC blocks at once.
+
+The rest of section 4.2 was checked against this tree as well.  The data page
+pointers have the same one instruction delay, and crt0.S wrote DPP3 and then
+read SYSCON1 at F1DCH, which is page 3 and so goes through the pointer just
+written - working only because the value written is the value it already held;
+it has a NOP there now.  The stack pointer rule is about RET, RETI, RETS, RETP
+and POP after an explicit write to SP, and crt0.S follows its write with more
+SFR writes, while the note that conflicts with PUSH, CALL and SCXT are resolved
+internally covers the rest.  Port direction, SYSCON mapping and BUSCON are
+startup concerns this backend generates no code for.
+
+Three things do not follow from the window and are handled separately.  The
+multiply/divide unit and the coprocessor are not part of a bank and are still
+saved by the handler that disturbs them.  R0 is the ABI stack pointer and
+belongs to the interrupted code rather than to the window, so a handler that
+calls anything or needs a frame brings it across: SCXT has just pushed the old
+CP, so SP names the word holding it and R0 is the first word of the bank that
+names - three instructions, and only where they are needed.  Chasing CP rather
+than naming the reset bank is what makes it right when the handler interrupted
+another banked handler, whose R0 is the live one.
+
+The bank itself is thirty-two bytes the AsmPrinter reserves in a NOBITS
+section of its own per handler, so that a handler nothing keeps takes its bank
+with it, and the linker script puts them in internal RAM - the only memory a
+context pointer may name.  Each handler gets its own rather than naming a
+shared one by number: sharing is only safe between handlers that cannot
+interrupt each other, which is a fact about their priorities that the compiler
+cannot see.
+
+Emitting a slot also defines __c166_vector_table, weak and absolute, which is
+what tells the linker script the table is wanted: its 128 rows are conditional
+on that symbol, so a program with no handlers does not pay 512 bytes of ROM for
+128 empty slots and a program with them needs no flag.  The VECTOR macros in
+startup/xc164cm-vectors.inc define the same symbol for a slot claimed by hand,
+which is why the two ways of claiming one behave alike.
 
 "far" is applied to declarations as well as definitions, because it is what
 tells a caller in another translation unit to use CALLS rather than CALL.
@@ -745,10 +855,14 @@ Known limitations / things to do
   The 48 KByte a near address reaches is the same on both, because that limit
   is what the data page pointers cover rather than where the memory is.
 
-  vectors.ld serves both parts unchanged.  A C167 has no VECSEG and no
-  CPUCON1.VECSC, so its table is four bytes per vector at the bottom of segment
-  0 and it has no choice about it; c167.ld's rom region starts there, so
-  placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
+  The vector table is the same in all three scripts.  A C167 has no VECSEG and
+  no CPUCON1.VECSC, so its table is four bytes per vector at the bottom of
+  segment 0 and it has no choice about it; c167.ld's rom region starts there,
+  so placing a slot at ORIGIN(rom) + 4n lands in the same place either way.
+  The simulator has to be told which part it is running, though, because FF12H
+  is a C167's SYSCON where it is an XC164CM's VECSEG, and its crt0 writes it -
+  read back as VECSEG that sent every interrupt to a segment nothing was
+  linked into.  differential/parts.sh passes --mcpu for that reason.
   c167-vectors.inc names that part's 56 interrupt sources and its four hardware
   traps.  Both tables pass the self-check the XC164CM's does - the location is
   four times the trap number in every row - and together they account for the
@@ -840,6 +954,18 @@ Known limitations / things to do
   "mov mdl, mdh" match it as well as MOV reg, mem.  The two are different
   encodings of the same thing and there would be nothing to choose between
   them.
+* The block loops in startup/mem.c are two instructions of work and two of
+  bookkeeping per word, and two things the machine can already do would take
+  one off each.  MOV [Rwn], [Rwm+] and MOV [Rwn+], [Rwm] copy memory to memory
+  with one of the two pointers stepping, which would make the copy loop's load
+  and store a single instruction; neither is defined in C166InstrInfo.td, and
+  selecting one means matching a store whose value is a load, which is not
+  something the tables express on their own.  The fill loop wants something
+  smaller: memset puts its byte in both halves of a word, which is MOVB Rhn,
+  Rln, and comes out as AND, MOV #257, MUL, MOV MDL, because instcombine
+  canonicalises every way of writing that splat - a shift and an or, two byte
+  stores, a multiply - into the multiply, and nothing turns it back.  It is
+  about twenty states once per call, which only a short fill notices.
 * The relocations are LLVM's own invention, like the rest of the C166 ELF
   scheme here; LLD implements them and nothing else does.
 * Two far accesses to the same object share one EXTS, and two to different
@@ -855,8 +981,12 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* Six of the MAC unit's instructions are selected and the other 174 are
-  assembled and disassembled only.  All 180 forms are there, in
+* Sixteen of the MAC unit's 180 forms are selected and the other 164 are
+  assembled and disassembled only.  That is six operations - CoLOAD, CoSTORE,
+  CoMUL, CoMAC, CoMAX and CoMIN - counting each once however its operands are
+  signed and however it reaches them.  The four forms added last are the
+  repeatable CoMACs that walk both operands through pointers, which
+  C166MACRepeat emits for a dot product; see the design note further down.  All 180 forms are there, in
   C166InstrMAC.td, which is generated from the Format lines
   the C166S V2 manual gives each instruction rather than written out by hand -
   the same table read from the opcode list agrees with those lines on every row
@@ -1022,6 +1152,112 @@ Known limitations / things to do
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
   win, being self-consistent across all 180.
+* One repeated coprocessor instruction is generated, and it is the dot product:
+  C166MACRepeat turns a loop over a __dpram global with a constant trip count
+  into "repeat n times comac [idx0+], [Rw+]" and what it takes to point at the
+  two streams.  CoMACM - the form that multiplies, accumulates, and writes the
+  word it read one step back down the buffer, so that an FIR filter's delay
+  line shifts for free - is still not generated.  The design note below is what
+  was written before either, for CoMACM, and the measuring in it is what said
+  to do the plain dot product first.
+
+  What it is worth.  Two loops, N = 16, 200 calls each with an empty-bodied
+  version subtracted, on the state counter:
+
+                                        compiler   by hand   ratio
+    fused FIR, CoMACM + repeat          516         51       10.1x
+    plain dot product, CoMAC + repeat   455         59        7.7x
+
+  and the FIR's function goes from 78 bytes to 44.  Both hand written versions
+  agree with the compiler's answer, which is what says the shapes are the same
+  computation.  differential/firdelay.c is the FIR row of that table kept: it
+  runs the filter both ways over forty samples and prints the accumulator and
+  both delay lines, so a dropped write back or a count one short is a different
+  answer rather than a quiet one.
+
+  The first thing that says is that almost all of the win is the repeat prefix
+  and not the M.  A plain dot product - no delay line, no fused store, the
+  commonest MAC loop there is - already gets 7.7 times, because the prefix
+  turns thirteen instructions of index arithmetic, two address computations, a
+  compare and a branch into one instruction that runs sixteen times.  CoMACM
+  adds the shift on top of that, and by then the shift is free.  So the general
+  form is worth more than the special one and should come first; CoMACM is then
+  a peephole on a loop that already became a repeat.
+
+  The second is that the pattern CoMACM matches is not the pattern anyone
+  writes.  The textbook FIR - accumulate over the taps, then shift the delay
+  line down - never reaches the backend as two loops: loop idiom recognition
+  turns the shift into llvm.memmove, at -O1, -O2 and -Os alike.  There is no
+  shift loop left to fuse with anything.  Only a source loop with the store
+  already inside it presents the shape, and it has to shift in the direction
+  CoMACM shifts - each word moves toward index 0, so the newest sample is at
+  the end - which is the opposite of how most references write it.
+
+  The third is the one that bounds the whole idea.  IDXi reaches the dual-port
+  RAM and nothing else (PM0036 section 2.1), so a repeated form can only be
+  selected where the compiler can prove one of the two streams is in that
+  memory.  The only thing that says so today is __dpram, which is an attribute
+  on a global object.  A pointer parameter carries nothing - "fir(const s16 *h,
+  s16 *x, int n)" is a plain address space 0 pointer however it is written - so
+  a filter that takes its delay line as an argument can never qualify, and that
+  is how a filter is usually written.  What is selectable is a loop over a
+  __dpram global with a trip count the compiler knows.  That is a real program,
+  and it is a narrow one.
+
+  What a pass has to establish, none of which is a peephole's business:
+
+    - a trip count that is constant and fits, the field being MRW[12:0] + 1;
+      a variable count is "repeat mrw times" and needs the count in MRW
+    - both streams walking one word per iteration, in step
+    - one of them provably in the dual-port RAM, which today means a __dpram
+      global rather than anything a pointer can carry
+    - no other memory access that could alias either stream
+    - nothing else in the loop at all, because the prefix repeats exactly one
+      instruction - so the pass replaces the loop rather than transforming it,
+      and has to build the address setup itself
+
+  The accumulator part was already done and was not what made this hard.
+  C166MACChain keeps the running total in the unit across a single block,
+  single exit loop with no call and no other user of the unit, and a handler
+  that touches the coprocessor saves it.  What was missing is the loop-level
+  facts above, which want SCEV rather than a look at neighbouring instructions.
+
+  What was written from that note is C166MACRepeat, and two things about it
+  were not in the note.  The first is where it runs.  The note said
+  MachineLoopInfo and SCEV; there is no SCEV for machine IR, and the facts
+  above are all questions about values rather than about registers, so the pass
+  is an IR one in addIRPasses and hands what it proved to selection as an
+  intrinsic, llvm.c166.comac.repeat.  A loop is not a thing a pattern can
+  match, and that intrinsic is how the answer travels from where it can be
+  established to where the instruction is chosen.
+
+  The second is unrolling.  A loop of eight taps never reached the pass at -O2:
+  the unroller had already written it out, into fifty instructions where the
+  repeated form is nine.  So C166TTIImpl::getUnrollingPreferences asks the same
+  question and refuses to unroll a loop that is about to become one
+  instruction, which is what the hook is for.  The recognition is therefore
+  asked twice and written once.
+
+  Measured again on what was built, per call, with the state counter:
+
+                     taps    loop    repeat   bytes, loop / repeat
+                        4      65        41     94 / 32   (unrolled)
+                        8     113        49    190 / 32   (unrolled)
+                       16     461        65     52 / 32
+                       40    1109       115     52 / 36
+                       64    1757       163     52 / 36
+
+  which is two states per tap against twenty seven, and smaller at every size.
+  The 16 tap row is the one the note's table predicted, at 455 and 59.
+
+  What is left is CoMACM, which is the two line addition the note said it would
+  be once this existed - the same recognition with the delay line's store
+  fused - and the reason it is still not worth writing is the note's second
+  finding: loop idiom recognition turns the shift into llvm.memmove before
+  anything sees two loops.  Widening either beyond a global would need a way to
+  say "this pointer is in the dual-port RAM" in the type system, which __dpram
+  deliberately is not - that decision is written up under __dpram above, and it
+  was the right one for placement even though it is what bounds this.
 * The instruction forms nothing generates are assembled and disassembled but
   their encodings are derived rather than read off the page.  Each ALU group's
   columns were already fixed by the forms the compiler emits - x0 register, x2

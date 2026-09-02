@@ -1,0 +1,129 @@
+/* Compiled twice: once for c166 and run in the simulator, once for the host
+   and run natively.  The two outputs must match exactly.
+
+   What this one is for is the interrupt attribute.  The host has no
+   interrupts, so the reference is simply the computation; the C166 side runs
+   the same computation with a handler firing into it about a thousand times.
+   The two agreeing is the claim the attribute makes - that a handler saves
+   and restores everything it touches - being checked rather than read off the
+   assembly.
+
+   Both ways of reaching a handler are here.  One names its trap number and
+   lets the compiler write the slot; the other is placed by hand in the slot's
+   own section, which is what a handler behind a dispatcher or on a shared
+   node still needs.  A third has a register bank of its own, so that the
+   switch is checked by the same rule as everything else: the answer must not
+   move.  */
+/* c166-sim-flags: --interrupt-every=1009:1:8 --interrupt-every=1447:26:9 --interrupt-every=2213:27:10 */
+
+#ifdef __c166__
+static void put(char c) { *(__far volatile unsigned char *)0xFF0000 = c; }
+#else
+#include <stdio.h>
+static void put(char c) { putchar(c); }
+#endif
+
+typedef __UINT16_TYPE__ u16;
+typedef __UINT32_TYPE__ u32;
+
+static void puthex(u32 v, int digits) {
+  for (int i = digits - 1; i >= 0; i--)
+    put("0123456789abcdef"[(v >> (i * 4)) & 0xF]);
+  put('\n');
+}
+
+#ifdef __c166__
+/* Volatile so the handler has to load and store rather than keep anything,
+   and so nothing here is optimised away for being unread.  */
+static volatile u32 Ticks;
+static volatile u32 A = 1, B = 2, C = 3, D = 4;
+
+__attribute__((interrupt)) void handler(void) {
+  /* Enough arithmetic to need most of a register bank, so that a register the
+     interrupted code was using is very likely one of them.  All of it cheap:
+     a handler that took longer than the period between requests would be
+     re-entered as soon as it returned and the program would never finish,
+     which is what the part does too.  */
+  u32 a = A, b = B, c = C, d = D;
+  a += b ^ 0x5A5A5A5Au;
+  b -= c + 0x1234u;
+  c ^= d << 3;
+  d += a >> 5;
+  A = a; B = b; C = c; D = d;
+  Ticks = Ticks + 1;
+}
+
+/* Placed by hand: slot 1, whose section is named for the trap number in
+   decimal, padded to three digits. */
+asm(".section .vectors.001,\"ax\",@progbits\n\t"
+    "jmps #seg(handler), sof(handler)\n\t"
+    ".text");
+
+/* And the same thing said with a trap number, which is what puts the jump in
+   slot 26 without anyone writing it out.  It runs at a higher priority than
+   the one above and is timed to land inside it now and then, so the two nest:
+   the outer handler's registers have to survive the inner one on top of
+   everything else. */
+__attribute__((interrupt(26))) void nested(void) {
+  u32 a = A, d = D;
+  a ^= 0x0F0F0F0Fu;
+  d += a;
+  A = a; D = d;
+  Ticks = Ticks + 0x10000u;
+}
+
+/* A third, with sixteen registers of its own rather than saving the ones it
+   uses: SCXT on the way in and POP CP on the way out.  It is the highest
+   priority of the three, so it lands inside either of the others, and it uses
+   the whole bank - if the switch were wrong, what it wrote would land in the
+   interrupted handler's registers and the answer below would move.  It calls
+   something too, which is what makes it need R0, the ABI stack pointer that
+   is not part of the register window.  */
+__attribute__((noinline)) static u32 mix(u32 x) { return x * 1103515245u + 7u; }
+
+__attribute__((interrupt(27), c166_bank)) void banked(void) {
+  u32 a = A, b = B, c = C, d = D;
+  a = mix(a) ^ b;
+  b = mix(b) + c;
+  c = mix(c) - d;
+  d = mix(d) ^ a;
+  A = a; B = b; C = c; D = d;
+  Ticks = Ticks + 0x1000000u;
+}
+#endif
+
+int main(void) {
+#ifdef __c166__
+  /* Nothing enables interrupts for a program; crt0 leaves PSW.IEN clear and
+     the part comes up that way.  */
+  __asm__ volatile("bset psw.11");
+#endif
+
+  /* A computation whose every step depends on the last, ending in a
+     conditional branch each time round: the interrupt lands between an
+     instruction that sets the flags and the one that reads them about as
+     often as anywhere else, and only the PSW that entry pushes and RETI pops
+     makes that survivable.  */
+  u32 s = 1;
+  u16 t = 0xACE1u;
+  for (u32 i = 1; i <= 400; ++i) {
+    s = s * 2654435761u + i;
+    s ^= s >> 13;
+    if (s & 1u)
+      s += i * 3u;
+    else
+      s -= i;
+    t = (u16)((t >> 1) ^ (u16)(-(t & 1u) & 0xB400u));
+  }
+  puthex(s, 8);
+  puthex(t, 4);
+
+#ifdef __c166__
+  /* The host has no handler, so the number of times this one ran cannot be
+     part of the compared output.  That it ran at all can be: a zero here
+     prints a line the host never prints, and the run fails.  */
+  if (Ticks == 0)
+    put('!'), put('\n');
+#endif
+  return 0;
+}
