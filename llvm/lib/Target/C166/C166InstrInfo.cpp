@@ -560,6 +560,72 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
     break;
   }
+  case C166::MACREP32: {
+    // A whole dot product.  IDX0 is pointed at the stream in the dual-port
+    // RAM, the accumulator goes into the unit, and one repeated CoMAC walks
+    // both streams and adds every product; the two words come back out at the
+    // end, the same way MAC32rr takes them out.
+    //
+    // The CoLOAD between the write of IDX0 and the CoMAC that reads it is not
+    // there for spacing - it is what the accumulator needs anyway - but it is
+    // the order the hand written sequences in
+    // llvm/utils/C166Sim/differential/macrepeat.c use, and putting the two
+    // adjacent would be a claim about the pipeline that nothing here checks.
+    Register Lo = MI.getOperand(0).getReg();
+    Register Hi = MI.getOperand(1).getReg();
+    // Operand 2 is $ptrend, which is $ptr again: the instruction leaves the
+    // stepped pointer there and nothing reads it.
+    Register Idx = MI.getOperand(3).getReg();
+    Register Ptr = MI.getOperand(4).getReg();
+    Register AccLo = MI.getOperand(5).getReg();
+    Register AccHi = MI.getOperand(6).getReg();
+    unsigned Count = MI.getOperand(7).getImm();
+    unsigned Kind = MI.getOperand(8).getImm();
+
+    // The field is five bits and holds 2 to 31; zero is the plain form and one
+    // means take the count from MRW, which holds (MRW[12:0]) + 1 - so a longer
+    // run costs one move and reaches 8192.  It goes first, which leaves two
+    // instructions between it and the repeat, as the hand written sequences in
+    // differential/macrepeat.c have.
+    unsigned Field = Count;
+    if (Count > 31) {
+      // MOV to one of these names it in a field rather than by address, so the
+      // register is an operand; the description has it as an input, because
+      // that is what the field is, so the write is said here.
+      Emit(C166::MOV16regi)
+          .addReg(C166::MRW)
+          .addImm(Count - 1)
+          .addDef(C166::MRW, RegState::Implicit);
+      Field = 1;
+    }
+
+    // IDX0 is written by its address rather than by name, so nothing in the
+    // instruction says which register that is; without the implicit definition
+    // the scheduler would see no reason to keep this in front of the CoMAC
+    // that reads it.
+    const TargetRegisterInfo &RI = getRegisterInfo();
+    Emit(C166::MOV16ar)
+        .addImm(C166::getSFRAddressForReg(RI, C166::IDX0))
+        .addReg(Idx)
+        .addDef(C166::IDX0, RegState::Implicit);
+    Emit(C166::CoLOAD_rr).addReg(AccLo).addReg(AccHi);
+    // Both pointers step forward by a word, which is the 2 in each pair: a
+    // coptr and a coidx are each a register and what happens to it after the
+    // read.  Stepping IDX0 writes it, and a count of one is the one that reads
+    // MRW; both are said so that nothing moves across them.
+    auto MAC = Emit(C166::getMACIdxOpcode(Kind))
+                   .addReg(C166::IDX0)
+                   .addImm(2)
+                   .addReg(Ptr)
+                   .addImm(2)
+                   .addImm(Field)
+                   .addDef(C166::IDX0, RegState::Implicit);
+    if (Field == 1)
+      MAC.addUse(C166::MRW, RegState::Implicit);
+    Emit(C166::CoSTORE_sr).addDef(Lo).addReg(C166::MAL);
+    Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
+    break;
+  }
   case C166::MINMAX32rr: {
     // The first operand goes into the accumulator, the comparison takes the
     // larger or smaller of it and the second, and the two words come back out.

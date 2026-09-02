@@ -981,8 +981,12 @@ Known limitations / things to do
 * A handler that uses the multiply/divide unit saves it whole, and one that
   calls anything at all is assumed to: there is no way to see whether the
   callee multiplies, so three words go on the hardware stack either way.
-* Six of the MAC unit's instructions are selected and the other 174 are
-  assembled and disassembled only.  All 180 forms are there, in
+* Sixteen of the MAC unit's 180 forms are selected and the other 164 are
+  assembled and disassembled only.  That is six operations - CoLOAD, CoSTORE,
+  CoMUL, CoMAC, CoMAX and CoMIN - counting each once however its operands are
+  signed and however it reaches them.  The four forms added last are the
+  repeatable CoMACs that walk both operands through pointers, which
+  C166MACRepeat emits for a dot product; see the design note further down.  All 180 forms are there, in
   C166InstrMAC.td, which is generated from the Format lines
   the C166S V2 manual gives each instruction rather than written out by hand -
   the same table read from the opcode list agrees with those lines on every row
@@ -1148,11 +1152,14 @@ Known limitations / things to do
   it puts the CoREG selector at bits 31 to 27, where the repeat field already
   is, while "B3 nn wwww:w000 rrr0:0qqq" puts it at 23 to 19.  The Format lines
   win, being self-consistent across all 180.
-* Nothing generates a repeated coprocessor instruction, and the design note
-  for doing so is below.  It was written for CoMACM - the form that multiplies,
-  accumulates, and writes the word it read one step back down the buffer, so
-  that an FIR filter's delay line shifts for free - and the measuring said to
-  do something else first.
+* One repeated coprocessor instruction is generated, and it is the dot product:
+  C166MACRepeat turns a loop over a __dpram global with a constant trip count
+  into "repeat n times comac [idx0+], [Rw+]" and what it takes to point at the
+  two streams.  CoMACM - the form that multiplies, accumulates, and writes the
+  word it read one step back down the buffer, so that an FIR filter's delay
+  line shifts for free - is still not generated.  The design note below is what
+  was written before either, for CoMACM, and the measuring in it is what said
+  to do the plain dot product first.
 
   What it is worth.  Two loops, N = 16, 200 calls each with an empty-bodied
   version subtracted, on the state counter:
@@ -1197,7 +1204,7 @@ Known limitations / things to do
   __dpram global with a trip count the compiler knows.  That is a real program,
   and it is a narrow one.
 
-  What a pass would have to establish, none of which is a peephole's business:
+  What a pass has to establish, none of which is a peephole's business:
 
     - a trip count that is constant and fits, the field being MRW[12:0] + 1;
       a variable count is "repeat mrw times" and needs the count in MRW
@@ -1209,20 +1216,48 @@ Known limitations / things to do
       instruction - so the pass replaces the loop rather than transforming it,
       and has to build the address setup itself
 
-  The accumulator part is already done and is not what makes this hard.
+  The accumulator part was already done and was not what made this hard.
   C166MACChain keeps the running total in the unit across a single block,
   single exit loop with no call and no other user of the unit, and a handler
-  that touches the coprocessor saves it - so a repeated CoMAC would inherit a
-  loop whose CoLOAD is already in the preheader and whose CoSTOREs are already
-  past the exit.  What is missing is the loop-level facts above, which want
-  MachineLoopInfo and SCEV rather than a look at neighbouring instructions.
+  that touches the coprocessor saves it.  What was missing is the loop-level
+  facts above, which want SCEV rather than a look at neighbouring instructions.
 
-  So: the repeated CoMAC over a __dpram global with a known trip count is the
-  piece worth writing, and CoMACM is a two line addition to it once it exists.
-  Widening either beyond a global would need a way to say "this pointer is in
-  the dual-port RAM" in the type system, which __dpram deliberately is not -
-  that decision is written up under __dpram above, and it was the right one for
-  placement even though it is what stops this.
+  What was written from that note is C166MACRepeat, and two things about it
+  were not in the note.  The first is where it runs.  The note said
+  MachineLoopInfo and SCEV; there is no SCEV for machine IR, and the facts
+  above are all questions about values rather than about registers, so the pass
+  is an IR one in addIRPasses and hands what it proved to selection as an
+  intrinsic, llvm.c166.comac.repeat.  A loop is not a thing a pattern can
+  match, and that intrinsic is how the answer travels from where it can be
+  established to where the instruction is chosen.
+
+  The second is unrolling.  A loop of eight taps never reached the pass at -O2:
+  the unroller had already written it out, into fifty instructions where the
+  repeated form is nine.  So C166TTIImpl::getUnrollingPreferences asks the same
+  question and refuses to unroll a loop that is about to become one
+  instruction, which is what the hook is for.  The recognition is therefore
+  asked twice and written once.
+
+  Measured again on what was built, per call, with the state counter:
+
+                     taps    loop    repeat   bytes, loop / repeat
+                        4      65        41     94 / 32   (unrolled)
+                        8     113        49    190 / 32   (unrolled)
+                       16     461        65     52 / 32
+                       40    1109       115     52 / 36
+                       64    1757       163     52 / 36
+
+  which is two states per tap against twenty seven, and smaller at every size.
+  The 16 tap row is the one the note's table predicted, at 455 and 59.
+
+  What is left is CoMACM, which is the two line addition the note said it would
+  be once this existed - the same recognition with the delay line's store
+  fused - and the reason it is still not worth writing is the note's second
+  finding: loop idiom recognition turns the shift into llvm.memmove before
+  anything sees two loops.  Widening either beyond a global would need a way to
+  say "this pointer is in the dual-port RAM" in the type system, which __dpram
+  deliberately is not - that decision is written up under __dpram above, and it
+  was the right one for placement even though it is what bounds this.
 * The instruction forms nothing generates are assembled and disassembled but
   their encodings are derived rather than read off the page.  Each ALU group's
   columns were already fixed by the forms the compiler emits - x0 register, x2

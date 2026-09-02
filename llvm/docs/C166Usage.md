@@ -325,9 +325,37 @@ All three are still fine in a clobber list, which asks for no move.
 
 ### Reaching the coprocessor
 
-Nothing selects the coprocessor's repeatable forms, so an asm statement is how
-they are used. Two things have to be right, and only one of them is about the
-assembly.
+One repeatable form is selected from ordinary C: a dot product over an array
+declared `__dpram`, with a trip count the compiler knows.
+
+```c
+__dpram short x[40];
+static const short h[40] = {…};
+
+long dot(void) {
+  long acc = 0;
+  for (int i = 0; i < 40; i++)
+    acc += (long)x[i] * h[i];   /* one "repeat mrw times comac" */
+  return acc;
+}
+```
+
+The accumulator has to be 32 bit, the product a widening one — both operands
+signed or both unsigned — and the loop has to contain nothing else, because
+the prefix repeats exactly one instruction. `acc -= …` works too. Which of the
+two arrays is written first does not matter: whichever is the `__dpram` one
+goes behind IDX0. Up to 31 taps go in the repeat field and more go through
+MRW, to a limit of 8192. A trip count only the running program knows, a stream
+walked backwards or with a stride, an array that is not in the dual-port RAM,
+or anything else in the loop body leaves it an ordinary loop.
+
+The count has to be a constant because "repeat this many times" is the whole
+instruction. The `__dpram` has to be on a global because that attribute is a
+property of the object rather than of a pointer, so a filter that takes its
+delay line as an argument cannot be recognised however it is written.
+
+Everything else the coprocessor does is reached with an asm statement. Two
+things have to be right, and only one of them is about the assembly.
 
 **Where the data is.** IDX0 and IDX1 reach the internal dual-port RAM and
 nothing else — PM0036 section 2.1, with `CoMOV` the one exception. Ordinary
@@ -341,7 +369,8 @@ static const short coef[8] = {…};   /* a register walks this, so anywhere */
 ```
 
 The second operand goes through a general purpose register, which reaches the
-whole memory space, so a coefficient table needs no attribute. The dual-port
+whole memory space, so a coefficient table needs no attribute.  That is the
+same rule the dot product above follows, and for the same reason. The dual-port
 RAM is 2 KByte on the parts here and the stacks are in it, so what goes there
 should be what has to.
 

@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IntrinsicsC166.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -597,6 +598,32 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
   }
 
   switch (Node->getOpcode()) {
+  case ISD::INTRINSIC_W_CHAIN: {
+    // The dot product C166MACRepeat left behind, which is one instruction plus
+    // what it takes to point at the two streams and get the total out.  There
+    // is no pattern for it because what it stands for is a loop; see
+    // C166MACRepeat.cpp.
+    if (Node->getConstantOperandVal(1) != Intrinsic::c166_comac_repeat)
+      break;
+    SDValue Ops[] = {
+        Node->getOperand(2), // where IDX0 starts, in the dual-port RAM
+        Node->getOperand(3), // where the general purpose pointer starts
+        Node->getOperand(4), // the accumulator, low word
+        Node->getOperand(5), // and high
+        CurDAG->getTargetConstant(Node->getConstantOperandVal(6), DL, MVT::i16),
+        CurDAG->getTargetConstant(Node->getConstantOperandVal(7), DL, MVT::i16),
+        Node->getOperand(0)}; // chain
+    // The third result is the stepped pointer, which is $ptr again and which
+    // nothing reads; it is there so that the allocator knows the register does
+    // not survive.
+    MachineSDNode *New = CurDAG->getMachineNode(
+        C166::MACREP32, DL, {MVT::i16, MVT::i16, MVT::i16, MVT::Other}, Ops);
+    ReplaceUses(SDValue(Node, 0), SDValue(New, 0));
+    ReplaceUses(SDValue(Node, 1), SDValue(New, 1));
+    ReplaceUses(SDValue(Node, 2), SDValue(New, 3));
+    CurDAG->RemoveDeadNode(Node);
+    return;
+  }
   case ISD::LOAD:
     // A post-incrementing load writes the stepped pointer back as well as the
     // value, which no pattern describes, so it is selected by hand.

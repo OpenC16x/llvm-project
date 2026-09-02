@@ -74,6 +74,10 @@ BitVector C166RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(C166::MSW);
   Reserved.set(C166::MCW);
   Reserved.set(C166::MRW);
+  // IDX0 and IDX1 are the same kind of thing: the unit's two pointers, placed
+  // by whatever emits a form that walks them and read by that form alone.
+  Reserved.set(C166::IDX0);
+  Reserved.set(C166::IDX1);
 
   Reserved.set(C166::SYSSP);
   Reserved.set(C166::CP);
