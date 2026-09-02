@@ -69,13 +69,32 @@ def FeatureSFRC167
 def FeatureSFRST10
     : SubtargetFeature<"sfr-st10", "HasSFRST10", "true",
                        "The ST10F269's special function registers">;
+//===----------------------------------------------------------------------===//
+// Register File Description
+//===----------------------------------------------------------------------===//
+
+include "C166RegisterInfo.td"
+
+//===----------------------------------------------------------------------===//
+// Calling Convention Description
+//===----------------------------------------------------------------------===//
+
+include "C166CallingConv.td"
+
+//===----------------------------------------------------------------------===//
+// Instruction Descriptions
+//===----------------------------------------------------------------------===//
+
+include "C166InstrInfo.td"
+include "C166InstrMAC.td"
+include "C166Schedule.td"
 
 //===----------------------------------------------------------------------===//
 // C166 supported processors
 //===----------------------------------------------------------------------===//
 
 class Proc<string Name, list<SubtargetFeature> Features>
-    : Processor<Name, NoItineraries, Features>;
+    : ProcessorModel<Name, C166Model, Features>;
 
 // Three of these name a peripheral map, because three have been read.  "st10"
 // used to get the shared set alone: the ST10 Family Programming Manual had
@@ -97,25 +116,6 @@ def : Proc<"c166",    []>;
 def : Proc<"c167",    [FeatureExtInstr, FeatureSFRC167]>;
 def : Proc<"st10",    [FeatureExtInstr, FeatureSFRST10]>;
 def : Proc<"xc16x",   [FeatureExtInstr, FeatureMAC, FeatureSFRXC164]>;
-
-//===----------------------------------------------------------------------===//
-// Register File Description
-//===----------------------------------------------------------------------===//
-
-include "C166RegisterInfo.td"
-
-//===----------------------------------------------------------------------===//
-// Calling Convention Description
-//===----------------------------------------------------------------------===//
-
-include "C166CallingConv.td"
-
-//===----------------------------------------------------------------------===//
-// Instruction Descriptions
-//===----------------------------------------------------------------------===//
-
-include "C166InstrInfo.td"
-include "C166InstrMAC.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GR16>;
 

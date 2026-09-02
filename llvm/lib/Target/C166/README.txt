@@ -1451,6 +1451,28 @@ Known limitations / things to do
   stdout - registers, memory, breakpoints, stepping - with the registers
   described to the client rather than assumed.  A port of GDB or LLDB to this
   target is what is left.
+* The cost model's time answers are correct and nothing reads them.  There is
+  a scheduling model now - C166Schedule.td, in states, from the same table of
+  the instruction set manual the simulator counts with - and the two numbers
+  the old instruction counts got wrong are right against it: a word multiply is
+  six ordinary instructions' worth of time rather than two, and a word divide
+  twelve rather than three, because MUL is ten states and DIV twenty where
+  everything else is two.
+
+  What that changed in generated code is nothing, and the way to see it is not
+  that the numbers moved a little: with every time answer multiplied by a
+  thousand, sixty six compilations of the differential programs at three
+  optimisation levels came out byte for byte identical.  Nothing on this target
+  asks the cost model about time.  The vectorisers are the usual askers and
+  they return early here, because getNumberOfRegisters says there are no vector
+  registers; the unroller asks in code size; and the inliner asks in
+  TCK_SizeAndLatency, which this target answers with the size number
+  deliberately and by measurement - doing otherwise cost 17% of code by
+  stopping four loops in language.c from unrolling.
+
+  So the time column is right and unreached, which is worth having written down
+  twice over: it is what stops the next person measuring it again, and it is
+  what would have to change first for a pass that reads it to be worth adding.
 * What the corpus costs is recorded and checked, and what any one function
   costs is not.  llvm/utils/C166Sim/corpus/sizes.sh holds text bytes and states
   for four programs at four optimisation levels against a baseline in the tree,
