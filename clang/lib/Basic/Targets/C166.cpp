@@ -79,4 +79,14 @@ void C166TargetInfo::getTargetDefines(const LangOptions &Opts,
   // toolchains do; the name is in the reserved identifier space, so it cannot
   // collide with anything the user wrote.
   Builder.defineMacro("__far", "__attribute__((address_space(1)))");
+
+  // The same address with a promise attached: that arithmetic on the pointer
+  // stays inside its segment, so stepping it is a 16 bit add rather than a 32
+  // bit one and the segment half never has to be written.  The vendor
+  // toolchains have this distinction too and disagree about the names for it
+  // -- it is Keil's "huge" against their "xhuge", and Tasking's "__shuge"
+  // against their "__huge" -- so neither name is spelled here; what is spelled
+  // is what it does.  llvm/docs/C166Usage.md says what the promise costs a
+  // program that breaks it.
+  Builder.defineMacro("__seg", "__attribute__((address_space(2)))");
 }

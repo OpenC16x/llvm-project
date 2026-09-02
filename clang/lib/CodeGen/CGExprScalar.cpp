@@ -4984,17 +4984,25 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
   // Do the raw subtraction part. When pointer overflow is defined, use ptrtoint
   // as the pointer difference can be used to obtain the pointer without basing
   // it on one of the pointers (e.g. via -(nullptr - ptr)).
+  // LangPtrDiffTy and not PtrDiffTy: the result of this expression is a
+  // ptrdiff_t to the language, and a target whose widest pointer is wider than
+  // its ptrdiff_t -- C166, whose far pointers are 32 bits and whose ptrdiff_t
+  // is 16 -- would otherwise get a value two bytes wider than the slot it is
+  // about to be stored in.  A difference that does not fit in ptrdiff_t is
+  // undefined however it is computed, and subtracting the low half is the same
+  // arithmetic modulo that width, so nothing that was defined changes here.
+  llvm::IntegerType *DiffTy = CGF.LangPtrDiffTy;
   Value *LHS, *RHS;
   if (CGF.getLangOpts().PointerOverflowDefined) {
-    LHS = Builder.CreatePtrToInt(op.LHS, CGF.PtrDiffTy, "sub.ptr.lhs.cast");
-    RHS = Builder.CreatePtrToInt(op.RHS, CGF.PtrDiffTy, "sub.ptr.rhs.cast");
+    LHS = Builder.CreatePtrToInt(op.LHS, DiffTy, "sub.ptr.lhs.cast");
+    RHS = Builder.CreatePtrToInt(op.RHS, DiffTy, "sub.ptr.rhs.cast");
   } else {
     LHS = Builder.CreatePtrToAddr(op.LHS, "sub.ptr.lhs.cast");
     RHS = Builder.CreatePtrToAddr(op.RHS, "sub.ptr.rhs.cast");
-    if (LHS->getType() != CGF.PtrDiffTy)
-      LHS = Builder.CreateZExtOrTrunc(LHS, CGF.PtrDiffTy, "sub.ptr.lhs.ext");
-    if (RHS->getType() != CGF.PtrDiffTy)
-      RHS = Builder.CreateZExtOrTrunc(RHS, CGF.PtrDiffTy, "sub.ptr.lhs.ext");
+    if (LHS->getType() != DiffTy)
+      LHS = Builder.CreateZExtOrTrunc(LHS, DiffTy, "sub.ptr.lhs.ext");
+    if (RHS->getType() != DiffTy)
+      RHS = Builder.CreateZExtOrTrunc(RHS, DiffTy, "sub.ptr.lhs.ext");
   }
   Value *diffInChars = Builder.CreateSub(LHS, RHS, "sub.ptr.sub");
 
@@ -5009,12 +5017,13 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
         = CGF.getContext().getAsVariableArrayType(elementType)) {
     auto VlaSize = CGF.getVLASize(vla);
     elementType = VlaSize.Type;
-    divisor = VlaSize.NumElts;
+    divisor = Builder.CreateZExtOrTrunc(VlaSize.NumElts, DiffTy);
 
     // Scale the number of non-VLA elements by the non-VLA element size.
     CharUnits eltSize = CGF.getContext().getTypeSizeInChars(elementType);
     if (!eltSize.isOne())
-      divisor = CGF.Builder.CreateNUWMul(CGF.CGM.getSize(eltSize), divisor);
+      divisor = CGF.Builder.CreateNUWMul(
+          llvm::ConstantInt::get(DiffTy, eltSize.getQuantity()), divisor);
 
   // For everything elese, we can just compute it, safe in the
   // assumption that Sema won't let anything through that we can't
@@ -5032,7 +5041,7 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
     if (elementSize.isOne())
       return diffInChars;
 
-    divisor = CGF.CGM.getSize(elementSize);
+    divisor = llvm::ConstantInt::get(DiffTy, elementSize.getQuantity());
   }
 
   if (CGF.getLangOpts().StablePointerSubtraction)

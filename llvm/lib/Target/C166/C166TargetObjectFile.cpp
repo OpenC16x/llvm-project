@@ -99,7 +99,7 @@ MCSection *C166TargetObjectFile::SelectSectionForGlobal(
   // Likewise an object the compiler reaches with a far pointer: it needs to be
   // somewhere the linker can place outside segment 0, or the far addressing
   // buys nothing.
-  if (GO->getAddressSpace() != C166AS::Far)
+  if (!C166AS::isFar(GO->getAddressSpace()))
     return Base::SelectSectionForGlobal(GO, Kind, TM);
 
   if (Kind.isBSS())

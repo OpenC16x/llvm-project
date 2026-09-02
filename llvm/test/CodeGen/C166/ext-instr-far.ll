@@ -27,3 +27,15 @@ define void @far_store(ptr addrspace(1) %p, i16 %v) {
   store i16 %v, ptr addrspace(1) %p
   ret void
 }
+
+; A segment-confined pointer is a far pointer, so it needs the same
+; instruction and gets the same answer when the part has not got it.
+define i16 @seg_load(ptr addrspace(2) %p) {
+; EXT-LABEL: seg_load:
+; EXT:         exts r3, #1
+; EXT-NEXT:    mov r2, [r2]
+;
+; ERR: error: {{.*}}in function seg_load {{.*}}: cannot reach a far object on this part: a load needs an EXTS, which the first generation of the family does not have; -mcpu=c167 or later has it
+  %v = load i16, ptr addrspace(2) %p
+  ret i16 %v
+}

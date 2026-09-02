@@ -35,6 +35,7 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeC166Target() {
   initializeC166MACChainPass(PR);
   initializeC166MACRepeatPass(PR);
   initializeC166LowerThreadLocalPass(PR);
+  initializeC166LowerSegPointersPass(PR);
 }
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
@@ -105,6 +106,12 @@ void C166PassConfig::addIRPasses() {
   // needs to know and what nothing after selection could work out again.
   if (getOptLevel() != CodeGenOptLevel::None)
     addPass(createC166MACRepeatPass());
+
+  // And after every pass that wanted to see a getelementptr has seen one.
+  // This turns the arithmetic on a segment-confined far pointer into the
+  // sixteen bit arithmetic the data layout already says it is, which is a form
+  // scalar evolution and alias analysis would both have given up on.
+  addPass(createC166LowerSegPointersPass());
 
   TargetPassConfig::addIRPasses();
 }

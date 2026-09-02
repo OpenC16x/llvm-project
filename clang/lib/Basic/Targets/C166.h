@@ -151,9 +151,12 @@ public:
   }
 
   /// Address space 1 holds far pointers, which are a linear 24 bit address
-  /// zero extended into 32 bits.  Everything else is a 16 bit near pointer.
+  /// zero extended into 32 bits.  Address space 2 holds the same address with
+  /// a promise attached, so it is the same width.  Everything else is a 16 bit
+  /// near pointer.
   uint64_t getPointerWidthV(LangAS AS) const override {
-    return getTargetAddressSpace(AS) == 1 ? 32 : 16;
+    unsigned Target = getTargetAddressSpace(AS);
+    return Target == 1 || Target == 2 ? 32 : 16;
   }
 
   uint64_t getPointerAlignV(LangAS AS) const override { return 16; }
@@ -162,10 +165,22 @@ public:
   /// 24 bit bus and the near space is one page of it -- so a near pointer
   /// converts to a far pointer without a cast.  The reverse needs one, because
   /// the top eight bits have nowhere to go.
+  ///
+  /// Address space 2 is a far pointer that has been promised to stay inside
+  /// one segment.  Dropping that promise is always safe, so one converts to a
+  /// far pointer without a cast; making it is what needs the cast, and so the
+  /// far space is a superset of it rather than the other way round.  A near
+  /// pointer converts to either, because a near address under the reset
+  /// configuration of the data page pointers is segment 0 throughout -- the
+  /// whole near space is one segment, so a near pointer is already confined to
+  /// one.
   bool isAddressSpaceSupersetOf(LangAS A, LangAS B) const override {
     if (A == B)
       return true;
-    return getTargetAddressSpace(A) == 1 && B == LangAS::Default;
+    unsigned TA = getTargetAddressSpace(A);
+    if (TA == 1 && getTargetAddressSpace(B) == 2)
+      return true;
+    return (TA == 1 || TA == 2) && B == LangAS::Default;
   }
 
   uint64_t getMaxPointerWidth() const override { return 32; }

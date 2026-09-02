@@ -227,6 +227,55 @@ segment corrupts only bytes nothing looks at and the test passes anyway.  Both
 of those were found by breaking the implementation on purpose and watching the
 test not notice.
 
+Segment-confined data
+~~~~~~~~~~~~~~~~~~~~~
+
+Address space 2 is a far pointer that has been promised to stay inside one
+segment - __seg in C.  It has the same representation as address space 1 and
+is accessed by the same EXTS and the same MOV, so nothing below instruction
+selection tells the two apart: the address space checks in the lowering ask
+C166AS::isFar(), which both satisfy, and a global declared in either is placed
+in the same far sections.  What differs is only the arithmetic.  Stepping a far
+pointer is a 32 bit add whose carry lands in the segment; stepping one of these
+touches the low sixteen bits and leaves the segment where it was.
+
+That is not a licence the backend takes.  The data layout declares this space
+with an index size of sixteen - "p2:32:16:16:16" - and the language reference
+is explicit about what that means: "the offsets are then added to the low bits
+of the base address up to the index type width, with silently-wrapping two's
+complement arithmetic ... the bits outside the index type width will not be
+affected".  So a getelementptr in this space already has these semantics, and
+scalar evolution, the induction variable rewriters and the loop strength
+reducer all reason about one in sixteen bits without being told to.
+
+What is missing is the last step, which C166LowerSegPointers.cpp supplies.
+SelectionDAGBuilder lowers a getelementptr by widening the offset to the
+pointer's own type and adding there, which is the same answer whenever the add
+does not carry and puts a 32 bit add in the loop either way.  The pass rewrites
+the arithmetic into an add on the low half while it is still IR, so that the
+segment half of the pointer passes through the loop untouched - and the two i16
+registers an i32 becomes after type legalisation are one that is stepped and
+one that is only read.  It runs in addIRPasses and deliberately late: a
+getelementptr is what alias analysis and every loop pass are written to
+understand, and the form the pass produces is an inttoptr they would all give
+up on, so the optimiser sees the pointer the whole way through and only the
+code generator sees the rewrite.  A constant expression is left alone; its
+offset is a constant added to an address the linker picks, and whether that
+stays inside the segment is the same question the linker script's assertion
+already asks of the object.
+
+Measured on a loop walking a far array a word at a time: nine instructions to
+six, 20 states an element to 14, and 22 bytes off the function.  The saving is
+one ADDC and the register shuffling that keeping a written value rather than a
+read one costs.
+
+Arithmetic that leaves the segment is undefined, and undefined the way that
+does not report itself: the offset wraps and the access lands at the foot of
+the same segment.  utils/C166Sim/differential/segptr.c therefore stays inside
+one segment throughout - it is farptr.c's shapes with the crossing removed,
+and it is the only way to check a confined pointer at all, since nothing about
+one is visible in the values it produces.
+
 Far code
 ~~~~~~~~
 

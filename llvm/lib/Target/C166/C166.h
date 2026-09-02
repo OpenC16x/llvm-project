@@ -25,10 +25,22 @@ namespace C166AS {
 /// hardware addresses directly; address space 1 holds far pointers, a linear
 /// 24 bit address zero extended into 32 bits, which are accessed by naming
 /// their segment in an EXTS ahead of the access.
+///
+/// Address space 2 is a far pointer that has been promised to stay inside one
+/// segment.  It is the same 32 bits and is accessed the same way, so an access
+/// through one is a far access and nothing below instruction selection tells
+/// them apart; what differs is that its arithmetic touches only the low
+/// sixteen bits, which the data layout says by giving it an index size of
+/// sixteen.  C166LowerSegPointers.cpp has the rest of the reasoning.
 enum : unsigned {
   Near = 0,
   Far = 1,
+  Seg = 2,
 };
+
+/// Whether an access through this address space is a far access, which is to
+/// say one that names its segment in an EXTS.
+inline bool isFar(unsigned AS) { return AS == Far || AS == Seg; }
 } // end namespace C166AS
 
 namespace C166II {
@@ -210,6 +222,9 @@ void initializeC166MACChainPass(PassRegistry &);
 
 FunctionPass *createC166MACRepeatPass();
 void initializeC166MACRepeatPass(PassRegistry &);
+
+FunctionPass *createC166LowerSegPointersPass();
+void initializeC166LowerSegPointersPass(PassRegistry &);
 
 namespace C166 {
 /// True where this loop is a dot product one repeated coprocessor instruction

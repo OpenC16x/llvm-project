@@ -131,6 +131,42 @@ tells a caller in another translation unit which call sequence to use.
 `-mcpu=c166` has no `EXTend` instructions, so far addressing is unavailable
 on the first-generation core.
 
+### Staying inside one segment
+
+A `__far` pointer holds a linear 24-bit address, so stepping one is a 32-bit
+add and a carry out of the offset lands in the segment. That is the right
+answer for a pointer that might cross a boundary and the wrong price for one
+that will not — and most will not, because an object is placed inside a
+segment and the linker scripts here assert that no region they lay out crosses
+one.
+
+`__seg` is the same pointer with that promise attached:
+
+```c
+__seg const short *p = table;
+
+while (n--)
+    sum += *p++;                    /* add r5, #2 -- and no carry */
+```
+
+It is the same 24-bit address in the same 32 bits, so a `__seg` pointer can be
+stored, passed and returned like a `__far` one and converts to one without a
+cast; making the promise is what needs the cast. A near pointer converts to
+either without one, because under the reset configuration of the data page
+pointers the whole near space is segment 0.
+
+What it buys, measured on a loop that walks a far array a word at a time: the
+loop body goes from nine instructions to six and from 20 states an element to
+14 — 6 states an element, or 30% of the loop — and the function 22 bytes
+smaller. The saving is one `ADDC` and the register shuffling that comes with
+keeping a value the loop writes rather than one it only reads.
+
+**Arithmetic that leaves the segment is undefined.** The offset wraps and the
+segment stays where it was, so the access lands at the foot of the same
+segment rather than at the head of the next one — which is a location that
+usually exists, so nothing reports it. That is the promise the type is: if a
+pointer might cross a boundary, `__far` is the type for it.
+
 ## Bit variables
 
 Setting, clearing or testing one bit of a variable is a single two-byte
@@ -436,6 +472,7 @@ whatever the unit sees there instead.
 | `__C166_EXT_INSTR__` | the `EXTend` instructions and `ATOMIC` are available |
 | `__C166_MAC__` | the multiply-accumulate coprocessor is available |
 | `__far` | always; expands to the address-space attribute |
+| `__seg` | always; a far pointer confined to one segment |
 
 Ask `__C166_MAC__` rather than guessing from the part number.
 

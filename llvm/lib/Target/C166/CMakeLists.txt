@@ -23,6 +23,7 @@ add_llvm_target(C166CodeGen
   C166InstrInfo.cpp
   C166MCInstLower.cpp
   C166FoldCompare.cpp
+  C166LowerSegPointers.cpp
   C166LowerThreadLocal.cpp
   C166MACChain.cpp
   C166MACRepeat.cpp

@@ -556,6 +556,8 @@ CodeGenModule::CodeGenModule(ASTContext &C,
     C.getTargetInfo().getMaxPointerWidth());
   LangSizeTy =
       llvm::IntegerType::get(LLVMContext, C.getTypeSize(C.getSizeType()));
+  LangPtrDiffTy = llvm::IntegerType::get(
+      LLVMContext, C.getTypeSize(C.getPointerDiffType()));
   LangSizeSizeInBytes = C.getTypeSizeInChars(C.getSizeType()).getQuantity();
   Int8PtrTy = llvm::PointerType::get(LLVMContext,
                                      C.getTargetAddressSpace(LangAS::Default));

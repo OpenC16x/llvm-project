@@ -583,9 +583,13 @@ std::string Triple::computeDataLayout(StringRef ABIName) const {
   case Triple::c166:
     // The C166 addresses data with 16 bit near pointers.  Address space 1
     // holds far pointers: a linear 24 bit address zero extended to 32 bits,
-    // so that pointer arithmetic stays a plain integer add.  Nothing is
-    // aligned to more than a word and the ABI stack in R0 is word aligned.
-    return "e-m:e-p:16:16-p1:32:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16";
+    // so that pointer arithmetic stays a plain integer add.  Address space 2
+    // is the same address with a promise attached, that arithmetic on it stays
+    // inside its segment: same width, but an index size of 16, which is what
+    // makes a getelementptr on one add to the low half and leave the segment
+    // alone.  Nothing is aligned to more than a word and the ABI stack in R0
+    // is word aligned.
+    return "e-m:e-p:16:16-p1:32:16-p2:32:16:16:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16";
   case Triple::bpfel:
   case Triple::bpfeb:
     return computeBPFDataLayout(*this);
