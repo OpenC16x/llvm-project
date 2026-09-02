@@ -1178,6 +1178,7 @@ C166TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
 ///
 ///     mov  save, psw          what IEN was, along with the flags
 ///     bclr psw.11             interrupts off
+///     nop                     which is one instruction late
 ///     mov  old, [addr]
 ///     cmp  old, cmp
 ///     jmpr cc_NE, out
@@ -1389,6 +1390,17 @@ C166TargetLowering::emitCmpXchg(MachineInstr &MI, MachineBasicBlock *BB) const {
   Register Save = MRI.createVirtualRegister(&C166::GR16RegClass);
   BuildMI(BB, DL, TII.get(C166::MOV16ra), Save).addImm(PSWAddr);
   BuildMI(BB, DL, TII.get(C166::BCLR)).addImm(PSWShort).addImm(IEN);
+  // Clearing IEN takes effect one instruction late.  "An interrupt request
+  // may be acknowledged after the instruction that disables interrupts via
+  // IEN or ILVL or after the following instructions.  Timecritical
+  // instruction sequences therefore should not begin directly after the
+  // instruction disabling interrupts" (C167CR Derivatives User's Manual
+  // V3.1, section 4.2, Controlling Interrupts).  Without something here the
+  // load below is that first critical instruction, and a request taken at the
+  // boundary after it lands between the read and the write this exists to
+  // keep together.  The manual's own remedy is an instruction that is not
+  // part of the sequence.
+  BuildMI(BB, DL, TII.get(C166::NOP));
   BuildMI(BB, DL, TII.get(Byte ? C166::MOVB8rp : C166::MOV16rp), Dst)
       .addReg(Addr);
   BuildMI(BB, DL, TII.get(Byte ? C166::CMPB8rr : C166::CMP16rr))

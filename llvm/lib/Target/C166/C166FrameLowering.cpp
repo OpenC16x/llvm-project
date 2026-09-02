@@ -271,18 +271,22 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
         .setMIFlag(MachineInstr::FrameSetup);
     ++SavedWords;
 
-    // Whether the instruction after one that writes CP already sees the new
-    // register window is not settled by any manual to hand.  The programming
-    // manual's SCXT page describes the push and the load and says nothing
-    // about it, and its pipeline section covers the SFR and stack pointer
-    // cases without covering this one.  Getting it wrong is not a slow
-    // program but a wrong one: this handler's first register write would land
-    // in the interrupted code's bank instead of its own, intermittently and
-    // with nothing to see afterwards.  The simulator cannot help either, since
-    // it applies the write at once - so this is one of the places where
-    // running it proves nothing.  Two states against the fifty the bank
-    // saves is the wrong side to economise on; if the manual turns up and says
-    // the window is live immediately, this comes out again.
+    // The instruction after one that writes CP does not see the new register
+    // window.  "An instruction, which calculates a physical GPR operand
+    // address via the CP register, is mostly not capable of using a new CP
+    // value, which is to be updated by an immediately preceding instruction.
+    // Thus, to make sure that the new CP value is used, at least one
+    // instruction must be inserted between a CP-changing and a subsequent
+    // GPR-using instruction" - C167CR Derivatives User's Manual V3.1, section
+    // 4.2, Context Pointer Updating, whose example is this very instruction:
+    //
+    //   In    : SCXT CP,#0FC00h  ;select a new context
+    //   In + 1: ...              ;must not be an instruction using a GPR
+    //   In + 2: MOV R0,#dataX    ;write to GPR 0 in the new context
+    //
+    // Without it this handler's first register write would land in the
+    // interrupted code's bank, and nothing here would show it: the simulator
+    // applies the CP write at once, so no test can find this.
     BuildMI(MBB, MBBI, DL, TII.get(C166::NOP))
         .setMIFlag(MachineInstr::FrameSetup);
 

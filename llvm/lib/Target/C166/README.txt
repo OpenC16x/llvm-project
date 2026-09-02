@@ -497,15 +497,39 @@ calls a function - the case that saves most - entry and exit go from 114 states
 to 64 and the handler from 110 bytes to 42.  A leaf that touches one register
 saves nothing, there having been one register to save.
 
-A NOP follows the SCXT.  Whether the instruction after one that writes CP
-already sees the new window is not settled by any manual to hand - the
-programming manual's SCXT page describes the push and the load and says
-nothing about it, and its pipeline section covers the SFR and stack pointer
-cases without covering this one.  Being wrong about it would put the handler's
-first register write in the interrupted code's bank, intermittently and with
-nothing to see afterwards, and the simulator cannot decide it either because
-it applies the write at once.  Two states against the fifty the bank saves is
-the wrong side to economise on.
+A NOP follows the SCXT, and the manual says it has to.  "An instruction, which
+calculates a physical GPR operand address via the CP register, is mostly not
+capable of using a new CP value, which is to be updated by an immediately
+preceding instruction.  Thus, to make sure that the new CP value is used, at
+least one instruction must be inserted between a CP-changing and a subsequent
+GPR-using instruction" - C167CR Derivatives User's Manual V3.1, section 4.2,
+Context Pointer Updating, whose worked example is SCXT CP, #0FC00h followed by
+a line reading "must not be an instruction using a GPR".  Without it the
+handler's first register write would land in the interrupted code's bank, and
+nothing here would show it: the simulator applies the CP write at once, so no
+test can find it.
+
+That section is worth reading whole rather than for the one rule, and doing so
+found a second thing.  The compare and exchange sequence cleared PSW.IEN and
+read the word in the very next instruction - but "an interrupt request may be
+acknowledged after the instruction that disables interrupts via IEN or ILVL or
+after the following instructions.  Timecritical instruction sequences therefore
+should not begin directly after the instruction disabling interrupts."  So a
+request could be taken at the boundary after that load, which is between the
+read and the write the sequence exists to keep together.  It has a NOP after
+the BCLR now, which is the manual's own remedy.  The read-modify-writes that
+use ATOMIC rather than IEN are not affected: the same section's example uses
+ATOMIC precisely to cover this delay, so ATOMIC blocks at once.
+
+The rest of section 4.2 was checked against this tree as well.  The data page
+pointers have the same one instruction delay, and crt0.S wrote DPP3 and then
+read SYSCON1 at F1DCH, which is page 3 and so goes through the pointer just
+written - working only because the value written is the value it already held;
+it has a NOP there now.  The stack pointer rule is about RET, RETI, RETS, RETP
+and POP after an explicit write to SP, and crt0.S follows its write with more
+SFR writes, while the note that conflicts with PUSH, CALL and SCXT are resolved
+internally covers the rest.  Port direction, SYSCON mapping and BUSCON are
+startup concerns this backend generates no code for.
 
 Three things do not follow from the window and are handled separately.  The
 multiply/divide unit and the coprocessor are not part of a bank and are still
