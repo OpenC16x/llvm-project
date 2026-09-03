@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Machine.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Format.h"
 
 using namespace c166sim;
