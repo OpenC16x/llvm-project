@@ -1001,13 +1001,33 @@ def MAC32rr : Pseudo<(outs GR16:$lo, GR16:$hi),
 // where the general purpose pointer starts.  The instruction steps both, so
 // $ptr is written as well as read - tied to $ptrend, which nothing uses - and
 // IDX0 is written outright.  $count is how many products are added and $kind
-// is a C166MAC::Kind.
+// is a C166MAC::Kind.  $idxstep and $ptrstep are how far each pointer moves
+// per repetition, in bytes; a stride that is not a word goes through one of
+// the unit's offset registers, which the expansion writes, so QX0 and QR0 are
+// clobbered whether or not this one needs them.
+//
+// Writing an offset register needs the value in a register first - this
+// machine has no move of an immediate to a memory address - and the expansion
+// runs after allocation, where it cannot make one up.  $scratch is that
+// register, and is early clobbered because the expansion writes it while the
+// pointers and the accumulator are still live.  A unit stride needs none of
+// this, so it has a pseudo of its own rather than paying for a register it
+// will not use.
 let Predicates = [HasMAC], Defs = [MAL, MAH, MSW, IDX0], mayLoad = 1,
     Constraints = "$ptr = $ptrend" in
 def MACREP32 : Pseudo<(outs GR16:$lo, GR16:$hi, GR16:$ptrend),
                       (ins GR16:$idx, GR16:$ptr, GR16:$acclo, GR16:$acchi,
                        i16imm:$count, i16imm:$kind),
                       "#MACREP32", []>;
+
+let Predicates = [HasMAC], Defs = [MAL, MAH, MSW, IDX0, QX0, QR0], mayLoad = 1,
+    Constraints = "$ptr = $ptrend,@earlyclobber $scratch" in
+def MACREP32S : Pseudo<(outs GR16:$lo, GR16:$hi, GR16:$ptrend,
+                        GR16:$scratch),
+                       (ins GR16:$idx, GR16:$ptr, GR16:$acclo, GR16:$acchi,
+                        i16imm:$count, i16imm:$kind, i16imm:$idxstep,
+                        i16imm:$ptrstep),
+                       "#MACREP32S", []>;
 
 //===----------------------------------------------------------------------===//
 // Move Instructions

@@ -654,7 +654,7 @@ static bool diagnoseFarWithoutExtInstr(const C166Subtarget &Subtarget,
 SDValue C166TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   auto *LD = cast<LoadSDNode>(Op);
   MVT AccessVT;
-  if (LD->getAddressSpace() != C166AS::Far || !LD->isUnindexed() ||
+  if (!C166AS::isFar(LD->getAddressSpace()) || !LD->isUnindexed() ||
       !getFarAccessType(LD->getMemoryVT(), AccessVT))
     return SDValue();
 
@@ -687,7 +687,7 @@ SDValue C166TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
 SDValue C166TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   auto *ST = cast<StoreSDNode>(Op);
   MVT AccessVT;
-  if (ST->getAddressSpace() != C166AS::Far || !ST->isUnindexed() ||
+  if (!C166AS::isFar(ST->getAddressSpace()) || !ST->isUnindexed() ||
       !getFarAccessType(ST->getMemoryVT(), AccessVT))
     return SDValue();
 
@@ -882,7 +882,7 @@ SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
 
   auto *GA = dyn_cast<GlobalAddressSDNode>(N->getOperand(0));
   auto *Offset = dyn_cast<ConstantSDNode>(N->getOperand(1));
-  if (!GA || !Offset || GA->getAddressSpace() != C166AS::Far)
+  if (!GA || !Offset || !C166AS::isFar(GA->getAddressSpace()))
     return SDValue();
 
   return DCI.DAG.getGlobalAddress(GA->getGlobal(), SDLoc(N), N->getValueType(0),
@@ -1203,7 +1203,7 @@ C166TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
 /// that looks atomic and is not.
 static bool diagnoseFarAtomic(const Instruction *I, const Value *Ptr,
                               StringRef What) {
-  if (Ptr->getType()->getPointerAddressSpace() != C166AS::Far)
+  if (!C166AS::isFar(Ptr->getType()->getPointerAddressSpace()))
     return false;
   I->getContext().diagnose(DiagnosticInfoUnsupported(
       *I->getFunction(),
@@ -1404,6 +1404,12 @@ C166TargetLowering::emitCmpXchg(MachineInstr &MI, MachineBasicBlock *BB) const {
   // boundary after it lands between the read and the write this exists to
   // keep together.  The manual's own remedy is an instruction that is not
   // part of the sequence.
+  //
+  // The delay itself is modelled in the simulator - a change to PSW.IEN or
+  // PSW.ILVL is not arbitrated on until the instruction after the one that
+  // made it - so the window this closes is one that now exists there rather
+  // than only in the manual; llvm/test/tools/c166-sim/pipeline.s is where that
+  // is checked.
   BuildMI(BB, DL, TII.get(C166::NOP));
   BuildMI(BB, DL, TII.get(Byte ? C166::MOVB8rp : C166::MOV16rp), Dst)
       .addReg(Addr);

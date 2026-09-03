@@ -187,15 +187,20 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   }
 }
 
-// There is no linker relaxation here, and it is not an omission.
+// There is no linker relaxation here, and it is not an omission.  Three
+// shrinks are available in principle once the layout is fixed, and each is
+// declined for a different reason: one on measurement, and two because they
+// are not things a linker can do at all.  A fourth, which needs no linker,
+// is declined on measurement next door - C166's README.txt has it under
+// "Why the calls are not relaxed either".
 //
-// A branch or call whose target lands close after layout could be the two byte
-// relative form rather than the four byte absolute one, and lld has the
-// machinery for that: relaxOnce, finalizeRelax and RelaxAux delete bytes from a
-// section and move the symbols and relocations that follow.  What that
-// machinery needs from the object file is a relocation for every branch it
-// might have to fix up, because deleting bytes moves every target after the
-// deletion.
+// JMPA and CALLA, four bytes and absolute, could be JMPR and CALLR, two bytes
+// and relative, whenever the target turns out to be within the signed 8 bit
+// word displacement.  lld has the machinery: relaxOnce, finalizeRelax and
+// RelaxAux delete bytes from a section and move the symbols and relocations
+// that follow.  What that machinery needs from the object file is a relocation
+// for every branch it might have to fix up, because deleting bytes moves every
+// target after the deletion.
 //
 // This assembler does not leave one.  An intra-section branch is resolved at
 // assembly time and its displacement is baked into the bytes, so:
@@ -214,12 +219,62 @@ void C166::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
 // form itself, since it would no longer know the distance, and would have to
 // emit the long form everywhere and rely on the linker to shrink it back.
 // That is a coherent design and it is how RISC-V works, but it is the opposite
-// of what this assembler does today.
+// of what this assembler does today, and it puts the branches the assembler
+// already shortens at stake against the ones only the linker can.
 //
-// Measured before writing any of it, over the differential programs: after
-// crt0 stopped spelling its local branches JMPA, what was left for a linker to
-// win was four to eleven sites per program, eight to twenty two bytes.  That
-// is not enough to pay for inverting how branches are assembled.
+// Both sides of that were measured over utils/C166Sim/corpus, which is drivers
+// over LLVM's own libc rather than programs written to exercise this backend -
+// relax.sh there re-derives the table, and relax.py says how each column is
+// counted.  At a fixed point, so counting the shrinks that only become
+// possible once earlier ones have moved things closer:
+//
+//     image        text   long   win   win%   short  stake  stake%
+//     numbers -O2   8118    71     8   0.10     323    646    7.96
+//     numbers -Os   5602    30    10   0.18     223    446    7.96
+//     parsing -O2   8894   166    20   0.22     362    724    8.14
+//     parsing -Os  10382   155    20   0.19     481    962    9.27
+//     sorting -O2  20877   193    64   0.31     479    958    4.59
+//     sorting -Os  17982   188    68   0.38     436    872    4.85
+//     strings -O2   5038    47     8   0.16     174    348    6.91
+//     strings -Os   3756    52    10   0.27     191    382   10.17
+//
+// So the linker would win 8 to 68 bytes, a tenth to four tenths of one per
+// cent, and to get at them the assembler would have to put 348 to 962 bytes -
+// five to ten per cent - back into the linker's hands.  The linker's first job
+// under that scheme is to return to where the assembler already is, and the
+// surplus beyond it is a third of one per cent at best.  The reason the
+// surplus is so small is in the "long" column rather than in the machinery:
+// the compiler has already taken the near branches, and what is left is
+// genuinely far.  Across the eight images above there are 902 of these, of
+// which 104 have a target within 254 bytes - a JMPR's forward reach - and the
+// median target is 829 bytes away.
+//
+// CALLS, a far call naming its segment, could be a CALLA or a CALLR when the
+// callee turns out to be in the calling segment - which is not a rare case
+// here, since c166.ld puts .fartext in the same segment as .text on a part
+// whose program memory is one segment.  But the far call sequence is a
+// contract between the two ends and not an encoding: CALLS pushes CSP and IP
+// and the callee returns with RETS, which pops both.  Turning the call near
+// means turning the callee's RETS into a RET, and the linker cannot know
+// whether some other caller - in another object, in another segment, through a
+// pointer - still needs the far form.  This is the same reason the compiler
+// cannot mix the two, which C166's README.txt gives at greater length.
+//
+// An EXTS ahead of an access to an object that landed inside the window the
+// data page pointers cover is dead, and could go.  Except that the window is
+// not in the object file: DPP0 to DPP3 are written by startup code, and this
+// toolchain's own crt0 writes pages 300H, 301H, 302H and 3 rather than the
+// reset 0, 1, 2, 3 - so the near window here is the first 48 KByte of segment
+// C0H plus the RAM, and a linker that assumed the reset mapping would delete
+// an EXTS the program needs.  The corpus agrees about the size of the prize
+// even if the question were answerable: three EXTS per program name a segment
+// as an immediate at all, and all three name E0H, which no DPP covers.  Every
+// other EXTS in those images takes its segment from a register, which is a run
+// time value and nothing a linker could fold.
+//
+// The measurements are worth repeating rather than trusting:
+// llvm/utils/C166Sim/corpus/relax.sh prints both tables, and moves when the
+// compiler does.
 
 // JMPA and CALLA take their segment from CSP, so they reach the segment the
 // instruction is in and no other.  Nothing in the instruction says which one

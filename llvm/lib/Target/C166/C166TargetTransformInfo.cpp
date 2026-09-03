@@ -129,11 +129,13 @@ InstructionCost C166TTIImpl::getArithmeticInstrCost(
     // One word is the hardware MUL and a MOV to read MDL back.  Wider is a
     // schoolbook product of the words, quadratic in them; against a constant
     // the partial products that are zero drop out, and a power of two leaves
-    // a shift.  Expanded in place, so size and time agree.
+    // a shift.  Expanded in place, so size and time agree - except at one
+    // word, where they do not: MUL is ten states where an ordinary
+    // instruction is two, so those two instructions are worth six.
     //
     // Measured at 32 bits: 10 against a variable, 7 against 13, 5 against 16.
     if (N == 1)
-      return 2;
+      return WantSize ? 2 : 6;
     if (Pow2Op2)
       return 2 * N + 1;
     if (ConstOp2)
@@ -152,11 +154,12 @@ InstructionCost C166TTIImpl::getArithmeticInstrCost(
   case Instruction::SDiv:
   case Instruction::SRem: {
     // One word is the hardware DIV: set up MDL, divide, read the answer back.
-    // Three instructions, and the one number here that understates - DIV is
-    // much longer than three instructions' worth of time - but it is the
-    // only divide this machine has, so nothing is chosen against it.
+    // Three instructions of code and twenty four states of time, because DIV
+    // is twenty of them - twelve ordinary instructions' worth.  This used to
+    // answer three to both questions and say so as the one number here that
+    // understated; the scheduling model is where the twenty now comes from.
     if (N == 1)
-      return 3;
+      return WantSize ? 3 : 12;
 
     // Wider than a word against a constant divisor never reaches a builtin:
     // it is a multiply by the reciprocal and a shift, or just a shift when
@@ -177,9 +180,14 @@ InstructionCost C166TTIImpl::getArithmeticInstrCost(
     // this target's own helper, which sends a divisor that fits in a word to
     // the divide unit and only falls back to the loop for a wider one; see
     // compiler-rt/lib/builtins/c166/int_divmod.h.  Measured in the simulator,
-    // a division by a word divisor is 32 instructions executed and a signed
-    // one is 63, so the numbers below are the measurements rather than a
-    // formula.
+    // a division by a word divisor is 120 states and a signed one is 188, so
+    // the numbers below are the measurements rather than a formula.
+    //
+    // In instructions executed those two are 32 and 63, which is what this
+    // used to answer.  The instruction counts were right and the unit was
+    // not: a helper with a DIV in it does not cost two states an instruction
+    // the way ordinary code does, and pricing it as though it did understated
+    // it by nearly a half.
     //
     // They are the common case and not the worst one: a divisor that does not
     // fit in a word still walks the loop, at about 740 instructions.  The
@@ -187,13 +195,15 @@ InstructionCost C166TTIImpl::getArithmeticInstrCost(
     // ordinary code divides by - and because overstating a division is not
     // free either, being what stops loops containing one from unrolling.
     if (Bits == 32)
-      return IsSigned ? 63 : 32;
+      return IsSigned ? 94 : 60;
 
     // Wider than that has no helper and is the generic loop, which walks the
     // dividend a bit at a time: roughly two dozen instructions per bit once
-    // the 32 bit shifts inside it are counted.  Note this is what it executes,
-    // which is not what it occupies - __udivsi3 is 140 instructions of code
-    // and runs about 740 of them.
+    // the 32 bit shifts inside it are counted.  There is no DIV anywhere in
+    // it, so every instruction is an ordinary two states and the count is
+    // already in the unit the rest of this file uses.  Note this is what it
+    // executes, which is not what it occupies - __udivsi3 is 140 instructions
+    // of code and runs about 740 of them.
     InstructionCost Cost = 24 * Bits;
     if (IsSigned)
       Cost += 32;

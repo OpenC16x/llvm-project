@@ -353,6 +353,21 @@ addresses, CAPCOM6 in the X-peripheral space that no short address reaches, and
 only ports 1, 3, 5 and 9.  Writing to one that is not here is a compile error
 rather than a store to whatever the address turned out to be.
 
+Two things in that header are not registers.  The Peripheral Event
+Controller's source and destination pointers live in the internal RAM rather
+than in the register map - "these pointers do not reside in specific SFRs, but
+are mapped into the internal RAM ... just below the bit-addressable area" - so
+C166_SRCP(ch) and C166_DSTP(ch) are the only place in this toolchain their
+addresses are written down, and a program that enables a channel owns the
+thirty two bytes at FCE0H.  The linker scripts do not reserve them, because a
+program that uses no channel should not pay for them, so keep __dpram objects
+away from that range if any channel is on.  Beside them are the field values
+for a PECCx and PEC_IC(ch), which is what to put in a source's interrupt
+control register to make that source ask for a given channel; the channel
+number is not in the channel's own register at all.
+clang/test/CodeGen/C166/c166-pec-header.c checks all of that arithmetic, and
+is the only thing that compiles this header at all.
+
 The addresses are the ones C166RegisterInfo.td holds, which is what the
 assembler and the disassembler use, so the two cannot disagree about where a
 register is.  That is worth knowing because it is checkable: compiling a store

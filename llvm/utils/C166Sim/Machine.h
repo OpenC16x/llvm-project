@@ -92,20 +92,20 @@ enum ResetValue : uint16_t {
 /// follow it.
 enum class ExtendKind { None, Page, Segment };
 
-/// An interrupt source, as far as this simulator has one.
+/// An interrupt source declared from the command line.
 ///
 /// A real source is a peripheral: it raises its request flag when something
 /// happens to it, and its own control register holds the enable bit and the
-/// priority.  None of that is modelled - the peripherals are not here, and
-/// which control register belongs to which vector is a property of the
-/// derivative rather than of the core.  So a source here is declared from the
-/// command line and fires on the clock: at a state count, once or over and
-/// over.  That is deterministic, which is what a test needs, and it is enough
-/// to exercise everything the *core* does with an interrupt.
+/// priority.  Three of them are modelled - the GPT1 timers, in Machine.cpp -
+/// and everything else in the vector table is still one of these, which fires
+/// on the clock at a state count, once or over and over.  That is
+/// deterministic, which is what a test needs, and it exercises everything the
+/// *core* does with an interrupt without a peripheral behind it.
 ///
 /// Consequently the source's own enable bit does not appear: an injected
-/// request is by definition enabled.  What gates it is PSW.IEN and the
-/// priority comparison, both of which are the core's.
+/// request is by definition enabled, and its group level is zero because a
+/// group level is a field of a control register it does not have.  What gates
+/// it is PSW.IEN and the priority comparison, both of which are the core's.
 struct InterruptSource {
   /// Never raise again, which is where a one shot goes after it has fired.
   static constexpr uint64_t Never = ~uint64_t(0);
@@ -115,6 +115,46 @@ struct InterruptSource {
   unsigned Vector = 0; ///< which vector table entry, 0 to 127
   unsigned Level = 0;  ///< the source's priority, 1 to 15
   bool Pending = false; ///< raised and not yet accepted
+};
+
+/// One of the three timers of the GPT1 block, as far as this models them.
+///
+/// The registers themselves are storage like every other peripheral register -
+/// the program reads and writes T2, T3 and T4 at their own addresses - so what
+/// is here is only the part the program cannot see: when the timer next counts,
+/// and what it was configured as last time anything looked, which is what says
+/// whether the prescaler has to start again.
+struct Timer {
+  uint64_t NextTick = 0;   ///< the state count at which it next counts
+  uint16_t LastConfig = 0; ///< TxCON's mode, prescaler and run bit, as last set
+};
+
+/// What the instruction that has just retired did that the pipeline will not
+/// have finished with by the time the next one wants it.
+///
+/// Section 4.2 of the C167CR Derivatives User's Manual V3.1, "Particular
+/// Pipeline Effects", names four of these and three are of this shape: the
+/// program has to leave a gap, and one that does not is not told so - the
+/// instruction simply uses the old value.  So they are checked here rather
+/// than emulated.  Emulating them would mean inventing what "mostly not
+/// capable of using a new CP value" covers, and the wrong answer a program
+/// gets on the part is not a wrong answer this could reproduce; refusing the
+/// sequence the manual says must not be written is exactly what can be
+/// checked.
+///
+/// The fourth effect, the one instruction of delay before a change to PSW.IEN
+/// or PSW.ILVL is arbitrated on, is not of this shape - the manual says what
+/// happens rather than what not to write - so that one is modelled.  See
+/// IntPSW.
+struct PipelineWrite {
+  enum Kind {
+    Nothing,
+    ContextPointer, ///< CP, so the next instruction must not use a GPR
+    DataPage,       ///< a DPPn, so the next must not address through that one
+    StackPointer,   ///< SP, so the next must not be a RET or a POP
+  };
+  Kind What = Nothing;
+  unsigned Which = 0; ///< which DPP, when What is DataPage
 };
 
 /// Why the machine stopped.
@@ -156,6 +196,19 @@ public:
 
   // -- registers ---------------------------------------------------------
 
+  /// The address of a byte of the register window, and the one place the CP
+  /// register is turned into an address.
+  ///
+  /// Everything that reaches a GPR goes through here - the accessors below,
+  /// the "reg" field's own encoding, the bit-addressable form - so that the
+  /// dependency section 4.2 describes is recorded in one place rather than in
+  /// each of them.  The first attempt instrumented the accessors and missed
+  /// the shortest path of all, which is a register named in a reg8 field.
+  uint16_t gprAddress(unsigned ByteOffset) const {
+    UsedGPR = true;
+    return uint16_t(CP + ByteOffset);
+  }
+
   /// R0 to R15 are a window into internal RAM at CP, so they are storage
   /// rather than registers and code may reach them either way.
   uint16_t getWordReg(unsigned N) const;
@@ -185,6 +238,37 @@ public:
   void setCPUPriority(unsigned L) {
     PSW = (PSW & 0x0FFF) | (uint16_t(L & 0xF) << PSWILVLShift);
   }
+
+  /// Whether the pipeline effects of section 4.2 are checked and modelled.
+  /// On by default; --no-pipeline-effects turns it off, which is how a program
+  /// that predates the check can still be run.
+  bool PipelineEffects = true;
+
+  /// What the previous instruction wrote, and what this one is writing.
+  PipelineWrite LastWrite, ThisWrite;
+  /// What this instruction reached, which is what the previous one's write is
+  /// checked against.  Both are mutable because the accessors that set them
+  /// are const: reading a GPR does not change the machine, but it is the thing
+  /// being recorded.
+  mutable bool UsedGPR = false;
+  mutable unsigned UsedDPPMask = 0;
+
+  /// PSW as arbitration sees it, which is one instruction behind.
+  ///
+  /// "Software modifications (implicit or explicit) of the PSW are done in the
+  /// execute phase of the respective instructions.  In order to maintain fast
+  /// interrupt responses, however, the current interrupt prioritization round
+  /// does not consider these changes, i.e. an interrupt request may be
+  /// acknowledged after the instruction that disables interrupts via IEN or
+  /// ILVL or after the following instructions." (section 4.2, Controlling
+  /// Interrupts.)  Only IEN and ILVL are read from this; every other field of
+  /// PSW is read by instructions, which see it at once.
+  ///
+  /// Entering a handler is not a software modification - it is the hardware
+  /// doing it - so acceptance sets this to the new value rather than letting
+  /// it lag, which is what stops a second request of the same level walking
+  /// straight into the handler.
+  uint16_t IntPSW = 0;
 
   bool flag(PSWBit B) const { return (PSW >> B) & 1; }
   void setFlag(PSWBit B, bool V) {
@@ -220,6 +304,40 @@ public:
   /// How many requests have been accepted, which is what a test asserts on
   /// when the program itself cannot see the difference.
   uint64_t InterruptsTaken = 0;
+
+  /// And how many were serviced by a PEC channel instead of by a handler,
+  /// which is the same thing for the same reason: a program that had its
+  /// buffer filled by the controller cannot tell how it got there.
+  uint64_t PECTransfers = 0;
+
+  /// Run the GPT1 timers forward to the current state count, raising the
+  /// request flags of any that overflowed on the way.  Called from
+  /// serviceInterrupts, which is where a request becomes an interrupt.
+  void advanceTimers();
+
+  /// Set a peripheral's interrupt request flag, which is bit 7 of its own
+  /// interrupt control register.  The enable and the priority beside it there
+  /// are the CPU's business and are read during arbitration.
+  void raiseRequest(uint32_t IC);
+
+  /// Write T2CON, T3CON or T4CON - 0, 1 and 2 - and take from it whatever the
+  /// timer now does.  A configuration that needs a pin stops the program here,
+  /// where the write is, rather than by never counting.
+  void setTimerControl(unsigned N, uint16_t V);
+
+  /// What an overflow or underflow of the core timer does: its own request,
+  /// the toggle latch, and any reload an auxiliary timer is watching for.
+  void coreTimerWrapped();
+
+  /// T2CON, T3CON and T4CON, which are registers rather than storage because
+  /// this simulator writes one of them: T3OTL toggles on every overflow of T3,
+  /// and an auxiliary timer in reload mode watches it.
+  uint16_t TCON[3] = {0, 0, 0};
+  Timer Timers[3];
+  /// Whether any of the three is doing anything, so that a program with no
+  /// timers - which is every program in this tree until now - pays one test
+  /// per instruction and not three register reads.
+  bool TimersOn = false;
 
   /// Count down an EXTend sequence.  Called once per instruction, after the
   /// instruction has used the override.

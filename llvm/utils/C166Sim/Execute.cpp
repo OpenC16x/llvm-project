@@ -25,6 +25,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Machine.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -533,7 +534,7 @@ struct Executor {
       return 0xFD00 + 2 * BitOff;
     if (BitOff < 0xF0)
       return 0xFF00 + 2 * (BitOff - 0x80);
-    return uint16_t(M.CP + 2 * (BitOff - 0xF0));
+    return M.gprAddress(2 * (BitOff - 0xF0));
   }
 
   bool getBit(unsigned BitOff, unsigned Pos) {
@@ -757,6 +758,70 @@ static void enterVector(Machine &M, unsigned Vector) {
   M.IP = uint16_t(Space * (Vector & 0x7F));
 }
 
+/// The three pipeline effects of section 4.2 that a program has to leave a gap
+/// for, checked against the instruction that has just run.
+///
+/// Each is reported rather than reproduced.  The part does not report them: it
+/// uses the value the pipeline still holds and carries on, so a program that
+/// gets one wrong gets a wrong answer with nothing said.  What can be checked
+/// is the sequence the manual says must not be written, and that is what this
+/// does - which is the whole reason it exists, because the two hazards the
+/// compiler already avoids were avoided on the strength of reading the manual
+/// and nothing in this tree could tell whether the avoidance worked.
+static void checkPipelineGap(Machine &M, Op O) {
+  if (!M.PipelineEffects)
+    return;
+
+  const char *Why = nullptr;
+  switch (M.LastWrite.What) {
+  case PipelineWrite::Nothing:
+    break;
+  case PipelineWrite::ContextPointer:
+    // "An instruction, which calculates a physical GPR operand address via the
+    // CP register, is mostly not capable of using a new CP value, which is to
+    // be updated by an immediately preceding instruction."
+    if (M.UsedGPR)
+      Why = "a general purpose register is read or written by the instruction "
+            "after the one that wrote CP, so it is the old context that is "
+            "addressed; at least one instruction has to come between them "
+            "(C167CR Derivatives User's Manual V3.1, section 4.2, Context "
+            "Pointer Updating)";
+    break;
+  case PipelineWrite::DataPage:
+    // "An instruction, which calculates a physical operand address via a
+    // particular DPPn register, is mostly not capable of using a new DPPn
+    // register value, which is to be updated by an immediately preceding
+    // instruction."
+    if (M.UsedDPPMask & (1u << M.LastWrite.Which))
+      Why = "a long or indirect address goes through the data page pointer "
+            "that the instruction before this one wrote, so it is the old page "
+            "that is addressed; at least one instruction has to come between "
+            "them (C167CR Derivatives User's Manual V3.1, section 4.2, Data "
+            "Page Pointer Updating)";
+    break;
+  case PipelineWrite::StackPointer:
+    // "None of the RET, RETI, RETS, RETP or POP instructions is capable of
+    // correctly using a new SP register value, which is to be updated by an
+    // immediately preceding instruction."
+    if (O == Op::RET || O == Op::RETI || O == Op::RETS || O == Op::RETP ||
+        O == Op::POP)
+      Why = "this pops the system stack immediately after SP was written, so "
+            "it is the old stack pointer that is used; at least one "
+            "instruction has to come between them (C167CR Derivatives User's "
+            "Manual V3.1, section 4.2, Explicit Stack Pointer Updating)";
+    break;
+  }
+
+  if (Why) {
+    M.Stop = StopReason::BadSequence;
+    M.StopDetail = Why;
+    return;
+  }
+
+  M.LastWrite = M.ThisWrite;
+  M.ThisWrite = PipelineWrite();
+}
+
 /// What accepting an interrupt costs, in states.
 ///
 /// It does exactly what TRAP does, so it is charged what TRAP is charged.  The
@@ -766,8 +831,147 @@ static void enterVector(Machine &M, unsigned Vector) {
 /// is a lower bound, which is what everything else in States already is.
 static constexpr unsigned InterruptEntryStates = 4;
 
+/// The interrupt control registers of the sources this simulator has
+/// peripherals for, and the vector each reaches.  Everything else in the
+/// interrupt table is still a command line injection.
+///
+/// The register itself is storage, which is what an unmodelled peripheral
+/// register already was; what makes these different is that something sets the
+/// request flag in them and that arbitration reads them.  So the layout below
+/// is the manual's - xxIR at bit 7, xxIE at 6, GLVL at 5-4 and ILVL at 3-0 -
+/// and a program configures one exactly as it would on the part.
+struct PeripheralSource {
+  uint32_t IC;
+  unsigned Vector;
+};
+static constexpr PeripheralSource PeripheralSources[] = {
+    {0xFF60, 34}, // T2IC, GPT1 timer 2
+    {0xFF62, 35}, // T3IC, GPT1 timer 3
+    {0xFF64, 36}, // T4IC, GPT1 timer 4
+};
+
+/// What a PEC transfer costs, in states.
+///
+/// "In cycle 3 a PEC transfer 'instruction' is injected into the decode stage
+/// of the pipeline, suspending instruction N + 1 ... Cycle 4 completes the
+/// injected PEC transfer and resumes the execution of instruction N + 1"
+/// (C167CR Derivatives User's Manual V3.1, section 5.6).  So it costs what an
+/// instruction costs, which is the same lower bound InterruptEntryStates is:
+/// the response time the manual quotes includes arbitration and the pipeline,
+/// and both depend on what was in flight rather than on the program.
+static constexpr unsigned PECTransferStates = 2;
+
+/// The eight channel control registers, PECC0 at FEC0H and one every two bytes
+/// after it (Table 5-4), and the source and destination pointers, which are
+/// not registers at all: "these pointers do not reside in specific SFRs, but
+/// are mapped into the internal RAM ... just below the bit-addressable area"
+/// (Figure 5-2), so SRCPx is at FCE0H + 4x and DSTPx two bytes above it.
+///
+/// Both are ordinary storage here, which is what they are on the part.  What
+/// makes the PEC a peripheral rather than sixteen more words of RAM is that
+/// something reads them when a request wins arbitration, which is below.
+enum { PECCBase = 0xFEC0, PECPointerBase = 0xFCE0 };
+
+/// One request in the running, whichever kind of source raised it.
+///
+/// A peripheral has a group level and an injected source does not, so an
+/// injected one arbitrates as group 0, the lowest.  That is the honest
+/// reading: the group level is a field of a control register, and a source
+/// declared on the command line has no control register to put one in.
+struct Candidate {
+  unsigned Level = 0;
+  unsigned Group = 0;
+  unsigned Vector = 0;
+  InterruptSource *Injected = nullptr;
+  uint32_t IC = 0;
+
+  /// "Defines the internal order for simultaneous requests of the same
+  /// priority.  3: Highest group priority" - so a higher group wins a tie, and
+  /// what is left after that is the order these were collected in, which
+  /// stands in for the node number the part breaks the last tie with.
+  bool beats(const Candidate &O) const {
+    return Level != O.Level ? Level > O.Level : Group > O.Group;
+  }
+};
+
+/// Service a request through its PEC channel, or return false where the
+/// channel has run out and a handler should run instead.
+///
+/// The transfer itself is one byte or word "between two locations in segment 0
+/// (data pages 3 ... 0)", so each pointer is a physical address in that
+/// segment rather than a near address through a data page pointer - which is
+/// the opposite of what every other address a program writes goes through, and
+/// is why nothing here calls mapData.
+///
+/// What COUNT does is Table 5-5's, which has four rows and needs all four: FFH
+/// is continuous and is not decremented, FEH to 02H decrement, 01H decrements
+/// to zero and leaves the request flag set - "which triggers another request",
+/// and is how a program is told the block is done - and 00H is not serviced
+/// here at all.
+static bool performPEC(Machine &M, const Candidate &C) {
+  unsigned Channel = ((C.Level & 1) << 2) | C.Group;
+  uint32_t PECC = PECCBase + 2 * Channel;
+  uint16_t Control = M.read16(PECC);
+  unsigned Count = Control & 0xFF;
+  if (Count == 0)
+    return false;
+
+  bool Byte = (Control >> 8) & 1;
+  // "0 0: Pointers are not modified.  0 1: Increment DSTPx by 1 or 2 (BWT).
+  // 1 0: Increment SRCPx by 1 or 2 (BWT).  1 1: Reserved.  Do not use this
+  // combination.  (changed to '10' by hardware)" - so three behaves as two.
+  // The register is left holding what was written: the manual says the
+  // combination is changed but not when, and inventing an answer to that would
+  // be a claim about a read back that nothing here can check.
+  unsigned Inc = (Control >> 9) & 3;
+
+  uint32_t SrcAddr = PECPointerBase + 4 * Channel;
+  uint32_t DstAddr = SrcAddr + 2;
+  uint16_t Src = M.read16(SrcAddr);
+  uint16_t Dst = M.read16(DstAddr);
+
+  if (Byte)
+    M.write8(Dst, M.read8(Src));
+  else
+    M.write16(Dst, M.read16(Src));
+
+  uint16_t Step = Byte ? 1 : 2;
+  if (Inc == 1)
+    M.write16(DstAddr, uint16_t(Dst + Step));
+  else if (Inc >= 2)
+    M.write16(SrcAddr, uint16_t(Src + Step));
+
+  bool LeaveRequest = false;
+  if (Count != 0xFF) {
+    --Count;
+    M.write16(PECC, uint16_t((Control & ~0xFFu) | Count));
+    LeaveRequest = Count == 0;
+  }
+
+  // "It is cleared automatically ... upon a PEC service.  In the case of PEC
+  // service the Interrupt Request flag remains set, if the COUNT field ...
+  // decrements to zero.  This allows a normal CPU interrupt to respond to a
+  // completed PEC block transfer."
+  if (!LeaveRequest) {
+    if (C.Injected)
+      C.Injected->Pending = false;
+    else
+      M.write16(C.IC, M.read16(C.IC) & ~uint16_t(1u << 7));
+  }
+  return true;
+}
+
 bool Machine::serviceInterrupts() {
-  if (Interrupts.empty())
+  // The peripherals run on the clock whether or not anything is listening, so
+  // they are advanced before the question of whether an interrupt can be taken
+  // is asked at all.
+  if (TimersOn) {
+    advanceTimers();
+    if (Stop != StopReason::Running)
+      return false;
+  }
+
+  if (Interrupts.empty() && !TimersOn)
     return false;
 
   // Raise whatever is due.  A source that is still pending when its period
@@ -792,18 +996,47 @@ bool Machine::serviceInterrupts() {
   // and is taken once the sequence has run out.
   if (ExtendCount > 0 || Extend != ExtendKind::None)
     return false;
-  if (!flag(PSW_IEN))
+  // Both of these are read from PSW as it stood one instruction ago, because
+  // "the current interrupt prioritization round does not consider" a change
+  // the instruction that has just retired made to either.  That one
+  // instruction of delay is why the compare-and-exchange sequence needs a NOP
+  // between clearing IEN and the read it protects.
+  uint16_t Arb = PipelineEffects ? IntPSW : PSW;
+  if (!((Arb >> PSW_IEN) & 1))
     return false;
 
-  // Arbitration: the highest priority pending request wins.  A tie goes to
-  // the source declared first, which stands in for the group level and the
-  // node number the part breaks ties with - neither of which exists here,
-  // since a source here is a command line argument and not a peripheral.
-  InterruptSource *Winner = nullptr;
+  // Arbitration: the highest priority pending request wins, and a tie goes to
+  // the higher group level.  Both kinds of source are in it together - an
+  // injected request and a timer's are the same thing by the time they reach
+  // the CPU, which is the point of the peripheral half existing at all.
+  Candidate Winner;
+  bool Any = false;
+  auto consider = [&](const Candidate &C) {
+    if (!Any || C.beats(Winner)) {
+      Winner = C;
+      Any = true;
+    }
+  };
   for (InterruptSource &S : Interrupts)
-    if (S.Pending && (!Winner || S.Level > Winner->Level))
-      Winner = &S;
-  if (!Winner)
+    if (S.Pending) {
+      Candidate C;
+      C.Level = S.Level;
+      C.Vector = S.Vector;
+      C.Injected = &S;
+      consider(C);
+    }
+  for (const PeripheralSource &P : PeripheralSources) {
+    uint16_t IC = read16(P.IC);
+    if (!((IC >> 7) & 1) || !((IC >> 6) & 1))
+      continue;
+    Candidate C;
+    C.Level = IC & 0xF;
+    C.Group = (IC >> 4) & 3;
+    C.Vector = P.Vector;
+    C.IC = P.IC;
+    consider(C);
+  }
+  if (!Any)
     return false;
 
   // "On receipt of the arbitration interrupt request winner, the CPU accepts
@@ -812,11 +1045,40 @@ bool Machine::serviceInterrupts() {
   // equal) interrupt priority than the current CPU task, it remains pending."
   // (C166S V2 Architecture Overview Handbook, section 7.2.)  So the comparison
   // is strict, and losing it is not losing the request.
-  if (Winner->Level <= cpuPriority())
+  if (Winner.Level <= ((Arb >> PSWILVLShift) & 0xF))
     return false;
 
-  Winner->Pending = false;
-  enterVector(*this, Winner->Vector);
+  // A request on level 15 or 14 goes to the Peripheral Event Controller
+  // rather than to a handler, unless the channel it names has run out.
+  //
+  // "Interrupt requests that are programmed to priority levels 15 or 14 (i.e.
+  // ILVL = 111XB) will be serviced by the PEC, unless the COUNT field of the
+  // associated PECC register contains zero.  In this case the request will
+  // instead be serviced by normal interrupt processing" - and "the associated
+  // PEC channel number is derived from the respective ILVL (LSB) and GLVL", so
+  // level 15 selects channels 7 to 4 and level 14 channels 3 to 0, with the
+  // group level choosing within the four.
+  //
+  // The arbitration above needs no change for this.  "Simultaneous requests
+  // for PEC channels are prioritized according to the PEC channel number,
+  // where channel 0 has lowest and channel 8 has highest priority" - and the
+  // channel number is built from exactly the two fields the round already
+  // compared, in the same order, so the winner by level and group is the
+  // winner by channel.
+  if (Winner.Level >= 14 && performPEC(*this, Winner)) {
+    ++PECTransfers;
+    States += PECTransferStates;
+    return true;
+  }
+
+  // "It is cleared automatically upon entry into the interrupt service
+  // routine" - so the request flag goes down here, and a handler that wants
+  // another one does not have to clear anything itself.
+  if (Winner.Injected)
+    Winner.Injected->Pending = false;
+  else
+    write16(Winner.IC, read16(Winner.IC) & ~uint16_t(1u << 7));
+  enterVector(*this, Winner.Vector);
   if (Stop != StopReason::Running)
     return true;
   // The CPU now runs at the accepted source's priority, which is what stops a
@@ -824,7 +1086,12 @@ bool Machine::serviceInterrupts() {
   // on this core the priority level is the whole of the nesting rule, and a
   // handler that wants no interrupts at all raises the level rather than
   // clearing the enable.  RETI puts back the pushed PSW, and with it both.
-  setCPUPriority(Winner->Level);
+  setCPUPriority(Winner.Level);
+  // Entering a handler is the hardware's doing rather than a software write to
+  // PSW, so the level it sets is arbitrated on at once; letting it lag would
+  // let a second request of the same level in before the handler's first
+  // instruction.
+  IntPSW = PSW;
   ++InterruptsTaken;
   States += InterruptEntryStates;
   // Nothing was decoded, so nothing can be covered by an extend and nothing
@@ -925,7 +1192,18 @@ bool Machine::step() {
   // simulator actually models.
   WrotePSW = false;
 
+  // What arbitration will see after this instruction has run, which is PSW as
+  // it stands before it does.
+  uint16_t PSWBefore = PSW;
+  UsedGPR = false;
+  UsedDPPMask = 0;
+
   executeOne(*this, MI, O, PC);
+
+  IntPSW = PSWBefore;
+  // Not an early return: the instruction ran, so it is charged for below the
+  // same way one that stopped the machine for any other reason is.
+  checkPipelineGap(*this, O);
 
   // A branch was taken if control did not fall through to the next
   // instruction.  That is what separates the two figures Table 11 gives for
@@ -1074,7 +1352,7 @@ unsigned byteRegIndex(const MCRegisterInfo &MRI, MCRegister R) {
 uint32_t reg8Address(Machine &M, const MCRegisterInfo &MRI, MCRegister R) {
   unsigned W = wordRegIndex(MRI, R);
   if (W != ~0u)
-    return uint16_t(M.CP + 2 * W);
+    return M.gprAddress(2 * W);
   return M.regFieldAddress(MRI.getEncodingValue(R));
 }
 
@@ -1379,7 +1657,7 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     MCRegister R = Reg(I);
     unsigned B = byteRegIndex(MRI, R);
     if (B != ~0u)
-      return uint16_t(M.CP + B);
+      return M.gprAddress(B);
     return M.regFieldAddress(MRI.getEncodingValue(R));
   };
   auto RB8 = [&](unsigned I) { return M.read8(ByteReg8Address(I)); };

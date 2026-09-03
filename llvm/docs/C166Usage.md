@@ -131,6 +131,42 @@ tells a caller in another translation unit which call sequence to use.
 `-mcpu=c166` has no `EXTend` instructions, so far addressing is unavailable
 on the first-generation core.
 
+### Staying inside one segment
+
+A `__far` pointer holds a linear 24-bit address, so stepping one is a 32-bit
+add and a carry out of the offset lands in the segment. That is the right
+answer for a pointer that might cross a boundary and the wrong price for one
+that will not — and most will not, because an object is placed inside a
+segment and the linker scripts here assert that no region they lay out crosses
+one.
+
+`__seg` is the same pointer with that promise attached:
+
+```c
+__seg const short *p = table;
+
+while (n--)
+    sum += *p++;                    /* add r5, #2 -- and no carry */
+```
+
+It is the same 24-bit address in the same 32 bits, so a `__seg` pointer can be
+stored, passed and returned like a `__far` one and converts to one without a
+cast; making the promise is what needs the cast. A near pointer converts to
+either without one, because under the reset configuration of the data page
+pointers the whole near space is segment 0.
+
+What it buys, measured on a loop that walks a far array a word at a time: the
+loop body goes from nine instructions to six and from 20 states an element to
+14 — 6 states an element, or 30% of the loop — and the function 22 bytes
+smaller. The saving is one `ADDC` and the register shuffling that comes with
+keeping a value the loop writes rather than one it only reads.
+
+**Arithmetic that leaves the segment is undefined.** The offset wraps and the
+segment stays where it was, so the access lands at the foot of the same
+segment rather than at the head of the next one — which is a location that
+usually exists, so nothing reports it. That is the promise the type is: if a
+pointer might cross a boundary, `__far` is the type for it.
+
 ## Bit variables
 
 Setting, clearing or testing one bit of a variable is a single two-byte
@@ -254,9 +290,30 @@ That the saving and restoring is right is checked rather than assumed:
 `llvm/utils/C166Sim/differential/interrupts.c` runs a computation whose every
 step depends on the last while the simulator fires a handler into it a few
 dozen times, and the answer has to match the host's, which had no interrupts
-at all. The simulator raises the requests itself — see `--interrupt-at` and
-`--interrupt-every` in `llvm/utils/C166Sim/README.txt`, since there are no
-peripherals to raise them.
+at all. There the requests come from `--interrupt-at` and `--interrupt-every`,
+which the simulator raises on the clock for the sources it has no peripheral
+for — see `llvm/utils/C166Sim/README.txt`.
+
+`differential/timer.c` is the same check driven the way a program on the part
+drives it. The GPT1 timers are modelled, so a handler for trap 23H is reached
+by writing the same registers real code writes:
+
+```c
+#define SFR(a) (*(volatile unsigned short *)(a))
+
+__attribute__((interrupt(35))) void tick(void) { Ticks = Ticks + 1; }
+
+SFR(0xFE40) = 0xFFC0;          /* T2, the reload value              */
+SFR(0xFF40) = 0x0027;          /* T2CON: reload mode, on T3OTL      */
+SFR(0xFE42) = 0xFFC0;          /* T3                                */
+SFR(0xFF62) = 0x0048;          /* T3IC: enable, priority 8          */
+__asm__ volatile("bset psw.11" ::: "memory");
+SFR(0xFF42) = 0x0043;          /* T3CON: timer mode, running        */
+```
+
+Nothing else in the vector table has a peripheral behind it yet, and a mode of
+the timers that would be driven by a pin stops the simulator by name rather
+than never counting.
 
 Both attributes are described in Clang's attribute reference alongside every
 other target's.
@@ -345,9 +402,31 @@ signed or both unsigned — and the loop has to contain nothing else, because
 the prefix repeats exactly one instruction. `acc -= …` works too. Which of the
 two arrays is written first does not matter: whichever is the `__dpram` one
 goes behind IDX0. Up to 31 taps go in the repeat field and more go through
-MRW, to a limit of 8192. A trip count only the running program knows, a stream
-walked backwards or with a stride, an array that is not in the dual-port RAM,
-or anything else in the loop body leaves it an ordinary loop.
+MRW, to a limit of 8192. A trip count only the running program knows, an array
+that is not in the dual-port RAM, or anything else in the loop body leaves it
+an ordinary loop.
+
+**A stream may stride.** It need not step one element forward: any fixed
+distance the loop keeps to is one the instruction walks by itself, because the
+coprocessor has four offset registers and its pointers can step by one of
+them. Either stream, or both, and in either direction:
+
+```c
+for (int i = 0; i < 16; i++)
+    acc += (long)h[i] * x[i * 3];   /* a decimating filter */
+
+for (int i = 0; i < 16; i++)
+    acc += (long)h[i] * x[15 - i];  /* a convolution */
+```
+
+A sixteen-tap decimating filter goes from 402 states to 74 that way, which is
+25 states a tap against 5.
+
+What it will not do is wrap. The part has no circular addressing — the C166S
+V2 Architecture Overview Handbook lists "one, Finite Impulse Response (FIR)
+filter tap per cycle, with no circular buffer management" among the unit's
+features — so a filter written over a circular buffer, where the index wraps
+back to the start, stays an ordinary loop.
 
 The count has to be a constant because "repeat this many times" is the whole
 instruction. The `__dpram` has to be on a global because that attribute is a
@@ -415,6 +494,7 @@ whatever the unit sees there instead.
 | `__C166_EXT_INSTR__` | the `EXTend` instructions and `ATOMIC` are available |
 | `__C166_MAC__` | the multiply-accumulate coprocessor is available |
 | `__far` | always; expands to the address-space attribute |
+| `__seg` | always; a far pointer confined to one segment |
 
 Ask `__C166_MAC__` rather than guessing from the part number.
 

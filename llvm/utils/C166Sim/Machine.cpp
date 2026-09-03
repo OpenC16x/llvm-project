@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Machine.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Format.h"
 
 using namespace c166sim;
@@ -14,9 +15,10 @@ using namespace llvm;
 
 Machine::Machine() : Mem(AddressSpaceSize, 0) {}
 
-// The SFRs that this simulator models are the CPU's own; a peripheral register
-// reads back what was written to it and does nothing else, which is enough to
-// run code that configures peripherals it then never waits on.
+// The SFRs that this simulator models are the CPU's own, and the GPT1 timers'
+// three control registers further down.  Every other peripheral register reads
+// back what was written to it and does nothing else, which is enough to run
+// code that configures peripherals it then never waits on.
 static constexpr uint32_t SFR_DPP0 = 0xFE00, SFR_DPP1 = 0xFE02;
 static constexpr uint32_t SFR_DPP2 = 0xFE04, SFR_DPP3 = 0xFE06;
 static constexpr uint32_t SFR_CSP = 0xFE08;
@@ -58,8 +60,245 @@ static constexpr uint32_t SFR_MCW = 0xFFDC, SFR_MSW = 0xFFDE;
 // lock time into instructions - and is only large enough that a wait loop goes
 // round rather than falling straight through.
 static constexpr uint32_t ESFR_PLLCON = 0xF1D0, ESFR_SYSSTAT = 0xF1E4;
+
+// The GPT1 block: the core timer T3 and the two auxiliary timers T2 and T4,
+// with their control and interrupt control registers.  Every address here is
+// from the C167CR Derivatives User's Manual V3.1 section 10.1 and its register
+// summary, and every one of the nine is in SFRCommon in
+// C166RegisterInfo.td - the set the three maps this tree models agree about -
+// so this block is the same block at the same addresses on every part in the
+// table, and none of it is gated on which one is selected.  That was worth
+// checking: modelling VECSEG unconditionally, at an address a C167 uses for
+// SYSCON, is exactly the mistake this would otherwise repeat.
+//
+// The counters and the interrupt control registers stay storage.  A program
+// reads and writes them at their own addresses, the simulator does the same,
+// and nothing is gained by intercepting either.  The three control registers
+// are registers, because T3OTL is a bit in one of them that this simulator
+// writes rather than the program.
+static constexpr uint32_t SFR_T2 = 0xFE40, SFR_T3 = 0xFE42, SFR_T4 = 0xFE44;
+static constexpr uint32_t SFR_T2CON = 0xFF40, SFR_T3CON = 0xFF42;
+static constexpr uint32_t SFR_T4CON = 0xFF44;
+static constexpr uint32_t SFR_T2IC = 0xFF60, SFR_T3IC = 0xFF62;
+static constexpr uint32_t SFR_T4IC = 0xFF64;
 static constexpr uint16_t PLLCON_VCO_LOCKS = 1u << 13;
 static constexpr uint16_t SYSSTAT_PLLLOCK = 1u << 14;
+
+//===----------------------------------------------------------------------===//
+// GPT1
+//===----------------------------------------------------------------------===//
+//
+// Everything below is from the C167CR Derivatives User's Manual V3.1 chapter
+// 10, "The General Purpose Timer Units".  Two of its statements are the whole
+// of the arithmetic:
+//
+//   "In this mode, T3 is clocked with the internal system clock (CPU clock)
+//    divided by a programmable prescaler, which is selected by bit field T3I.
+//    ... fT3 = fCPU / (8 x 2^<T3I>)"                            (section 10.1.1)
+//
+//   "Upon a trigger signal T3 is loaded with the contents of the respective
+//    timer register (T2 or T4) and the interrupt request flag (T2IR or T4IR)
+//    is set.  Note: When a T3OTL transition is selected for the trigger
+//    signal, also the interrupt request flag T3IR will be set upon a trigger"
+//                                                               (section 10.1.2)
+//
+// A state here is one CPU clock period, which is what States counts, so the
+// first of those is a period of 8 << TxI states and needs no conversion.
+//
+// What is modelled is timer mode, and reload mode on the two auxiliary timers.
+// Everything else in the block - counter, gated, capture and incremental
+// interface mode, and the external up/down control - is driven by a pin, and
+// this simulator has no pins.  A configuration that needs one stops the program
+// by name rather than running it and never counting, because never counting is
+// exactly the failure nothing else would catch.
+
+/// TxCON, from the register figures in sections 10.1.1 and 10.1.2.  The core
+/// timer has two bits the auxiliary ones do not, at the top.
+enum TCONBit {
+  TCON_I = 0,      ///< bits 2-0, the prescaler in timer mode
+  TCON_M = 3,      ///< bits 5-3, the basic operating mode
+  TCON_R = 6,      ///< the run bit
+  TCON_UD = 7,     ///< count down when set
+  TCON_UDE = 8,    ///< take the direction from the TxEUD pin instead
+  TCON_OE = 9,     ///< T3 only: put T3OTL on the T3OUT pin
+  TCON_OTL = 10,   ///< T3 only: toggles on every overflow and underflow
+};
+
+/// The basic operating modes TxM selects.
+enum TimerMode {
+  ModeTimer = 0,
+  ModeCounter = 1,
+  ModeGatedLow = 2,
+  ModeGatedHigh = 3,
+  ModeReload = 4,  ///< auxiliary timers only; reserved on T3
+  ModeCapture = 5, ///< auxiliary timers only; reserved on T3
+  ModeIncremental = 6,
+};
+
+/// xxIC, from section 5 of the same manual: "xxIR xxIE ILVL GLVL", with the
+/// request flag at the top of the low byte.
+enum ICBit {
+  IC_ILVL = 0, ///< bits 3-0
+  IC_GLVL = 4, ///< bits 5-4
+  IC_IE = 6,
+  IC_IR = 7,
+};
+
+/// The parts of TxCON that decide what the timer does, which is what has to
+/// change before the prescaler starts again.
+static uint16_t timerConfig(uint16_t Con) {
+  return Con & ((7u << TCON_I) | (7u << TCON_M) | (1u << TCON_R) |
+                (1u << TCON_UD) | (1u << TCON_UDE));
+}
+
+static unsigned timerMode(uint16_t Con) { return (Con >> TCON_M) & 7; }
+static bool timerRunning(uint16_t Con) { return (Con >> TCON_R) & 1; }
+
+/// States per count in timer mode: fCPU / (8 x 2^TxI) is a tick every
+/// 8 x 2^TxI clocks, and a clock is a state.
+static uint64_t timerPeriod(uint16_t Con) {
+  return uint64_t(8) << ((Con >> TCON_I) & 7);
+}
+
+/// The addresses of one timer's three registers, and the vector its overflow
+/// reaches.  The vector numbers are the table's own - 22H, 23H and 24H - which
+/// is what startup/c167-vectors.inc calls VECTOR_T2IC, T3IC and T4IC.
+struct TimerRegs {
+  uint32_t Count, IC;
+  unsigned Vector;
+  const char *Name;
+};
+static constexpr TimerRegs GPT1[3] = {
+    {SFR_T2, SFR_T2IC, 34, "T2"},
+    {SFR_T3, SFR_T3IC, 35, "T3"},
+    {SFR_T4, SFR_T4IC, 36, "T4"},
+};
+
+/// Raise a source's request flag, which is the peripheral half of an interrupt:
+/// the enable and the priority beside it in the same register are the CPU's
+/// business and are read during arbitration.
+void Machine::raiseRequest(uint32_t IC) {
+  write16(IC, read16(IC) | (uint16_t(1) << IC_IR));
+}
+
+void Machine::setTimerControl(unsigned N, uint16_t V) {
+  uint16_t Old = TCON[N];
+  TCON[N] = V;
+
+  // Only the core timer has an output toggle latch and an output enable; on an
+  // auxiliary timer those two bits are not implemented, so they read as zero
+  // whatever was written.
+  if (N != 1)
+    TCON[N] &= ~((1u << TCON_OE) | (1u << TCON_OTL));
+
+  // A configuration that would do something on the part and nothing here is
+  // refused, at the write rather than at some later instruction, so that what
+  // is reported is the line that asked for it.
+  unsigned Mode = timerMode(TCON[N]);
+  if (N == 1 && (Mode == ModeReload || Mode == ModeCapture)) {
+    // Not a gap here but a mistake there: the manual marks both of these
+    // reserved on the core timer, so the part would not do it either.
+    Stop = StopReason::Unsupported;
+    StopDetail =
+        (Twine("T3CON asks for a mode the manual reserves on the core timer"))
+            .str();
+    return;
+  }
+
+  const char *Missing = nullptr;
+  if ((TCON[N] >> TCON_UDE) & 1)
+    Missing = "external up/down control";
+  else if (Mode == ModeReload || Mode == ModeCapture) {
+    // Table 10-8: the trigger is TxIN unless bit 2 of TxI selects T3OTL, and
+    // TxI = 000 selects nothing at all, which is idle rather than unmodelled.
+    unsigned Sel = (TCON[N] >> TCON_I) & 7;
+    if (Mode == ModeCapture)
+      Missing = "capture mode";
+    else if (Sel != 0 && !(Sel & 4))
+      Missing = "a reload triggered by the TxIN pin";
+  } else if (Mode != ModeTimer && timerRunning(TCON[N])) {
+    Missing = Mode == ModeCounter    ? "counter mode"
+              : Mode == ModeIncremental ? "incremental interface mode"
+                                        : "gated timer mode";
+  }
+  if (Missing) {
+    Stop = StopReason::Unsupported;
+    StopDetail = (Twine(GPT1[N].Name) + " was configured for " + Missing +
+                  ", which is driven by a pin this simulator does not have")
+                     .str();
+    return;
+  }
+
+  // The prescaler starts again when what the timer is doing changes, which is
+  // a choice: the manual gives the rate and says nothing about the phase, and
+  // a tick that landed in the middle of the write would be as defensible.  The
+  // rate is what a program can observe, and it is the same either way.
+  if (timerConfig(Old) != timerConfig(TCON[N]))
+    Timers[N].NextTick = States + timerPeriod(TCON[N]);
+  Timers[N].LastConfig = timerConfig(TCON[N]);
+
+  TimersOn = false;
+  for (unsigned I = 0; I != 3; ++I) {
+    unsigned M = timerMode(TCON[I]);
+    if ((M == ModeTimer && timerRunning(TCON[I])) ||
+        (I != 1 && M == ModeReload && (((TCON[I] >> TCON_I) & 7) & 4)))
+      TimersOn = true;
+  }
+}
+
+/// One overflow or underflow of the core timer: its own request, the toggle
+/// latch, and whatever an auxiliary timer in reload mode makes of the latch.
+void Machine::coreTimerWrapped() {
+  raiseRequest(SFR_T3IC);
+
+  bool Was = (TCON[1] >> TCON_OTL) & 1;
+  bool Now = !Was;
+  TCON[1] = (TCON[1] & ~(uint16_t(1) << TCON_OTL)) | (uint16_t(Now) << TCON_OTL);
+
+  // Table 10-8 again: 101 is a rising edge of T3OTL, 110 a falling one and 111
+  // either.  T2 is looked at before T4, so where both are set to reload - which
+  // the manual does not forbid and no program should do - T4's value is the one
+  // T3 keeps.
+  for (unsigned I : {0u, 2u}) {
+    if (timerMode(TCON[I]) != ModeReload)
+      continue;
+    unsigned Sel = (TCON[I] >> TCON_I) & 7;
+    if (!(Sel & 4))
+      continue;
+    bool Wanted = (Sel & 3) == 1 ? Now : (Sel & 3) == 2 ? !Now : true;
+    if (!Wanted)
+      continue;
+    write16(GPT1[1].Count, read16(GPT1[I].Count));
+    raiseRequest(GPT1[I].IC);
+  }
+}
+
+void Machine::advanceTimers() {
+  for (unsigned N = 0; N != 3; ++N) {
+    uint16_t Con = TCON[N];
+    if (timerMode(Con) != ModeTimer || !timerRunning(Con))
+      continue;
+    uint64_t Period = timerPeriod(Con);
+    bool Down = (Con >> TCON_UD) & 1;
+    while (States >= Timers[N].NextTick) {
+      Timers[N].NextTick += Period;
+      uint16_t V = read16(GPT1[N].Count);
+      uint16_t Next = Down ? uint16_t(V - 1) : uint16_t(V + 1);
+      write16(GPT1[N].Count, Next);
+      // Counting up, the wrap is FFFFH to 0000H; counting down it is 0000H to
+      // FFFFH.  Either is what the manual calls an overflow or an underflow,
+      // and either raises the request.
+      if (Down ? V == 0 : Next == 0) {
+        if (N == 1)
+          coreTimerWrapped();
+        else
+          raiseRequest(GPT1[N].IC);
+      }
+      if (Stop != StopReason::Running)
+        return;
+    }
+  }
+}
 
 /// True when Phys names one of the CPU registers rather than storage.
 static bool isCPUSFR(uint32_t Phys) {
@@ -83,6 +322,9 @@ static bool isCPUSFR(uint32_t Phys) {
   case SFR_PSW:
   case ESFR_PLLCON:
   case ESFR_SYSSTAT:
+  case SFR_T2CON:
+  case SFR_T3CON:
+  case SFR_T4CON:
     return true;
   // Only on a part that has them.  On one that does not, these two addresses
   // are a different register - FF12H is a C167's SYSCON - and modelling them
@@ -146,6 +388,12 @@ uint16_t Machine::read16(uint32_t Phys) {
       // Only PLLLOCK is modelled; the oscillator watchdog and the clock loss
       // detectors that share this register read back as nothing reported.
       return Steps >= PLLLockStep ? SYSSTAT_PLLLOCK : 0;
+    case SFR_T2CON:
+      return TCON[0];
+    case SFR_T3CON:
+      return TCON[1];
+    case SFR_T4CON:
+      return TCON[2];
     }
   }
   return uint16_t(Mem[Phys]) | (uint16_t(Mem[(Phys + 1) & AddressMask]) << 8);
@@ -156,15 +404,19 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
   if (isCPUSFR(Phys)) {
     switch (Phys) {
     case SFR_DPP0:
+      ThisWrite = {PipelineWrite::DataPage, 0};
       DPP[0] = V & 0x3FF;
       return;
     case SFR_DPP1:
+      ThisWrite = {PipelineWrite::DataPage, 1};
       DPP[1] = V & 0x3FF;
       return;
     case SFR_DPP2:
+      ThisWrite = {PipelineWrite::DataPage, 2};
       DPP[2] = V & 0x3FF;
       return;
     case SFR_DPP3:
+      ThisWrite = {PipelineWrite::DataPage, 3};
       DPP[3] = V & 0x3FF;
       return;
     case SFR_CSP:
@@ -207,9 +459,14 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
                      "register bank has to be - see c166_bank";
         return;
       }
+      ThisWrite = {PipelineWrite::ContextPointer, 0};
       CP = V;
       return;
     case SFR_SP:
+      // An explicit write, which is the one the manual's rule is about;
+      // PUSH, CALL and SCXT reach SP through push() and "are solved
+      // internally by the CPU logic".
+      ThisWrite = {PipelineWrite::StackPointer, 0};
       SP = V;
       return;
     case SFR_STKOV:
@@ -236,6 +493,15 @@ void Machine::write16(uint32_t Phys, uint16_t V) {
       return;
     case ESFR_SYSSTAT:
       // Read only, and writing it is not an error.
+      return;
+    case SFR_T2CON:
+      setTimerControl(0, V);
+      return;
+    case SFR_T3CON:
+      setTimerControl(1, V);
+      return;
+    case SFR_T4CON:
+      setTimerControl(2, V);
       return;
     }
   }
@@ -290,32 +556,35 @@ uint32_t Machine::mapData(uint16_t Addr) const {
     break;
   }
   // The standard scheme: the top two bits pick a DPP, whose ten bits are
-  // address bits 23..14.
-  return (uint32_t(DPP[(Addr >> 14) & 3] & 0x3FF) << 14) | (Addr & 0x3FFF);
+  // address bits 23..14.  Which one is what the write before this is checked
+  // against; an EXTP or EXTS access returned above and used none of them.
+  unsigned N = (Addr >> 14) & 3;
+  UsedDPPMask |= 1u << N;
+  return (uint32_t(DPP[N] & 0x3FF) << 14) | (Addr & 0x3FFF);
 }
 
 uint16_t Machine::getWordReg(unsigned N) const {
-  uint32_t A = uint16_t(CP + 2 * N);
+  uint32_t A = gprAddress(2 * N);
   return uint16_t(Mem[A]) | (uint16_t(Mem[A + 1]) << 8);
 }
 
 void Machine::setWordReg(unsigned N, uint16_t V) {
-  uint32_t A = uint16_t(CP + 2 * N);
+  uint32_t A = gprAddress(2 * N);
   Mem[A] = V & 0xFF;
   Mem[A + 1] = V >> 8;
 }
 
 uint8_t Machine::getByteReg(unsigned N) const {
   // RL0, RH0, RL1, RH1 ... are consecutive bytes of the same window.
-  return Mem[uint16_t(CP + N)];
+  return Mem[gprAddress(N)];
 }
 
-void Machine::setByteReg(unsigned N, uint8_t V) { Mem[uint16_t(CP + N)] = V; }
+void Machine::setByteReg(unsigned N, uint8_t V) { Mem[gprAddress(N)] = V; }
 
 uint32_t Machine::regFieldAddress(unsigned Reg) const {
   Reg &= 0xFF;
   if (Reg >= 0xF0)
-    return uint16_t(CP + 2 * (Reg - 0xF0));
+    return gprAddress(2 * (Reg - 0xF0));
   if (Reg < 0x80)
     return 0xFE00 + 2 * Reg;
   return 0xFF00 + 2 * (Reg - 0x80);

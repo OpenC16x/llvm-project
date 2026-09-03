@@ -11,14 +11,19 @@
 // machine with 8 registers of 32 bits, vector registers, and a 32 bit divide
 // that costs the same as a 32 bit add.
 //
-// The numbers below are instruction counts, measured by compiling the
-// operation and counting what came out; C166.td declares NoItineraries, so
-// there is no verified cycle data in this tree to anchor anything finer, and
-// an invented cycle count would be worse than a measured instruction count.
-// The core is in-order with nothing worth calling a pipeline, so the count is
-// a sound first order proxy for time as well as for space.  The one place it
-// is known to understate is the hardware DIV, whose latency is a good deal
-// longer than the three instructions it takes to set up and read back.
+// The unit below is one ordinary instruction, which is two states.  A size
+// answer is the count of instructions the operation emits, measured by
+// compiling it and counting; a time answer is what it takes to run in those
+// same units, which is its states halved.  The two are the same number
+// wherever every instruction is two states, which is everywhere except a MUL
+// (ten) or a DIV (twenty) - so the operations that answer the two questions
+// differently are exactly the ones with one of those in them.
+//
+// C166Schedule.td is where the ten and the twenty come from, and it takes them
+// from the same table of the instruction set manual that llvm/utils/C166Sim
+// counts with.  This used to be instruction counts throughout, with a note
+// that the hardware DIV was the one place that understated; it is not a note
+// any more.
 //
 // llvm/test/Analysis/CostModel/C166 records the numbers and how to redo them.
 //

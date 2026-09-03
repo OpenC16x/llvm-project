@@ -17,6 +17,25 @@ implementation ran on the host.
 
 The sysroot is the one differential/mksysroot.sh builds.
 
+Beside it is sizes.sh, which builds the same programs for the target alone and
+checks what they cost against baseline.txt:
+
+  sizes.sh <build-bin-dir> <sysroot> <linker-script> [--update]
+
+Every size and speed claim this backend has made was measured by hand at the
+time it was made, and until this existed nothing checked that any of them still
+held.  It records text bytes and states for each program at each level, fails
+on a growth of more than one per cent, and prints an improvement as loudly as a
+regression - a baseline that is only updated when something gets worse would
+let a later regression back to the old value pass unnoticed.  --update
+rewrites the file, and the convention is to do that in the same commit as the
+change that moves it, so that the trade is in the diff rather than in a log.
+
+It does not compile for the host and does not compare any output; that is
+run.sh's job above and this would only repeat it.  It does run each program,
+because the state count comes from running it and because one that stopped
+early would report a flattering number.
+
   strings.cpp   libc/src/string - two-pointer scans, tables built on the
                 stack, and the word-at-a-time loops that
                 libc/src/__support/CPP/simd.h builds out of _BitInt
@@ -32,6 +51,19 @@ The sysroot is the one differential/mksysroot.sh builds.
                 checked on all three of what they return, where they stopped
                 and what they left in errno, at six bases and across the
                 sixteen, thirty two and sixty four bit boundaries
+
+And beside that, relax.sh, which asks what relaxing a branch or a call would be
+worth here:
+
+  relax.sh <build-bin-dir> <sysroot> <linker-script> [levels]
+
+It prints two tables, one from the linked images and one from the objects,
+because the answer could come from either end and does not: what a linker could
+shrink, against what letting it shrink would put at risk, and what the
+assembler could shrink on its own with no linker involved.  The decisions those
+numbers support are in lld/ELF/Arch/C166.cpp and in the C166 backend's
+README.txt; this is here so that they can be checked rather than believed, and
+so that they move when the compiler does.
 
 What it found
 -------------

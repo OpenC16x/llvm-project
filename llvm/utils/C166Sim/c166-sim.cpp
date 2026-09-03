@@ -17,6 +17,7 @@
 #include "GDBServer.h"
 #include "Unwind.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELFObjectFile.h"
@@ -62,6 +63,14 @@ static cl::opt<bool>
                    "stops; a state is one CPU clock period, and the counts are "
                    "the instruction set manual's for execution out of the "
                    "internal program memory"));
+static cl::opt<bool> NoPipelineEffects(
+    "no-pipeline-effects",
+    cl::desc("do not check the pipeline effects of section 4.2 of the C167CR "
+             "manual, and do not delay a change to PSW.IEN or PSW.ILVL by the "
+             "one instruction the same section describes.  They are on by "
+             "default; this is for running a program written before they "
+             "were, which the part would run wrongly rather than refuse"));
+
 static cl::opt<bool> Trace("trace",
                            cl::desc("print each instruction executed"));
 static cl::opt<bool>
@@ -161,6 +170,7 @@ int main(int argc, char **argv) {
     return Fail("cannot open '" + InputFile +
                 "': " + BufOrErr.getError().message());
   Machine M;
+  M.PipelineEffects = !NoPipelineEffects;
   M.MaxSteps = MaxSteps;
   M.Trace = Trace;
   M.TraceOS = &errs();
@@ -196,9 +206,13 @@ int main(int argc, char **argv) {
     if (Stats) {
       errs() << formatv("instructions {0}  states {1}", M.Steps, M.States);
       // Only when there were sources, so that a program with none reads the
-      // same as it always has.
-      if (!M.Interrupts.empty())
+      // same as it always has.  A peripheral is a source the command line did
+      // not declare, so a timer that fired counts too - and one configured but
+      // never reached still reads as it always has.
+      if (!M.Interrupts.empty() || M.InterruptsTaken)
         errs() << formatv("  interrupts {0}", M.InterruptsTaken);
+      if (M.PECTransfers)
+        errs() << formatv("  pec {0}", M.PECTransfers);
       errs() << "\n";
     }
     switch (M.Stop) {

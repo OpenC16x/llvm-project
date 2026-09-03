@@ -60,6 +60,14 @@ struct CodeGenTypeCache {
   /// argument of an operator new, the count in an array cookie.
   llvm::IntegerType *LangSizeTy;
 
+  /// ptrdiff_t as the language defines it, which is not always PtrDiffTy
+  /// above, and for the same reason: that is built from the target's widest
+  /// pointer.  The difference of two pointers is an expression of this type,
+  /// so this is the width it has to be computed in -- on C166 a far pointer
+  /// is 32 bits and ptrdiff_t is 16, and subtracting in 32 produces a value
+  /// two bytes wider than the slot the caller has for it.
+  llvm::IntegerType *LangPtrDiffTy;
+
   /// void*, void** in the target's default address space (often 0)
   union {
     llvm::PointerType *DefaultPtrTy;

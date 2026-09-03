@@ -285,8 +285,11 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
     //   In + 2: MOV R0,#dataX    ;write to GPR 0 in the new context
     //
     // Without it this handler's first register write would land in the
-    // interrupted code's bank, and nothing here would show it: the simulator
-    // applies the CP write at once, so no test can find this.
+    // interrupted code's bank.  That used to be unfindable here - the
+    // simulator applied the CP write at once - and is not any more: taking
+    // this NOP out stops llvm/utils/C166Sim/differential/interrupts.c with the
+    // sentence above, which is what llvm/test/tools/c166-sim/pipeline.s
+    // checks.
     BuildMI(MBB, MBBI, DL, TII.get(C166::NOP))
         .setMIFlag(MachineInstr::FrameSetup);
 

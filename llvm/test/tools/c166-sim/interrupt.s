@@ -93,16 +93,24 @@
 
 ## ATOMIC locks interrupts out for the instructions it covers, which is the
 ## whole reason the instruction exists.  R6 is the loop counter as the handler
-## found it.  Raised two states earlier, just before the ATOMIC, the request
-## goes straight in and the handler sees nothing incremented; raised inside
-## the sequence it is held until all four covered instructions have run, and
-## the handler sees all four increments.
+## found it.  Raised just before the ATOMIC the request goes straight in and
+## the handler sees nothing incremented; raised inside the sequence it is held
+## until all four covered instructions have run, and the handler sees all four
+## increments.
+##
+## The NOP between BSET PSW.11 and ATOMIC is what leaves a window at all.
+## Enabling interrupts takes effect one instruction late - "no interrupt
+## requests are acknowledged until the instruction following the enabling
+## instruction" - so with the ATOMIC directly after the BSET there is no round
+## between them where a request could be accepted, and both cases below would
+## be the second one.  That is the manual's own advice about where a critical
+## sequence may begin, seen from the other side.
 # RUN: llvm-mc -filetype=obj -triple=c166 %t/atomic.s -o %t/atomic.o
 # RUN: llvm-objcopy -O binary %t/atomic.o %t/atomic.bin
-# RUN: %c166_sim --binary --dump-state --interrupt-at=18:2:8 %t/atomic.bin 2>&1 \
+# RUN: %c166_sim --binary --dump-state --interrupt-at=20:2:8 %t/atomic.bin 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=BEFORE
 # BEFORE: R3=0001 R4=0000 R5=0000 R6=0000
-# RUN: %c166_sim --binary --dump-state --interrupt-at=20:2:8 %t/atomic.bin 2>&1 \
+# RUN: %c166_sim --binary --dump-state --interrupt-at=22:2:8 %t/atomic.bin 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=INSIDE
 # INSIDE: R3=0001 R4=0000 R5=0000 R6=0004
 
@@ -280,6 +288,9 @@
         mov     r6, #0
         mov     r2, #0
         bset    psw.11
+## Enabling takes effect one instruction late, so this is what gives a request
+## anywhere to be accepted before the ATOMIC.
+        nop
 ## Four instructions covered, and a fifth after them that is not.
         atomic  #4
         add     r2, #1

@@ -36,7 +36,7 @@ C166SelectionDAGInfo::~C166SelectionDAGInfo() = default;
 // Only a copy the compiler cannot expand inline ends up here; a constant sized
 // one has already been turned into loads and stores by the time this runs.
 static bool isFar(const MachinePointerInfo &PtrInfo) {
-  return PtrInfo.getAddrSpace() == C166AS::Far;
+  return C166AS::isFar(PtrInfo.getAddrSpace());
 }
 
 /// Widen a near pointer so that it can be passed to a far entry point.

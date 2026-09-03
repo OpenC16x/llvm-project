@@ -227,6 +227,93 @@ segment corrupts only bytes nothing looks at and the test passes anyway.  Both
 of those were found by breaking the implementation on purpose and watching the
 test not notice.
 
+Segment-confined data
+~~~~~~~~~~~~~~~~~~~~~
+
+Address space 2 is a far pointer that has been promised to stay inside one
+segment - __seg in C.  It has the same representation as address space 1 and
+is accessed by the same EXTS and the same MOV, so nothing below instruction
+selection tells the two apart: the address space checks in the lowering ask
+C166AS::isFar(), which both satisfy, and a global declared in either is placed
+in the same far sections.  What differs is only the arithmetic.  Stepping a far
+pointer is a 32 bit add whose carry lands in the segment; stepping one of these
+touches the low sixteen bits and leaves the segment where it was.
+
+That is not a licence the backend takes.  The data layout declares this space
+with an index size of sixteen - "p2:32:16:16:16" - and the language reference
+is explicit about what that means: "the offsets are then added to the low bits
+of the base address up to the index type width, with silently-wrapping two's
+complement arithmetic ... the bits outside the index type width will not be
+affected".  So a getelementptr in this space already has these semantics, and
+scalar evolution, the induction variable rewriters and the loop strength
+reducer all reason about one in sixteen bits without being told to.
+
+What is missing is the last step, which C166LowerSegPointers.cpp supplies.
+SelectionDAGBuilder lowers a getelementptr by widening the offset to the
+pointer's own type and adding there, which is the same answer whenever the add
+does not carry and puts a 32 bit add in the loop either way.  The pass rewrites
+the arithmetic into an add on the low half while it is still IR, so that the
+segment half of the pointer passes through the loop untouched - and the two i16
+registers an i32 becomes after type legalisation are one that is stepped and
+one that is only read.  It runs in addIRPasses and deliberately late: a
+getelementptr is what alias analysis and every loop pass are written to
+understand, and the form the pass produces is an inttoptr they would all give
+up on, so the optimiser sees the pointer the whole way through and only the
+code generator sees the rewrite.  A constant expression is left alone; its
+offset is a constant added to an address the linker picks, and whether that
+stays inside the segment is the same question the linker script's assertion
+already asks of the object.
+
+Measured on a loop walking a far array a word at a time: nine instructions to
+six, 20 states an element to 14, and 22 bytes off the function.  The saving is
+one ADDC and the register shuffling that keeping a written value rather than a
+read one costs.
+
+Arithmetic that leaves the segment is undefined, and undefined the way that
+does not report itself: the offset wraps and the access lands at the foot of
+the same segment.  utils/C166Sim/differential/segptr.c therefore stays inside
+one segment throughout - it is farptr.c's shapes with the crossing removed,
+and it is the only way to check a confined pointer at all, since nothing about
+one is visible in the values it produces.
+
+Why the calls are not relaxed either
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A branch is selected as JMPR, the two byte relative form, and C166AsmBackend
+grows it into a JMPA where the layout turns out to be too far apart.  A call is
+selected as CALLA, the four byte absolute form, and is never shrunk into the
+two byte CALLR - and the asymmetry is deliberate rather than an oversight.
+
+The machinery would be small: an entry in getRelaxedOpcode() mapping CALLR to
+CALLA, a call pattern selecting CALLR, and the operand shuffle that CALLA
+carries a condition and CALLR does not.  What stops it is that the assembler
+can only measure a distance inside one section, and a callee is almost never in
+the caller's.  Measured over the corpus with
+llvm/utils/C166Sim/corpus/relax.sh, which builds each driver's objects and
+counts: 278 CALLA, of which 9 name a target in the same section, of which none
+is within a CALLR's reach.  Those programs are C++, and every callee is a
+template or an inline function that has to go in a COMDAT section of its own.
+
+The C programs in utils/C166Sim/differential do better and still not well: 198
+CALLA, 77 in the same section, and 24 of those within reach - 48 bytes across
+all twenty two programs, about two bytes each.  The reason even a same-section
+call usually misses is the reach rather than the placement.  CALLR reaches 254
+bytes forward and the code is not that dense: across the corpus's linked
+images the median JMPA or CALLA target is 829 bytes away, and 104 of 902 of
+them are within that reach at all.
+
+There is also a hazard to pay for it with.  BranchRelaxation runs on machine
+instructions and uses their table sizes, and it is here for the bit branches,
+which have no long form to grow into and so must be turned into a short branch
+over a jump when they cannot reach.  A call that is two bytes at that point and
+four after assembly would make its estimates optimistic, in the direction that
+leaves a bit branch unable to reach.  JMPR already has that shape and the
+backend already lives with it; adding a second source of it for two bytes a
+program is not a trade worth making.
+
+The linker's side of the same question - and the two shrinks that are not
+about size at all - is in lld/ELF/Arch/C166.cpp.
+
 Far code
 ~~~~~~~~
 
@@ -511,9 +598,7 @@ least one instruction must be inserted between a CP-changing and a subsequent
 GPR-using instruction" - C167CR Derivatives User's Manual V3.1, section 4.2,
 Context Pointer Updating, whose worked example is SCXT CP, #0FC00h followed by
 a line reading "must not be an instruction using a GPR".  Without it the
-handler's first register write would land in the interrupted code's bank, and
-nothing here would show it: the simulator applies the CP write at once, so no
-test can find it.
+handler's first register write would land in the interrupted code's bank.
 
 That section is worth reading whole rather than for the one rule, and doing so
 found a second thing.  The compare and exchange sequence cleared PSW.IEN and
@@ -536,6 +621,24 @@ and POP after an explicit write to SP, and crt0.S follows its write with more
 SFR writes, while the note that conflicts with PUSH, CALL and SCXT are resolved
 internally covers the rest.  Port direction, SYSCON mapping and BUSCON are
 startup concerns this backend generates no code for.
+
+All four of those effects are now in the simulator, which is what turned that
+reading into something checkable.  The three that are rules about what not to
+write are checked - a GPR reached one instruction after CP is written, a long
+or indirect address through a data page pointer one instruction after it is
+written, and a pop one instruction after an explicit write to SP each stop the
+program with the manual's own sentence - and the fourth, the one instruction of
+delay before a change to PSW.IEN or PSW.ILVL is arbitrated on, is modelled.
+Checking rather than emulating is deliberate: the part reports none of them and
+carries on with the value the pipeline still holds, and "mostly not capable"
+does not say which cases "mostly" leaves out, so the wrong answer a program
+gets there is not one a simulator can reproduce.  The sequence the manual says
+must not be written is what can be checked exactly.
+
+That closes the gap both NOPs above were written into.  Taking the SCXT one out
+stops differential/interrupts.c, and taking crt0's out stops every program that
+links it; llvm/test/tools/c166-sim/pipeline.s has both, the stack pointer rule,
+the exemption for PUSH, and the delay with and without.
 
 Three things do not follow from the window and are handled separately.  The
 multiply/divide unit and the coprocessor are not part of a bank and are still
@@ -1258,6 +1361,54 @@ Known limitations / things to do
   say "this pointer is in the dual-port RAM" in the type system, which __dpram
   deliberately is not - that decision is written up under __dpram above, and it
   was the right one for placement even though it is what bounds this.
+
+  There is no way round the shift, and that is worth saying rather than
+  leaving as an open question.  A filter over a circular buffer does not shift
+  at all - the newest sample overwrites the oldest and the pointer wraps - so
+  if the pointer could be made to wrap by the unit rather than by the loop, the
+  whole filter would be a repeated CoMAC and the delay line would not move.
+  The unit has four offset registers, QX0, QX1, QR0 and QR1, and pointer update
+  codes 4 to 7 step a pointer by one of them; the question is whether any of
+  that is a modulo.
+
+  It is not.  PM0036 Table 27 enumerates the pointer post-modifications
+  completely, five per pointer kind, and every one of them is an add or a
+  subtract: "(IDXi) <- (IDXi) + (QXj)".  The ST10F269 datasheet's Table 5 is
+  the same table.  And the C166S V2 Architecture Overview Handbook says it
+  outright in the MAC unit's own feature list - "one, Finite Impulse Response
+  (FIR) filter tap per cycle, with no circular buffer management" - which reads
+  as a boast and is a denial: there is no circular buffer support, and CoMACM
+  moving the delay line is what the part offers instead of one.  MCW has two
+  bits, MP and MS, and neither is a modulo.  So the road round CoMACM does not
+  exist, and MAC-10's conclusion stands from the other side as well.
+
+  What the offset registers do give is a stride, and that is worth having on
+  its own.  A stream that moves by a fixed distance other than a word is a
+  decimating filter, one channel of an interleaved stream, or a column of a
+  matrix, and it was the one thing keeping such a loop out of the repeated
+  form: describeStream() asked for a step of exactly two.  It now asks only for
+  an even step that fits in sixteen bits, and the expansion picks the update
+  code from it - 2 for a word forward, 3 for a word back, and 4 or 5 with the
+  distance written into QX0 or QR0 for anything else, on either pointer or on
+  both.
+
+  Writing an offset register needs the value in a register first, since this
+  machine has no move of an immediate to a memory address, and expandPostRAPseudo
+  runs where it cannot make one up; so the strided form is a pseudo of its own,
+  MACREP32S, with an early clobbered scratch operand.  A unit stride keeps
+  MACREP32 and pays for nothing it does not use, which is why MAC-11's own
+  tests come out byte for byte identical.
+
+  Measured per call on a sixteen tap decimating filter, every third sample:
+
+                                  states   text
+    before, a loop with CoMUL        402    548
+    after, one repeated CoMAC         74    540
+
+  which is 25 states a tap against 5, and 5.4 times.  That is the same shape of
+  win the repeat prefix gave the unit-stride case, for the same reason: what
+  goes is the index arithmetic, the two address computations, the compare and
+  the branch, not the multiply.
 * The instruction forms nothing generates are assembled and disassembled but
   their encodings are derived rather than read off the page.  Each ALU group's
   columns were already fixed by the forms the compiler emits - x0 register, x2
@@ -1281,6 +1432,11 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
+  Setting it from the branch probabilities is a small change and is not made,
+  because nothing here could measure it: the simulator charges a taken branch
+  what Table 11 says and a mispredicted one the same, so the number after the
+  change would equal the number before by construction.  A taken-branch penalty
+  in the simulator is what this waits on.
 * Three SFR maps are modelled and the subtarget picks between them, because
   the same short address names different registers on different derivatives.
   What they all agree about - 97 names at the same short address, which is the
@@ -1430,6 +1586,60 @@ Known limitations / things to do
   stdout - registers, memory, breakpoints, stepping - with the registers
   described to the client rather than assumed.  A port of GDB or LLDB to this
   target is what is left.
+* The cost model's time answers are correct and nothing reads them.  There is
+  a scheduling model now - C166Schedule.td, in states, from the same table of
+  the instruction set manual the simulator counts with - and the two numbers
+  the old instruction counts got wrong are right against it: a word multiply is
+  six ordinary instructions' worth of time rather than two, and a word divide
+  twelve rather than three, because MUL is ten states and DIV twenty where
+  everything else is two.
+
+  What that changed in generated code is nothing, and the way to see it is not
+  that the numbers moved a little: with every time answer multiplied by a
+  thousand, sixty six compilations of the differential programs at three
+  optimisation levels came out byte for byte identical.  Nothing on this target
+  asks the cost model about time.  The vectorisers are the usual askers and
+  they return early here, because getNumberOfRegisters says there are no vector
+  registers; the unroller asks in code size; and the inliner asks in
+  TCK_SizeAndLatency, which this target answers with the size number
+  deliberately and by measurement - doing otherwise cost 17% of code by
+  stopping four loops in language.c from unrolling.
+
+  So the time column is right and unreached, which is worth having written down
+  twice over: it is what stops the next person measuring it again, and it is
+  what would have to change first for a pass that reads it to be worth adding.
+* What the corpus costs is recorded and checked, and what any one function
+  costs is not.  llvm/utils/C166Sim/corpus/sizes.sh holds text bytes and states
+  for four programs at four optimisation levels against a baseline in the tree,
+  which is what would notice a change that gave back a win somebody measured by
+  hand.  What it would not notice is a regression confined to something the
+  corpus does not reach - the block functions at a size it never copies, a
+  handler's prologue, the coprocessor - because those move a few bytes in
+  programs of five to twenty five kilobytes.  Per function rows would catch
+  them and would need a list of which functions are worth watching, which is a
+  thing to choose rather than to derive.
+* The pipeline is not modelled beyond the four effects section 4.2 names.
+  Those four are there - three as checks and one as behaviour, under Pipeline
+  effects in llvm/utils/C166Sim/README.txt - because each changes what a
+  correct program may be written as.  Everything else about it is not: an
+  instruction retires whole, a taken branch costs what Table 11 says rather
+  than what a thrown-away pipeline costs, and the forwarding that "resolves
+  most of the possible conflicts in a time optimized way" is not there to
+  resolve anything.  The one thing that wants is a taken-branch penalty, which
+  is what the prediction bit of JMPA and CALLA would be measured against; the
+  bullet on that bit above says the rest.
+* One peripheral is modelled in the simulator and the rest are not.  GPT1's
+  three timers count on the clock at the manual's rate and raise their requests
+  through their own interrupt control registers, which is what makes the whole
+  interrupt chain - the attribute, the vector slot, the linker script row, the
+  register bank, the arbitration - reachable from a C program that configures a
+  timer the way it would on the part; llvm/utils/C166Sim/differential/timer.c is
+  that program.  Everything else in the vector table still needs a request
+  injected from the command line, because a peripheral register that is not
+  GPT1's reads back what was written to it and does nothing.  The serial
+  channels and the A/D converter are the ones a program would notice next, and
+  the PEC is the one that would change what an accepted request does rather
+  than where it came from.
 * Nothing has been executed on silicon.  llvm/utils/C166Sim runs what comes
   out, and its differential tests agree with a host compiler over the whole
   language, but a simulator agreeing with itself about the manual is not the
