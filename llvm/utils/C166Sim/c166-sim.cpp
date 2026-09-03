@@ -80,6 +80,13 @@ static cl::opt<bool>
                         "stdout instead of running the program, so that a "
                         "debugger can drive it: target remote | c166-sim "
                         "--gdb prog.elf"));
+static cl::opt<int> GDBPort(
+    "gdb-port",
+    cl::desc("serve the protocol on this TCP port of the loopback interface "
+             "rather than on stdin and stdout, for a debugger with no pipe "
+             "form - LLDB among them.  Zero asks for a free port and prints "
+             "the one it got.  Implies --gdb"),
+    cl::init(-1));
 static cl::opt<bool> Backtrace(
     "backtrace",
     cl::desc("walk the stack when the program stops, using the call frame "
@@ -176,6 +183,8 @@ int main(int argc, char **argv) {
   M.TraceOS = &errs();
   // The debugger owns stdout while it is connected, so the program's console
   // output goes the other way rather than into the middle of a packet.
+  if (GDBPort >= 0)
+    GDB = true;
   M.ConsoleOS = GDB ? &errs() : &outs();
 
   for (auto &&[Specs, Periodic] : {std::make_pair(&InterruptAt, false),
@@ -321,7 +330,7 @@ int main(int argc, char **argv) {
   }
 
   if (GDB)
-    return serveGDB(M);
+    return serveGDB(M, GDBPort);
 
   while (M.step())
     ;

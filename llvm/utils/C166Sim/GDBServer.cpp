@@ -30,6 +30,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Errno.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdio>
 #include <optional>
@@ -37,7 +38,10 @@
 #include <string>
 
 #ifdef LLVM_ON_UNIX
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #endif
 
@@ -226,7 +230,8 @@ static std::string targetDescription() {
 /// The conversation.
 class GDBServer {
 public:
-  GDBServer(Machine &M) : M(M) {}
+  GDBServer(Machine &M, int InFD, int OutFD)
+      : M(M), InFD(InFD), OutFD(OutFD) {}
 
   /// Talk until the debugger goes away.  Returns what the program exited with,
   /// or -1 if the protocol broke down.
@@ -242,6 +247,12 @@ private:
 
   // -- framing ---------------------------------------------------------
 
+  /// Where the debugger is.  Two descriptors rather than one because stdin and
+  /// stdout are two; a socket is the same number twice.
+  int InFD;
+  int OutFD;
+
+  void writeAll(StringRef Bytes);
   std::optional<char> readByte();
   /// The body of the next packet, or nothing at end of input.  Acknowledges
   /// what it reads, and re-reads a packet whose checksum does not match.
@@ -270,10 +281,35 @@ private:
 };
 
 std::optional<char> GDBServer::readByte() {
+#ifdef LLVM_ON_UNIX
+  char C;
+  ssize_t N = sys::RetryAfterSignal(ssize_t(-1), ::read, InFD, &C, size_t(1));
+  if (N != 1)
+    return std::nullopt;
+  return C;
+#else
   int C = std::getchar();
   if (C == EOF)
     return std::nullopt;
   return char(C);
+#endif
+}
+
+/// Everything written to the debugger goes through here, so that there is one
+/// place that knows whether the far end is stdout or a socket.
+void GDBServer::writeAll(StringRef Bytes) {
+#ifdef LLVM_ON_UNIX
+  while (!Bytes.empty()) {
+    ssize_t N = sys::RetryAfterSignal(ssize_t(-1), ::write, OutFD,
+                                      Bytes.data(), Bytes.size());
+    if (N <= 0)
+      return;
+    Bytes = Bytes.drop_front(size_t(N));
+  }
+#else
+  std::fwrite(Bytes.data(), 1, Bytes.size(), stdout);
+  std::fflush(stdout);
+#endif
 }
 
 std::optional<std::string> GDBServer::readPacket() {
@@ -304,12 +340,10 @@ std::optional<std::string> GDBServer::readPacket() {
       return std::nullopt;
     unsigned Want = (hexDigitValue(*Hi) << 4) | hexDigitValue(*Lo);
     if ((Sum & 0xFF) != Want) {
-      std::fputc('-', stdout);
-      std::fflush(stdout);
+      writeAll("-");
       continue;
     }
-    std::fputc('+', stdout);
-    std::fflush(stdout);
+    writeAll("+");
     return Body;
   }
 }
@@ -318,16 +352,17 @@ void GDBServer::sendPacket(StringRef Body) {
   unsigned Sum = 0;
   for (char C : Body)
     Sum += uint8_t(C);
-  std::fputc('$', stdout);
-  for (char C : Body)
-    std::fputc(C, stdout);
-  std::fprintf(stdout, "#%02x", Sum & 0xFF);
-  std::fflush(stdout);
+  std::string Out = "$";
+  Out += Body;
+  Out += "#";
+  Out += hexdigit((Sum >> 4) & 0xF, /*LowerCase=*/true);
+  Out += hexdigit(Sum & 0xF, /*LowerCase=*/true);
+  writeAll(Out);
 }
 
 bool GDBServer::interrupted() {
 #ifdef LLVM_ON_UNIX
-  struct pollfd P = {STDIN_FILENO, POLLIN, 0};
+  struct pollfd P = {InFD, POLLIN, 0};
   if (::poll(&P, 1, 0) <= 0)
     return false;
   std::optional<char> C = readByte();
@@ -636,7 +671,65 @@ int GDBServer::run() {
 
 } // end anonymous namespace
 
-int c166sim::serveGDB(Machine &M) {
-  GDBServer Server(M);
-  return Server.run();
+#ifdef LLVM_ON_UNIX
+/// Wait for one debugger on \p Port of the loopback interface and hand back the
+/// socket, or -1 with the reason printed.
+static int acceptOneDebugger(int Port) {
+  int Listen = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (Listen < 0) {
+    errs() << "c166-sim: cannot make a socket: " << sys::StrError() << "\n";
+    return -1;
+  }
+  int One = 1;
+  ::setsockopt(Listen, SOL_SOCKET, SO_REUSEADDR, &One, sizeof(One));
+
+  struct sockaddr_in Addr = {};
+  Addr.sin_family = AF_INET;
+  Addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  Addr.sin_port = htons(uint16_t(Port));
+  if (::bind(Listen, (struct sockaddr *)&Addr, sizeof(Addr)) < 0 ||
+      ::listen(Listen, 1) < 0) {
+    errs() << "c166-sim: cannot listen on port " << Port << ": "
+           << sys::StrError() << "\n";
+    ::close(Listen);
+    return -1;
+  }
+
+  // A port of zero asks the system for a free one, and then the number is only
+  // knowable from here - so it is printed, and a script reads it rather than
+  // guessing a port and racing whatever else wanted it.
+  socklen_t Len = sizeof(Addr);
+  if (::getsockname(Listen, (struct sockaddr *)&Addr, &Len) == 0)
+    errs() << "listening on port " << ntohs(Addr.sin_port) << "\n";
+  errs().flush();
+
+  int Conn = sys::RetryAfterSignal(-1, ::accept, Listen,
+                                   (struct sockaddr *)nullptr,
+                                   (socklen_t *)nullptr);
+  ::close(Listen);
+  if (Conn < 0) {
+    errs() << "c166-sim: nothing connected: " << sys::StrError() << "\n";
+    return -1;
+  }
+  return Conn;
+}
+#endif
+
+int c166sim::serveGDB(Machine &M, int Port) {
+  if (Port < 0) {
+    GDBServer Server(M, STDIN_FILENO, STDOUT_FILENO);
+    return Server.run();
+  }
+#ifdef LLVM_ON_UNIX
+  int Conn = acceptOneDebugger(Port);
+  if (Conn < 0)
+    return -1;
+  GDBServer Server(M, Conn, Conn);
+  int Result = Server.run();
+  ::close(Conn);
+  return Result;
+#else
+  errs() << "c166-sim: --gdb-port needs sockets, which this build has not\n";
+  return -1;
+#endif
 }

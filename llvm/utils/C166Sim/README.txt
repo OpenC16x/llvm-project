@@ -98,6 +98,18 @@ assembler, the debug information and this.  PC is not a register any
 instruction can name: it is the 24 bit CSP:IP pair, reported as one 32 bit
 register because that is what an address in the debug information is.
 
+"target remote |" is GDB's spelling, and not every debugger has a pipe form -
+LLDB has none.  So the stub will listen on a socket instead:
+
+  $ c166-sim --gdb-port=0 prog.elf &
+  listening on port 43505
+
+A port of zero asks the system for a free one and prints the number it got,
+which is what a script should use: guessing a port races whatever else wanted
+it.  The stdin and stdout form above is still the default and is still what the
+tests use, because it needs no port and leaves nothing listening if the
+debugger goes away.
+
 No debugger knows the C166 architecture yet, so nothing can put a source level
 front end on this today; a port of GDB or LLDB to this target is what that
 would take.  The protocol itself is not architecture specific, though, so an
