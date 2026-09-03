@@ -35,7 +35,7 @@ implies it - because it programs the XC164CM's PLL through that part's extended
 special function registers, and a name from one derivative's map is refused for
 another.  That is the whole point of the map being chosen rather than assumed;
 saying which part a file is for is how it gets past it.
-  mem.c                memcpy, memmove, memset and memcmp
+  mem.c                memcpy, memmove, memset, memcmp and strlen
   unwind.c             the DWARF unwinder, for C++ exceptions
   unwind-asm.S         the register capture and restore it needs
   cxa.c                the personality routine and the __cxa_ calls
@@ -490,8 +490,11 @@ the rest of the freestanding set, so those are not here.  Neither are
 clock, so there is nothing behind them to declare.
 
   errno.h     one int, reached through the errno macro, with Linux's numbers
-  string.h    the five mem.c defines, and the rest of <string.h> declared
-  stdlib.h    the integer and search parts, div_t and friends, RAND_MAX
+  string.h    the five mem.c defines, the rest of C, and the POSIX and BSD
+              functions llvm-libc carries beside them
+  stdlib.h    the conversions, the integer arithmetic, the two sorts and the
+              generator, div_t and friends, RAND_MAX
+  ctype.h     the classifications, all of which exist
   assert.h    assert, calling __c166_assert_failed
   inttypes.h  intmax_t, imaxdiv_t and the PRI and SCN macros
   wchar.h     wint_t, mbstate_t and the declarations
@@ -531,18 +534,118 @@ __cxa_thread_atexit in cxa.c, which records nothing and so never runs it, for
 the same reason exit runs no handlers.  llvm/lib/Target/C166/README.txt says
 what this does not do, which is make a second thread work.
 
+The C library
+-------------
+
+libc.a used to be mem.c and a handful of things the runtime needs.  It now
+carries LLVM's own libc beside them.  libc/src/string, libc/src/stdlib,
+libc/src/ctype and libc/src/inttypes are 129 sources; 105 of them compile for
+this target and 24 do not, and 103 of the 105 are in the archive - the two left
+out are below.  llvm/utils/C166Sim/corpus/README.txt accounts for the 24 one at
+a time; most of them fail on an #error inside libc itself, for a locale_t or an
+mbstate_t that overlay mode declares unavailable.
+
+That is about a hundred functions - the whole of <ctype.h>, the rest of
+<string.h> with the POSIX and BSD entry points, and the half of <stdlib.h> that
+is about values rather than about a process.  differential/mksysroot.sh builds
+them and differential/library.c calls them through their public C names and
+checks every answer against the host.
+
+Three things about it are decisions rather than defaults.
+
+  mem.c goes into the archive before llvm-libc, and that is what decides which
+  memcpy a program gets: a linker takes the first member that defines the
+  symbol.  mem.c's block functions move a word at a time and llvm-libc's move a
+  byte, which over 256 bytes of memset, memcpy and strlen is 6540 states
+  against 9538 - 1.46 times - for 102 bytes more.  That was measured, not
+  assumed.  Reversing the order is deleting two names from one line of
+  mksysroot.sh.
+
+  llvm-libc is compiled with -fno-builtin, and it has to be.  The public name
+  is made by an alias, so the function the optimiser sees inside memcpy.cpp is
+  the one that will answer to "memcpy"; its byte loop becomes llvm.memcpy, and
+  that lowers to a call to memcpy, which is itself.  It recurses until the
+  system stack overflows.  The simulator says so on the first run, which is how
+  this was found; llvm-libc's own build passes the same flag for the same
+  reason.
+
+  Two sources from outside those four directories are built as well, because
+  leaving them out breaks something inside them: error_to_string is strerror's
+  table and mbrtowc is what mblen, mbtowc and mbstowcs each wrap.  Without them
+  those entry points link against a mangled C++ name that says nothing about
+  which C function the program asked for.  Two more are dropped for the mirror
+  image of that reason - strsignal wants a <signal.h> on a part with no signals
+  and getenv wants an environment on a part nothing could pass one to - so that
+  they are undefined under their own names instead.
+
 What is missing
 ---------------
 
-mem.c is four functions, not a C library.  A project that needs printf, malloc
-or anything else should build picolibc or newlib for c166 and link that
-instead; mem.c exists so that a program can be linked and run with nothing
-else present at all.
+There is no stdio, no malloc, no math and no threads, and nothing here is going
+to add them: <stdio.h> needs somewhere to write, malloc needs a policy nobody
+here chose, and libc/src/math is a hundred and twenty sources for a part with
+no floating point unit.  strdup and strndup are in the archive and do not link,
+naming malloc, which is the whole of what went wrong.
 
-The four move a word at a time where they can, which on this part means where
-the two addresses have the same parity: a word access is an even address
-access, the hardware ignoring bit 0 rather than trapping, so two pointers of
-different parity are copied a byte at a time and nothing can be done about it.
+And the floating point string conversions do not work.  strtof, strtod, strtold
+and atof are in the archive, they link, and they are wrong: anything the first
+pass cannot bound goes to llvm-libc's simple_decimal_conversion, which puts an
+800 byte HighPrecisionDecimal on the stack.  With its callers that chain wants
+about 1.1 KByte; the ABI stack in every script here is the 1 KByte between
+F600H and FA00H, because that is the dual-port RAM under the system stack and
+there is nowhere else on this part to put it.  It overruns without saying so.
+strtof("1e39") comes back as 1.4e-45 rather than infinity, with the end pointer
+never written, at every optimisation level; the same call inside a longer
+program does not return at all.  An input the first pass can bound - "1e300"
+for a float, whose base ten exponent is past anything finite - never reaches
+that path and is correct, which is why this is easy to miss.
+
+Nothing in the compiler or the linker is wrong there.  The same source is
+correct when it is built for the machine running these tests, and the frame
+sizes are in the object file: 838 bytes in one function.  What it needs is
+either a part with more internal RAM, an ABI stack somewhere the scripts here
+do not put one, or a decimal conversion written for a part this size.
+
+picolibc, or this
+-----------------
+
+picolibc is built for exactly this shape of part - it is newlib's C library
+with the parts that assume an operating system taken out, it is what an ARM
+Cortex-M or a RISC-V microcontroller project reaches for, and it brings printf,
+which is the single thing missing here that a real program asks for first.  It
+would be a better answer for a project than what is here, and a worse one for
+this backend, which is why what is here is llvm-libc.
+
+The difference is what each one is for.  picolibc is portable C that has been
+built for a hundred targets: it is written to the standard, it avoids anything
+a small target might not have, and a new backend that compiles it has learned
+that it can compile careful, conservative C.  llvm-libc is none of those
+things.  It is modern C++ - templates over _BitInt, cpp::span, structured
+bindings, word-at-a-time loops built out of types nobody writes by hand - and
+it was written with no idea this target exists.  Pointing it at a sixteen bit
+part with two pointer widths is how the four front end bugs in
+llvm/utils/C166Sim/corpus/README.txt were found, and none of them is about
+libc: new char[n] crashing clang, a __atomic_compare_exchange building broken
+IR on any target with a sixteen bit int, char32_t too narrow to hold a code
+point, and an array bound deduced at the wrong width.  Three of those break
+MSP430 and AVR too.  picolibc would have found none of them, because picolibc
+does not do any of that.
+
+So the trade is: picolibc gives a project a working C library sooner, and
+llvm-libc gives this backend a harder question every time it is rebuilt.  A
+project that needs printf should build picolibc for c166 and link it instead of
+this - nothing here stops it, and the driver's -nolibc is how - and it will
+almost certainly work, because a target that survives llvm-libc has already
+survived worse.  What is in the tree is the one that keeps finding things.
+
+Block functions
+---------------
+
+The five in mem.c move a word at a time where they can, which on this part
+means where the two addresses have the same parity: a word access is an even
+address access, the hardware ignoring bit 0 rather than trapping, so two
+pointers of different parity are copied a byte at a time and nothing can be
+done about it.
 That doubled their speed and roughly tripled their size, which is why
 mksysroot.sh compiles this file and runtime.c with -ffunction-sections: the
 driver already passes --gc-sections, and an archive member is pulled whole, so
