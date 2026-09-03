@@ -276,6 +276,44 @@ one segment throughout - it is farptr.c's shapes with the crossing removed,
 and it is the only way to check a confined pointer at all, since nothing about
 one is visible in the values it produces.
 
+Why the calls are not relaxed either
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A branch is selected as JMPR, the two byte relative form, and C166AsmBackend
+grows it into a JMPA where the layout turns out to be too far apart.  A call is
+selected as CALLA, the four byte absolute form, and is never shrunk into the
+two byte CALLR - and the asymmetry is deliberate rather than an oversight.
+
+The machinery would be small: an entry in getRelaxedOpcode() mapping CALLR to
+CALLA, a call pattern selecting CALLR, and the operand shuffle that CALLA
+carries a condition and CALLR does not.  What stops it is that the assembler
+can only measure a distance inside one section, and a callee is almost never in
+the caller's.  Measured over the corpus with
+llvm/utils/C166Sim/corpus/relax.sh, which builds each driver's objects and
+counts: 278 CALLA, of which 9 name a target in the same section, of which none
+is within a CALLR's reach.  Those programs are C++, and every callee is a
+template or an inline function that has to go in a COMDAT section of its own.
+
+The C programs in utils/C166Sim/differential do better and still not well: 198
+CALLA, 77 in the same section, and 24 of those within reach - 48 bytes across
+all twenty two programs, about two bytes each.  The reason even a same-section
+call usually misses is the reach rather than the placement.  CALLR reaches 254
+bytes forward and the code is not that dense: across the corpus's linked
+images the median JMPA or CALLA target is 829 bytes away, and 104 of 902 of
+them are within that reach at all.
+
+There is also a hazard to pay for it with.  BranchRelaxation runs on machine
+instructions and uses their table sizes, and it is here for the bit branches,
+which have no long form to grow into and so must be turned into a short branch
+over a jump when they cannot reach.  A call that is two bytes at that point and
+four after assembly would make its estimates optimistic, in the direction that
+leaves a bit branch unable to reach.  JMPR already has that shape and the
+backend already lives with it; adding a second source of it for two bytes a
+program is not a trade worth making.
+
+The linker's side of the same question - and the two shrinks that are not
+about size at all - is in lld/ELF/Arch/C166.cpp.
+
 Far code
 ~~~~~~~~
 

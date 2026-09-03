@@ -52,6 +52,19 @@ early would report a flattering number.
                 and what they left in errno, at six bases and across the
                 sixteen, thirty two and sixty four bit boundaries
 
+And beside that, relax.sh, which asks what relaxing a branch or a call would be
+worth here:
+
+  relax.sh <build-bin-dir> <sysroot> <linker-script> [levels]
+
+It prints two tables, one from the linked images and one from the objects,
+because the answer could come from either end and does not: what a linker could
+shrink, against what letting it shrink would put at risk, and what the
+assembler could shrink on its own with no linker involved.  The decisions those
+numbers support are in lld/ELF/Arch/C166.cpp and in the C166 backend's
+README.txt; this is here so that they can be checked rather than believed, and
+so that they move when the compiler does.
+
 What it found
 -------------
 
