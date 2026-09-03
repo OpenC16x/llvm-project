@@ -215,4 +215,42 @@ typedef volatile unsigned int c166_sfr;
 #define TCONCS7       C166_SFR(0xEE48U)
 #define ADDRSEL7      C166_SFR(0xEE4EU)
 
+/* The Peripheral Event Controller's pointers, which are not registers.
+ *
+ * "These pointers do not reside in specific SFRs, but are mapped into the
+ * internal RAM ... just below the bit-addressable area" (C167CR Derivatives
+ * User's Manual V3.1, Figure 5-2), so there is nothing in the register map to
+ * name them and they are written out here instead.  A program that uses a
+ * channel owns those thirty two bytes: the linker scripts here do not reserve
+ * them, because a program that uses no channel should not pay for them, so
+ * keep __dpram objects away from FCE0H to FCFEH if any channel is enabled.
+ */
+#define C166_SRCP(ch) C166_SFR(0xFCE0U + 4U * (ch))
+#define C166_DSTP(ch) C166_SFR(0xFCE2U + 4U * (ch))
+
+/* And what goes in a PECCx.  COUNT is the low byte: FFH transfers for as long
+ * as the channel is enabled and is never decremented, FEH to 01H transfer and
+ * count down, and 00H is no transfer at all - the request goes to the handler
+ * instead, which is how a finished block is noticed.  Table 5-5 has all four
+ * rows; the one that catches people is that 01H still transfers, and leaves
+ * the request flag set so that the handler runs straight after.
+ */
+#define PECC_COUNT(n)   ((n) & 0xFFU)  /* transfers left, or FFH for endless */
+#define PECC_WORD       0x000U         /* BWT = 0: move a word              */
+#define PECC_BYTE       0x100U         /* BWT = 1: move a byte              */
+#define PECC_INC_NONE   0x000U         /* INC = 00: neither pointer moves   */
+#define PECC_INC_DST    0x200U         /* INC = 01: step the destination    */
+#define PECC_INC_SRC    0x400U         /* INC = 10: step the source         */
+
+/* Which channel a source is served by is not in the PECC register: it comes
+ * from the source's own interrupt control register.  "Interrupt requests that
+ * are programmed to priority levels 15 or 14 ... will be serviced by the PEC",
+ * and "the associated PEC channel number is derived from the respective ILVL
+ * (LSB) and GLVL" - so level 15 reaches channels 7 to 4 and level 14 channels
+ * 3 to 0, with the group level choosing among the four.  Levels 13 and below
+ * have no channel and are always a handler.
+ */
+#define PEC_IC(ch)      (0x40U | (((ch) >= 4) ? 0x0FU : 0x0EU) | \
+                         (((ch) & 3U) << 4))
+
 #endif /* C166_XC164CM_H */

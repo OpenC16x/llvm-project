@@ -849,6 +849,28 @@ static constexpr PeripheralSource PeripheralSources[] = {
     {0xFF64, 36}, // T4IC, GPT1 timer 4
 };
 
+/// What a PEC transfer costs, in states.
+///
+/// "In cycle 3 a PEC transfer 'instruction' is injected into the decode stage
+/// of the pipeline, suspending instruction N + 1 ... Cycle 4 completes the
+/// injected PEC transfer and resumes the execution of instruction N + 1"
+/// (C167CR Derivatives User's Manual V3.1, section 5.6).  So it costs what an
+/// instruction costs, which is the same lower bound InterruptEntryStates is:
+/// the response time the manual quotes includes arbitration and the pipeline,
+/// and both depend on what was in flight rather than on the program.
+static constexpr unsigned PECTransferStates = 2;
+
+/// The eight channel control registers, PECC0 at FEC0H and one every two bytes
+/// after it (Table 5-4), and the source and destination pointers, which are
+/// not registers at all: "these pointers do not reside in specific SFRs, but
+/// are mapped into the internal RAM ... just below the bit-addressable area"
+/// (Figure 5-2), so SRCPx is at FCE0H + 4x and DSTPx two bytes above it.
+///
+/// Both are ordinary storage here, which is what they are on the part.  What
+/// makes the PEC a peripheral rather than sixteen more words of RAM is that
+/// something reads them when a request wins arbitration, which is below.
+enum { PECCBase = 0xFEC0, PECPointerBase = 0xFCE0 };
+
 /// One request in the running, whichever kind of source raised it.
 ///
 /// A peripheral has a group level and an injected source does not, so an
@@ -870,6 +892,73 @@ struct Candidate {
     return Level != O.Level ? Level > O.Level : Group > O.Group;
   }
 };
+
+/// Service a request through its PEC channel, or return false where the
+/// channel has run out and a handler should run instead.
+///
+/// The transfer itself is one byte or word "between two locations in segment 0
+/// (data pages 3 ... 0)", so each pointer is a physical address in that
+/// segment rather than a near address through a data page pointer - which is
+/// the opposite of what every other address a program writes goes through, and
+/// is why nothing here calls mapData.
+///
+/// What COUNT does is Table 5-5's, which has four rows and needs all four: FFH
+/// is continuous and is not decremented, FEH to 02H decrement, 01H decrements
+/// to zero and leaves the request flag set - "which triggers another request",
+/// and is how a program is told the block is done - and 00H is not serviced
+/// here at all.
+static bool performPEC(Machine &M, const Candidate &C) {
+  unsigned Channel = ((C.Level & 1) << 2) | C.Group;
+  uint32_t PECC = PECCBase + 2 * Channel;
+  uint16_t Control = M.read16(PECC);
+  unsigned Count = Control & 0xFF;
+  if (Count == 0)
+    return false;
+
+  bool Byte = (Control >> 8) & 1;
+  // "0 0: Pointers are not modified.  0 1: Increment DSTPx by 1 or 2 (BWT).
+  // 1 0: Increment SRCPx by 1 or 2 (BWT).  1 1: Reserved.  Do not use this
+  // combination.  (changed to '10' by hardware)" - so three behaves as two.
+  // The register is left holding what was written: the manual says the
+  // combination is changed but not when, and inventing an answer to that would
+  // be a claim about a read back that nothing here can check.
+  unsigned Inc = (Control >> 9) & 3;
+
+  uint32_t SrcAddr = PECPointerBase + 4 * Channel;
+  uint32_t DstAddr = SrcAddr + 2;
+  uint16_t Src = M.read16(SrcAddr);
+  uint16_t Dst = M.read16(DstAddr);
+
+  if (Byte)
+    M.write8(Dst, M.read8(Src));
+  else
+    M.write16(Dst, M.read16(Src));
+
+  uint16_t Step = Byte ? 1 : 2;
+  if (Inc == 1)
+    M.write16(DstAddr, uint16_t(Dst + Step));
+  else if (Inc >= 2)
+    M.write16(SrcAddr, uint16_t(Src + Step));
+
+  bool LeaveRequest = false;
+  if (Count != 0xFF) {
+    --Count;
+    M.write16(PECC, uint16_t((Control & ~0xFFu) | Count));
+    LeaveRequest = Count == 0;
+  }
+
+  // "It is cleared automatically ... upon a PEC service.  In the case of PEC
+  // service the Interrupt Request flag remains set, if the COUNT field ...
+  // decrements to zero.  This allows a normal CPU interrupt to respond to a
+  // completed PEC block transfer."
+  if (!LeaveRequest) {
+    if (C.Injected)
+      C.Injected->Pending = false;
+    else
+      M.write16(C.IC, M.read16(C.IC) & ~uint16_t(1u << 7));
+  }
+  return true;
+}
 
 bool Machine::serviceInterrupts() {
   // The peripherals run on the clock whether or not anything is listening, so
@@ -957,6 +1046,29 @@ bool Machine::serviceInterrupts() {
   // is strict, and losing it is not losing the request.
   if (Winner.Level <= ((Arb >> PSWILVLShift) & 0xF))
     return false;
+
+  // A request on level 15 or 14 goes to the Peripheral Event Controller
+  // rather than to a handler, unless the channel it names has run out.
+  //
+  // "Interrupt requests that are programmed to priority levels 15 or 14 (i.e.
+  // ILVL = 111XB) will be serviced by the PEC, unless the COUNT field of the
+  // associated PECC register contains zero.  In this case the request will
+  // instead be serviced by normal interrupt processing" - and "the associated
+  // PEC channel number is derived from the respective ILVL (LSB) and GLVL", so
+  // level 15 selects channels 7 to 4 and level 14 channels 3 to 0, with the
+  // group level choosing within the four.
+  //
+  // The arbitration above needs no change for this.  "Simultaneous requests
+  // for PEC channels are prioritized according to the PEC channel number,
+  // where channel 0 has lowest and channel 8 has highest priority" - and the
+  // channel number is built from exactly the two fields the round already
+  // compared, in the same order, so the winner by level and group is the
+  // winner by channel.
+  if (Winner.Level >= 14 && performPEC(*this, Winner)) {
+    ++PECTransfers;
+    States += PECTransferStates;
+    return true;
+  }
 
   // "It is cleared automatically upon entry into the interrupt service
   // routine" - so the request flag goes down here, and a handler that wants

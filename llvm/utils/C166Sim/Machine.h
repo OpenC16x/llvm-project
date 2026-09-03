@@ -305,6 +305,11 @@ public:
   /// when the program itself cannot see the difference.
   uint64_t InterruptsTaken = 0;
 
+  /// And how many were serviced by a PEC channel instead of by a handler,
+  /// which is the same thing for the same reason: a program that had its
+  /// buffer filled by the controller cannot tell how it got there.
+  uint64_t PECTransfers = 0;
+
   /// Run the GPT1 timers forward to the current state count, raising the
   /// request flags of any that overflowed on the way.  Called from
   /// serviceInterrupts, which is where a request becomes an interrupt.

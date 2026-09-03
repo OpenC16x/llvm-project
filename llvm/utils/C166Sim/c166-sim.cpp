@@ -210,6 +210,8 @@ int main(int argc, char **argv) {
       // never reached still reads as it always has.
       if (!M.Interrupts.empty() || M.InterruptsTaken)
         errs() << formatv("  interrupts {0}", M.InterruptsTaken);
+      if (M.PECTransfers)
+        errs() << formatv("  pec {0}", M.PECTransfers);
       errs() << "\n";
     }
     switch (M.Stop) {

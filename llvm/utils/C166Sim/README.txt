@@ -221,13 +221,61 @@ being re-entered by its own level or below.  RETI puts back all three, and
 with PSW both the level and the condition flags.  An ATOMIC or an EXTend locks
 the request out for the instructions it covers, which is what ATOMIC is for.
 
-Two things are deliberately absent.  An injected source has no enable bit and
-no group level: both are fields of a control register, and a source declared on
+One thing is deliberately absent.  An injected source has no enable bit and no
+group level: both are fields of a control register, and a source declared on
 the command line has no control register to put them in, so such a request is
 by definition enabled, arbitrates as group 0, and is gated by PSW.IEN and the
 priority alone.  A timer's request has all of them, because it has the
-register.  The PEC is the other absence - a request here is always serviced by
-the CPU.
+register.
+
+The Peripheral Event Controller
+-------------------------------
+
+A request that wins arbitration does not always reach a handler.  The PEC is
+this part's answer to DMA: eight channels, each of which moves one byte or word
+per request, counts down, and only lets the request through when the count runs
+out.  Chapter 5 of the C167CR Derivatives User's Manual V3.1 is what is
+modelled, and all of it that a program can observe is:
+
+  - which channel a source asks for, which is not in the channel's own register
+    but in the source's.  "Interrupt requests that are programmed to priority
+    levels 15 or 14 will be serviced by the PEC", and "the associated PEC
+    channel number is derived from the respective ILVL (LSB) and GLVL" - so
+    level 15 reaches channels 7 to 4 and level 14 channels 3 to 0, with the
+    group level choosing among the four.  Level 13 and below have no channel.
+    The arbitration needs no change for any of this: the channel number is
+    built from the two fields the round already compared, in the same order, so
+    the winner by level and group is the winner by channel.
+
+  - PECCx at FEC0H and one every two bytes after it, with COUNT in the low
+    byte, BWT at bit 8 and INC at bits 10-9.  The reserved INC combination 11
+    behaves as 10, which is what the manual says hardware does with it; the
+    register is left holding what was written, because the manual says the
+    combination is changed but not when.
+
+  - SRCPx and DSTPx, which are not registers: "these pointers do not reside in
+    specific SFRs, but are mapped into the internal RAM", at FCE0H + 4x and two
+    bytes above.  A program that uses a channel owns those words.
+
+  - Table 5-5's four rows for COUNT, which needs all four.  FFH is continuous
+    and is not decremented; FEH to 02H transfer and count down; 01H transfers,
+    reaches zero and leaves the request flag set, "which triggers another
+    request", so the handler runs straight after and a program is told the
+    block is finished; and 00H is not a PEC request at all - the handler runs
+    instead.
+
+A transfer costs two states, which is what the injected transfer "instruction"
+of section 5.6 costs, and how many happened is printed beside the interrupt
+count under --count-states.
+
+One thing about it catches people and is worth knowing before it does.  A
+channel moves "between two locations in segment 0 (data pages 3 ... 0)", so
+each pointer is a physical address in that segment rather than a near address
+through a data page pointer.  On a part whose program memory is at C0'0000H
+that puts read-only data out of the controller's reach entirely: a const array
+has a near address the PEC will happily use and find nothing at.  Anything a
+channel touches has to be in RAM, which is why differential/pec.c's string is
+not const and says so where a reader will be looking for it.
 
 Pipeline effects
 ----------------
