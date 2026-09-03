@@ -269,6 +269,17 @@ static constexpr const CoreDefinition g_core_definitions[] = {
 
     {eByteOrderLittle, 2, 2, 4, llvm::Triple::avr, ArchSpec::eCore_avr, "avr"},
 
+    // The address size here is four rather than the two a pointer in the
+    // program is.  A C166 pointer is a 16 bit offset that the data page
+    // pointers or CSP place somewhere in the 16 MByte the part addresses, so
+    // two bytes cannot say where anything is - on a part whose Flash is at
+    // C0'0000H every function would be described as living in segment 0.  The
+    // debug information says the same thing: llvm/test/DebugInfo/C166 has the
+    // address size as four and the relocations as the full value.
+    // Instructions are two or four bytes.
+    {eByteOrderLittle, 4, 2, 4, llvm::Triple::c166, ArchSpec::eCore_c166,
+     "c166"},
+
     {eByteOrderLittle, 4, 1, 4, llvm::Triple::wasm32, ArchSpec::eCore_wasm32,
      "wasm32"},
     AMD_GPU_CORE_DEF_R600(R600),
@@ -519,6 +530,7 @@ static const ArchDefinitionEntry g_elf_arch_entries[] = {
     {ArchSpec::eCore_hexagon_generic, llvm::ELF::EM_HEXAGON     }, // HEXAGON
     {ArchSpec::eCore_arc,             llvm::ELF::EM_ARC_COMPACT2}, // ARC
     {ArchSpec::eCore_avr,             llvm::ELF::EM_AVR         }, // AVR
+    {ArchSpec::eCore_c166,            llvm::ELF::EM_C166        }, // C166
     {ArchSpec::eCore_riscv32,         llvm::ELF::EM_RISCV,      ArchSpec::eRISCVSubType_riscv32}, // riscv32
     {ArchSpec::eCore_riscv64,         llvm::ELF::EM_RISCV,      ArchSpec::eRISCVSubType_riscv64}, // riscv64
     {ArchSpec::eCore_loongarch32,     llvm::ELF::EM_LOONGARCH,  ArchSpec::eLoongArchSubType_loongarch32}, // loongarch32

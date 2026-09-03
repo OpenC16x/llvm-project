@@ -48,6 +48,29 @@ static std::vector<DynamicRegisterInfo::Register> GetRegisters_msp430() {
   return registers;
 }
 
+static std::vector<DynamicRegisterInfo::Register> GetRegisters_c166() {
+  ConstString empty_alt_name;
+  ConstString reg_set{"general purpose registers"};
+
+  // The order is the one the "g" packet uses, because that is what this
+  // fallback is for: without it every register would be read at the wrong
+  // offset.  llvm/utils/C166Sim/GDBServer.cpp has the same list and is where
+  // it is decided; the two have to agree, and the stub also serves it as a
+  // target description for a debugger that can read one.
+  //
+  // The program counter is four bytes where everything else is two.  It is the
+  // 24 bit CSP:IP pair, which is what an address in the debug information is,
+  // so it is one register rather than its two halves.
+  std::vector<DynamicRegisterInfo::Register> registers{
+      R16(r0),    R16(r1),   R16(r2),   R16(r3),   R16(r4),  R16(r5),
+      R16(r6),    R16(r7),   R16(r8),   R16(r9),   R16(r10), R16(r11),
+      R16(r12),   R16(r13),  R16(r14),  R16(r15),  R16(psw), R16(mdl),
+      R16(mdh),   R16(mdc),  R16(sp),   R16(cp),   R16(stkov), R16(stkun),
+      R16(dpp0),  R16(dpp1), R16(dpp2), R16(dpp3), R16(csp), R32(pc)};
+
+  return registers;
+}
+
 static std::vector<DynamicRegisterInfo::Register> GetRegisters_x86() {
   ConstString empty_alt_name;
   ConstString reg_set{"general purpose registers"};
@@ -84,6 +107,8 @@ GetFallbackRegisters(const ArchSpec &arch_to_use) {
   switch (arch_to_use.GetMachine()) {
   case llvm::Triple::aarch64:
     return GetRegisters_aarch64();
+  case llvm::Triple::c166:
+    return GetRegisters_c166();
   case llvm::Triple::msp430:
     return GetRegisters_msp430();
   case llvm::Triple::x86:

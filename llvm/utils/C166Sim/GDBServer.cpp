@@ -211,11 +211,19 @@ static std::string targetDescription() {
                     "<target version=\"1.0\">\n"
                     "  <architecture>c166</architecture>\n"
                     "  <feature name=\"org.llvm.c166.core\">\n";
-  for (const RegDesc &R : Regs) {
+  for (unsigned I = 0; I != unsigned(Slot::NumSlots); ++I) {
+    const RegDesc &R = Regs[I];
     XML += "    <reg name=\"";
     XML += R.Name;
-    XML += "\" bitsize=\"" + utostr(R.Bits) + "\" regnum=\"" +
-           utostr(R.Dwarf) + "\"";
+    // regnum is the protocol's own numbering, and the protocol says that is
+    // the position in the "g" packet: a client that has not read this
+    // description at all - which is any client without an XML parser, LLDB
+    // among them - numbers the registers that way, and the two have to agree
+    // or "p" reads the wrong register.  The DWARF number is a different
+    // numbering for a different purpose, the one the unwind information is
+    // written in, and goes in the attribute meant for it.
+    XML += "\" bitsize=\"" + utostr(R.Bits) + "\" regnum=\"" + utostr(I) +
+           "\" dwarf_regnum=\"" + utostr(R.Dwarf) + "\"";
     // The program counter is what a debugger needs told apart from the rest.
     if (StringRef(R.Name) == "pc")
       XML += " type=\"code_ptr\"";
@@ -440,15 +448,13 @@ void GDBServer::readOneRegister(StringRef Args) {
     sendPacket("E01");
     return;
   }
-  // The number is the DWARF one, which is not an index into the table.
-  for (unsigned I = 0; I != unsigned(Slot::NumSlots); ++I)
-    if (Regs[I].Dwarf == Num) {
-      std::string Out;
-      appendRegHex(Out, readReg(M, Slot(I)), Regs[I].Bits);
-      sendPacket(Out);
-      return;
-    }
-  sendPacket("E01");
+  if (Num >= unsigned(Slot::NumSlots)) {
+    sendPacket("E01");
+    return;
+  }
+  std::string Out;
+  appendRegHex(Out, readReg(M, Slot(Num)), Regs[Num].Bits);
+  sendPacket(Out);
 }
 
 void GDBServer::writeOneRegister(StringRef Args) {
@@ -458,18 +464,17 @@ void GDBServer::writeOneRegister(StringRef Args) {
     sendPacket("E01");
     return;
   }
-  for (unsigned I = 0; I != unsigned(Slot::NumSlots); ++I)
-    if (Regs[I].Dwarf == Num) {
-      std::optional<uint32_t> V = parseRegHex(Hex, Regs[I].Bits);
-      if (!V) {
-        sendPacket("E01");
-        return;
-      }
-      writeReg(M, Slot(I), *V);
-      sendPacket("OK");
-      return;
-    }
-  sendPacket("E01");
+  if (Num >= unsigned(Slot::NumSlots)) {
+    sendPacket("E01");
+    return;
+  }
+  std::optional<uint32_t> V = parseRegHex(Hex, Regs[Num].Bits);
+  if (!V) {
+    sendPacket("E01");
+    return;
+  }
+  writeReg(M, Slot(Num), *V);
+  sendPacket("OK");
 }
 
 void GDBServer::readMemory(StringRef Args) {

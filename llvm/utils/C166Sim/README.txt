@@ -92,11 +92,21 @@ own - nothing is written into the program - which is something a simulator can
 do and a part cannot.
 
 The registers are described to the client rather than assumed, through
-qXfer:features:read, and the numbers in that description are the DWARF ones
-from C166RegisterInfo.td.  So there is one register numbering across the
-assembler, the debug information and this.  PC is not a register any
-instruction can name: it is the 24 bit CSP:IP pair, reported as one 32 bit
-register because that is what an address in the debug information is.
+qXfer:features:read.  There are two numberings in that description and they are
+different things, which is worth saying because getting it wrong here was a bug
+that lasted until a real debugger arrived: regnum is the protocol's own number,
+which the protocol defines as the position in the "g" packet, and dwarf_regnum
+is the number the unwind information is written in, from C166RegisterInfo.td.
+A client that reads the description uses the first; a client that cannot -
+LLDB has no XML parser unless it is built with one - counts "g" packet
+positions, which is the same numbering.  Advertising the DWARF numbers as
+regnum made those two disagree above R15, and nothing noticed, because
+rsp-client.py reads whole register dumps and never asks for one register.
+llvm/test/tools/c166-sim/gdb-stub.test asks.
+
+PC is not a register any instruction can name: it is the 24 bit CSP:IP pair,
+reported as one 32 bit register because that is what an address in the debug
+information is.
 
 "target remote |" is GDB's spelling, and not every debugger has a pipe form -
 LLDB has none.  So the stub will listen on a socket instead:
@@ -110,11 +120,29 @@ it.  The stdin and stdout form above is still the default and is still what the
 tests use, because it needs no port and leaves nothing listening if the
 debugger goes away.
 
-No debugger knows the C166 architecture yet, so nothing can put a source level
-front end on this today; a port of GDB or LLDB to this target is what that
-would take.  The protocol itself is not architecture specific, though, so an
-ordinary remote client works, and tools/rsp-client.py is one - it is what the
-tests drive the stub with, and it prints what came back:
+LLDB knows the C166 now - that is what the ArchSpec entry, the register
+fallback and the generic register mapping under lldb/ are for - so it will
+connect to the port above and debug:
+
+  $ lldb prog.elf -o "gdb-remote 43505" -o "breakpoint set -n add" -o run
+
+A breakpoint set by name, the source line and column at the stop, the argument
+registers, disassembly with the current instruction marked, and stepping all
+work.  What does not yet is the ABI plugin, so the stack stops at one frame and
+a local reads as unavailable: the return address is on the other stack, and
+finding it needs the CFI expression llvm/test/CodeGen/C166/cfi-two-stacks.ll
+describes.
+
+None of that is a lit test, and the reason is worth writing down rather than
+leaving to be rediscovered.  The workflow that runs these tests does not build
+LLDB, and LLDB's own test suite has no C166 toolchain to build a program with,
+so a test there would be a test nothing runs.  What is tested is the half that
+can be - the stub - and gdb-stub.test beside the others drives it with
+rsp-client.py.
+
+The protocol is not architecture specific, so an ordinary remote client works
+too, and tools/rsp-client.py is one - it is what the tests drive the stub with,
+and it prints what came back:
 
   $ rsp-client.py -- c166-sim --gdb prog.elf <<'END'
   send Z0,c00100,2
