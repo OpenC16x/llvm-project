@@ -60,10 +60,13 @@ Three things now watch it, and it is worth knowing which of them run where.
   make.  --check-user-stack=false turns it off.
 
 What the check found on its first run, which is why it exists: throwing a C++
-exception uses 1262 bytes of the 1024 the scripts give the ABI stack, and
-llvm/utils/C166Sim/differential/library.c - a program that only calls the C
-library - uses 936 of them.  Neither had ever been measured.  startup/README.txt
-has the first under "C++ exceptions"; the second is 91% of the stack and passes.
+exception used 1262 bytes of the 1024 the scripts give the ABI stack - not a
+slow program but one writing below F600H, where there is no memory - and
+llvm/utils/C166Sim/differential/library.c, which only calls the C library, uses
+936 of them.  Neither had ever been measured.  The first is fixed: the rules the
+unwinder holds went from ten bytes to four and a throw is 812 bytes now, which
+startup/README.txt explains under "C++ exceptions".  The second is 91% of the
+stack and passes, and is the next thing that will go over.
 
 The threshold's default is 6 and the 6 is arithmetic.  Every call pushes two
 bytes of return address onto the system stack, which the stock scripts give 512

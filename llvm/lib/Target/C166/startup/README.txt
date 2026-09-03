@@ -710,19 +710,24 @@ instructions are interpreted.  The unwinder and the C++ ABI together are about
 13 KByte of Flash, which on a 64 KByte part is a fifth of it.  Exceptions here
 are for what has gone wrong, not for control flow.
 
-And there is a fourth thing, which is not a choice and is not fixed: a throw
-uses more ABI stack than the linker scripts here have to give it.  1262 bytes
-against the 1024 between F600H and FA00H, measured by the check STK-1 added -
-"c166-sim --count-states" prints "abi-stack 1262 of 1024" for
-differential/exceptions.cpp.  It is the unwinder's own frames: __unw_step is
-374 bytes, _Unwind_RaiseException 356 and frameInfo 280, and the first and last
-each hold a Row, which is twenty rules of ten bytes apiece.
+And there is a fourth cost, the ABI stack, which is worth knowing about
+because for a while it was not paid.  A throw is the deepest thing this backend
+does - the unwinder holds two Rows of rules at once and walks frames it did not
+build - and it used to take 1262 bytes of the 1024 the scripts give.  That is
+not a slow program, it is a program writing below F600H, where there is no
+memory on the part at all; it went unnoticed because the simulator's memory is
+flat, so the writes landed somewhere and the program carried on.  The check
+STK-1 added is what found it.
 
-That went unnoticed because the simulator's memory is flat, so a write below
-F600H lands somewhere and the program carries on; on the part that address is
-not memory at all.  So "throwing and catching work" above is a statement about
-this simulator and not about a part, and it stays true only for a program whose
-frames leave 1262 bytes clear when the throw happens - which the ones here do
-not.  Making the unwinder's rows smaller is the fix and is its own piece of
-work.  Until then differential/exceptions.cpp runs with the check off and says
-in its own comment why.
+It is 812 bytes now, worst case, and 784 at every level above -O0.  What did it
+was the Rule structure in unwind.c: a rule that has an argument is never one
+that has an expression, so the two share a field; an expression's length rides
+in the spare bits of the kind; and where an expression is fits in a sixteen bit
+offset from __eh_frame_start rather than a whole address.  Ten bytes to four,
+and a Row is twenty of them, twice over.  The unwinder came out 514 bytes
+smaller as well - indexing a four byte structure is a shift where ten was a
+multiply - and 1.6% faster.
+
+So "throwing and catching work" above is now a statement about a part and not
+only about this simulator, and differential/exceptions.cpp is what keeps it
+one: it runs with the stack check on and prints "abi-stack 812 of 1024".

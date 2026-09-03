@@ -1,24 +1,14 @@
 /* c166-flags: -fno-rtti */
-/* c166-sim-flags: --check-user-stack=false */
 /* Compiled twice: once for c166 and run in the simulator, once for the host
    and run natively.  The two outputs must match exactly.
 
-   The simulator's ABI stack check is turned off for this one, and that is a
-   defect being recorded rather than a check being avoided.  Throwing an
-   exception on this part uses more ABI stack than the linker scripts here have
-   to give: 1262 bytes against the 1024 between F600H and FA00H, which
-   "c166-sim --count-states" now prints as "abi-stack 1262 of 1024".  It is the
-   unwinder's own frames that do it - __unw_step is 374 bytes, frameInfo 280,
-   _Unwind_RaiseException 356, and each of the first two holds a Row, which is
-   twenty rules of ten bytes.  In the simulator the memory below F600H is
-   ordinary memory and the program runs; on the part it is not memory at all,
-   so this would be writing into nothing.
-
-   So this passes here and would not work on hardware, and turning the check
-   off is how that is said out loud rather than by a test that fails every run.
-   Fixing it means making the unwinder's frames smaller, which is a change to
-   startup/unwind.c and its own piece of work; llvm/lib/Target/C166/README.txt
-   says so under "C++ exceptions".
+   This is also where the ABI stack is measured, because a throw is the deepest
+   thing this backend does: the unwinder holds two Rows of rules at once and
+   walks frames it did not build.  It used to take 1262 bytes of the 1024 the
+   linker scripts give, which the simulator's stack check found the day it was
+   written and which meant throwing did not work on a part at all - the memory
+   below F600H is not memory.  It is 784 now.  "c166-sim --count-states" prints
+   that as "abi-stack 784 of 1024" and is how to check it stays there.
 
    Throwing and catching, which on this part means the unwinder in libc walks
    the call frame information the compiler emitted, on a machine where a return

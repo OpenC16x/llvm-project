@@ -154,12 +154,36 @@ enum {
   RULE_VAL_EXPR       /* is what the expression computes              */
 };
 
+/* A rule is four bytes, and the shape is the reason.  Two Rows are live at the
+ * deepest point of a walk - the one __unw_step is building and the one
+ * frameInfo keeps to restore from - so every byte here is paid for twice, and
+ * a Row is twenty rules.  At the ten bytes this used to be that came to 416
+ * bytes of a stack that is 1024, and a throw did not fit in it: 1262 bytes
+ * against 1024, which is what llvm/utils/C166Sim's ABI stack check reported
+ * the day it was written.
+ *
+ * Three things make it four.  A rule that has an argument - an offset or a
+ * register number - is never one that has an expression, so the two share a
+ * field.  An expression's length is small enough to ride in the spare bits of
+ * the kind, of which there are seven.  And an expression is always inside
+ * .eh_frame, so where it is fits in a sixteen bit offset from the start of
+ * that section rather than needing the whole address; the linker scripts
+ * assert that the section is small enough for that to be true. */
 typedef struct {
-  u8 kind;
-  s16 arg;   /* an offset, or a register number                       */
-  u32 expr;  /* where the expression is, when there is one            */
-  u8 exprlen;
+  u8 kind : 3;    /* one of the RULE_ values above                    */
+  u8 exprlen : 5; /* how long the expression is, when there is one    */
+  union {
+    s16 arg;  /* an offset, or a register number                      */
+    u16 expr; /* where the expression is, from __eh_frame_start       */
+  } u;
 } Rule;
+
+/* The most an exprlen can hold.  A call frame expression this target emits is
+ * a handful of bytes - the return address one is the longest and is under ten
+ * - so this is not a limit anything reaches; a rule that would exceed it is
+ * refused rather than truncated, which stops the walk instead of unwinding to
+ * a wrong address. */
+#define MAX_EXPR_LEN 31
 
 typedef struct {
   Rule reg[NREGS];
@@ -167,6 +191,13 @@ typedef struct {
   s16 cfaOffset;
   u32 loc;        /* the address the rules so far describe            */
 } Row;
+
+/* Where a rule's expression actually is.  The offset is from the start of
+ * .eh_frame, which is a far address, and the linker script keeps that section
+ * inside one segment - so this addition cannot carry into the segment. */
+static u32 ruleExpr(const Rule *r) {
+  return (u32)__eh_frame_start + r->u.expr;
+}
 
 typedef struct {
   u32 codeAlign;
@@ -308,7 +339,7 @@ static int runCFI(Row *row, const CIE *cie, fptr p, fptr end, u32 pc,
         int slot = slotOf(operand);
         if (slot >= 0) {
           row->reg[slot].kind = RULE_OFFSET;
-          row->reg[slot].arg = (s16)off;
+          row->reg[slot].u.arg = (s16)off;
         }
         continue;
       }
@@ -369,7 +400,7 @@ static int runCFI(Row *row, const CIE *cie, fptr p, fptr end, u32 pc,
       if (slot >= 0) {
         row->reg[slot].kind =
             (op == DW_CFA_val_offset) ? RULE_VAL_OFFSET : RULE_OFFSET;
-        row->reg[slot].arg = (s16)off;
+        row->reg[slot].u.arg = (s16)off;
       }
       break;
     }
@@ -380,7 +411,7 @@ static int runCFI(Row *row, const CIE *cie, fptr p, fptr end, u32 pc,
       if (slot >= 0) {
         row->reg[slot].kind =
             (op == DW_CFA_val_offset_sf) ? RULE_VAL_OFFSET : RULE_OFFSET;
-        row->reg[slot].arg = (s16)off;
+        row->reg[slot].u.arg = (s16)off;
       }
       break;
     }
@@ -389,7 +420,7 @@ static int runCFI(Row *row, const CIE *cie, fptr p, fptr end, u32 pc,
       u32 other = uleb(&p);
       if (slot >= 0) {
         row->reg[slot].kind = RULE_REGISTER;
-        row->reg[slot].arg = (s16)other;
+        row->reg[slot].u.arg = (s16)other;
       }
       break;
     }
@@ -404,9 +435,14 @@ static int runCFI(Row *row, const CIE *cie, fptr p, fptr end, u32 pc,
       int slot = slotOf(uleb(&p));
       u32 len = uleb(&p);
       if (slot >= 0) {
+        /* Refused rather than truncated: a rule this cannot hold is one the
+         * walk would apply wrongly, and stopping is the safe answer. */
+        u32 off = (u32)p - (u32)__eh_frame_start;
+        if (len > MAX_EXPR_LEN || off > 0xFFFFu)
+          return 0;
         row->reg[slot].kind =
             (op == DW_CFA_val_expression) ? RULE_VAL_EXPR : RULE_EXPR;
-        row->reg[slot].expr = (u32)p;
+        row->reg[slot].u.expr = (u16)off;
         row->reg[slot].exprlen = (u8)len;
       }
       p += len;
@@ -598,9 +634,8 @@ static int findFDEUncached(u32 pc, CIE *cie, fptr *instrs, fptr *instrsEnd,
 static void initialRow(Row *row) {
   for (int i = 0; i < NREGS; i++) {
     row->reg[i].kind = RULE_SAME;
-    row->reg[i].arg = 0;
-    row->reg[i].expr = 0;
     row->reg[i].exprlen = 0;
+    row->reg[i].u.arg = 0;
   }
   row->cfaReg = 0;
   row->cfaOffset = 0;
@@ -682,10 +717,13 @@ _Unwind_Reason_Code __unw_step(_Unwind_Context *ctx) {
    * evaluated before any of them is stored. */
   _Unwind_Context out = *ctx;
   u32 value[NREGS];
-  u8 have[NREGS];
+  /* One bit per register rather than one byte: twenty bytes of a stack this
+   * size is worth the shift, and there are only twenty of them. */
+  u32 have = 0;
+#define HAVE(i) (have & (1ul << (i)))
+#define SET_HAVE(i) (have |= 1ul << (i))
 
   for (int i = 0; i < NREGS; i++) {
-    have[i] = 0;
     value[i] = 0;
     int ok = 1;
     switch (row.reg[i].kind) {
@@ -694,49 +732,51 @@ _Unwind_Reason_Code __unw_step(_Unwind_Context *ctx) {
     case RULE_UNDEFINED:
       break;
     case RULE_OFFSET:
-      value[i] = loadWord(cfa + (u32)(s32)row.reg[i].arg);
-      have[i] = 1;
+      value[i] = loadWord(cfa + (u32)(s32)row.reg[i].u.arg);
+      SET_HAVE(i);
       break;
     case RULE_VAL_OFFSET:
-      value[i] = cfa + (u32)(s32)row.reg[i].arg;
-      have[i] = 1;
+      value[i] = cfa + (u32)(s32)row.reg[i].u.arg;
+      SET_HAVE(i);
       break;
     case RULE_REGISTER: {
-      int from = slotOf((u32)row.reg[i].arg);
+      int from = slotOf((u32)row.reg[i].u.arg);
       if (from < 0)
         return _URC_FATAL_PHASE1_ERROR;
       value[i] = (from < 16) ? ctx->reg[from]
                              : (from == REG_SYSSP ? ctx->syssp
                                 : from == REG_CSP  ? ctx->csp
                                                    : ctx->pc);
-      have[i] = 1;
+      SET_HAVE(i);
       break;
     }
     case RULE_EXPR: {
-      u32 addr = runExpr(ctx, row.reg[i].expr, row.reg[i].exprlen, cfa, &ok);
+      u32 addr = runExpr(ctx, ruleExpr(&row.reg[i]), row.reg[i].exprlen,
+                         cfa, &ok);
       if (!ok)
         return _URC_FATAL_PHASE1_ERROR;
       value[i] = loadWord(addr);
-      have[i] = 1;
+      SET_HAVE(i);
       break;
     }
     case RULE_VAL_EXPR:
-      value[i] = runExpr(ctx, row.reg[i].expr, row.reg[i].exprlen, cfa, &ok);
+      value[i] = runExpr(ctx, ruleExpr(&row.reg[i]), row.reg[i].exprlen,
+                         cfa, &ok);
       if (!ok)
         return _URC_FATAL_PHASE1_ERROR;
-      have[i] = 1;
+      SET_HAVE(i);
       break;
     }
   }
 
   for (int i = 0; i < 16; i++)
-    if (have[i])
+    if (HAVE(i))
       out.reg[i] = (u16)value[i];
-  if (have[REG_SYSSP])
+  if (HAVE(REG_SYSSP))
     out.syssp = (u16)value[REG_SYSSP];
-  if (have[REG_CSP])
+  if (HAVE(REG_CSP))
     out.csp = (u16)value[REG_CSP];
-  if (have[REG_PC])
+  if (HAVE(REG_PC))
     out.pc = value[REG_PC];
 
   /* The canonical frame address is the caller's ABI stack pointer, which is
@@ -749,8 +789,10 @@ _Unwind_Reason_Code __unw_step(_Unwind_Context *ctx) {
   /* A frame whose return address came back as zero is the outermost one:
    * crt0 starts the program with a zero there so that a walk ends rather than
    * wandering off into whatever the reset left behind. */
-  if (!have[REG_PC] || out.pc == 0 || out.pc == ctx->pc)
+  if (!HAVE(REG_PC) || out.pc == 0 || out.pc == ctx->pc)
     return _URC_END_OF_STACK;
+#undef HAVE
+#undef SET_HAVE
 
   *ctx = out;
   return _URC_NO_REASON;

@@ -614,5 +614,13 @@ SECTIONS
 ASSERT(__user_stack_limit < __user_stack_top,
        "there is no room left for the ABI stack: what is placed below it reaches __user_stack_top")
 
+/* The call frame information has to fit in a sixteen bit offset from its own
+ * start, because that is how startup/unwind.c stores where an expression is -
+ * see the note on Rule there, which is about the two Rows a walk holds and the
+ * 1 KByte of ABI stack they have to fit in.  Nothing on any part in the table
+ * comes close: the whole of the near program memory is 48 KByte. */
+ASSERT(__eh_frame_end - __eh_frame_start <= 0xFFFF,
+       "the call frame information is larger than the unwinder can index")
+
 ASSERT(__c166_unnumbered_vectors_start == __c166_unnumbered_vectors_end,
        "a vector goes in .vectors.NNN, named for its trap number in decimal padded to three digits; plain .vectors has no slot")
