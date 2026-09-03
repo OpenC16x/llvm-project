@@ -1,0 +1,95 @@
+# REQUIRES: c166-registered-target
+# RUN: rm -rf %t && split-file %s %t
+
+## The other half of STK-1: not the simulator noticing that R0 has gone too
+## far, but the program noticing it itself.  -mstack-check puts a comparison
+## against __user_stack_limit in the prologue of any function whose frame is
+## large enough to be worth eight bytes, and jumps to __c166_stack_overflow
+## when it fails.  That handler is weak, so a program can replace it; this one
+## does, with four instructions that say so and stop.
+##
+## Everything here is linked by hand rather than through the sysroot, so that
+## the test needs nothing the LLVM build does not produce.
+
+# RUN: llc -mtriple=c166 -mattr=+stack-check %t/deep.ll -o %t/deep.s
+# RUN: llvm-mc -filetype=obj -triple=c166 %t/deep.s -o %t/deep.o
+# RUN: llvm-mc -filetype=obj -triple=c166 %t/rt.s -o %t/rt.o
+# RUN: ld.lld -Ttext=0xc00100 -e _start --defsym=__user_stack_limit=0xf600 \
+# RUN:     %t/deep.o %t/rt.o -o %t/deep.elf
+
+## The recursion runs off the bottom of the stack, and the program's own
+## handler is what says so - the simulator's check is turned off here, because
+## the point is that this works without it and would work on a part.
+# RUN: %c166_sim --check-user-stack=false %t/deep.elf | FileCheck %s
+# CHECK: caught
+
+## With the simulator watching as well, it is the compiler's check that gets
+## there first: the prologue compares before the frame is used, so the program
+## stops itself on the same call the simulator would have stopped it on.
+# RUN: %c166_sim %t/deep.elf | FileCheck %s
+
+## And without the flag nothing in the program notices.  It runs on past the
+## limit until the return addresses fill the system stack, which is the
+## hardware's check and the one this part does have.
+# RUN: llc -mtriple=c166 %t/deep.ll -o %t/plain.s
+# RUN: llvm-mc -filetype=obj -triple=c166 %t/plain.s -o %t/plain.o
+# RUN: ld.lld -Ttext=0xc00100 -e _start --defsym=__user_stack_limit=0xf600 \
+# RUN:     %t/plain.o %t/rt.o -o %t/plain.elf
+# RUN: not %c166_sim --check-user-stack=false %t/plain.elf 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=UNCHECKED
+# UNCHECKED-NOT: caught
+# UNCHECKED: error: system stack overflow
+
+#--- deep.ll
+; A frame of 128 bytes and a recursion with no way out, which is the shape of
+; the failure this exists for: the ABI stack in the linker scripts is 1 KByte,
+; so this reaches the bottom of it in eight calls.
+define i16 @recurse(i16 %n) {
+  %a = alloca [64 x i16]
+  call void @touch(ptr %a)
+  %r = call i16 @recurse(i16 %n)
+  ret i16 %r
+}
+
+define void @touch(ptr %p) {
+  store volatile i16 1, ptr %p
+  ret void
+}
+
+#--- rt.s
+## What a sysroot would supply: somewhere to start, somewhere to stop, and a
+## replacement for the weak handler in runtime.c.
+	.macro	emit ch
+	movb	rl2, #\ch
+	exts	#0xFF, #1
+	movb	[r4], rl2
+	.endm
+
+	.text
+	.globl _start
+_start:
+	mov	r0, #0xFA00
+	calla	cc_UC, recurse
+	mov	r2, #0
+	jmpa	cc_UC, __c166_exit
+
+## The program's own handler.  It needs no frame of its own - R0 is already
+## below where it is allowed to be, so anything this allocated would go further
+## down - which is why it writes the characters out one at a time from
+## immediates rather than walking a string.
+	.globl __c166_stack_overflow
+__c166_stack_overflow:
+	mov	r4, #0x0000
+	emit	'c'
+	emit	'a'
+	emit	'u'
+	emit	'g'
+	emit	'h'
+	emit	't'
+	emit	10
+	mov	r2, #0
+	jmpa	cc_UC, __c166_exit
+
+	.globl __c166_exit
+__c166_exit:
+	ret

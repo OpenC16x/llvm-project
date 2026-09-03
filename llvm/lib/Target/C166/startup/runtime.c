@@ -60,3 +60,23 @@ __c166_assert_failed(const char *expr, const char *file, unsigned line) {
   __c166_exit();
   __builtin_unreachable();
 }
+
+/// Where a prologue that found R0 below __user_stack_limit goes, under
+/// -mstack-check.  The compiler jumps here rather than calling, because the
+/// frame that would hold the return address is the one that did not fit, and
+/// because there is nothing to go back to: by the time this runs the stack
+/// pointer is already below the memory it is allowed to use, so anything this
+/// does that needs a frame of its own makes it worse.
+///
+/// It stops the machine.  A program that wants to say something first, or to
+/// reset R0 to the top and carry on, defines its own - the symbol is weak and
+/// takes no arguments and returns nothing, so a replacement is four lines.
+///
+/// A replacement must need no frame of its own, which is why this one is a
+/// call and nothing else.  That is not only a rule about this function: it is
+/// also what keeps the check from finding itself, since -mstack-check only
+/// puts the comparison in a prologue that allocates something.
+__attribute__((weak, noreturn)) void __c166_stack_overflow(void) {
+  __c166_exit();
+  __builtin_unreachable();
+}

@@ -23,6 +23,68 @@ is an ordinary general purpose register, so frame slots are reachable with the
 [Rw + #data16] addressing mode; the hardware stack pointer is not.  R1 is the
 frame pointer when a function needs one.
 
+Only one of the two is guarded.  STKOV and STKUN are registers the hardware
+compares SP against on every push and pop, and crossing either takes a trap;
+what they compare is the hardware stack pointer, so there is no way to aim them
+at R0 and no second pair to aim.  The ABI stack therefore has nothing watching
+it, and a program that recurses too deep or puts a large array on the stack
+walks R0 down through whatever is under it and keeps running.  On a part with
+2 KByte of dual-port RAM that is not an exotic failure: it is what
+llvm/utils/C166Sim/differential/library.c found llvm-libc's strtof doing, an
+800 byte object on a 1 KByte stack.
+
+Checking the ABI stack
+----------------------
+
+Three things now watch it, and it is worth knowing which of them run where.
+
+  __user_stack_limit is a symbol the linker scripts in startup/ define, at the
+  bottom of the ABI stack, with an assertion beside it that what is placed
+  below has not reached the top.  It is the address the other two compare
+  against.
+
+  -mstack-check puts two instructions in the prologue of any function whose
+  frame is at least -c166-stack-check-threshold bytes: a CMP of R0 against
+  __user_stack_limit plus this frame's size, and a JMPA to
+  __c166_stack_overflow when it is below.  The addition is the linker's, in the
+  addend of the relocation, so it is eight bytes and four states; comparing
+  before the allocation rather than after it means a checked program never puts
+  R0 below its own stack at all.  __c166_stack_overflow is weak, defined in
+  startup/runtime.c to stop the machine, and replaceable by a program that
+  wants to say something first - a replacement must need no frame of its own.
+
+  llvm/utils/C166Sim reads __user_stack_limit out of the executable and stops
+  when R0 goes below it, whether or not the program was built with the flag.
+  That costs the program nothing and catches every crossing rather than the
+  ones a checked prologue happens to see, which is a trade only a simulator can
+  make.  --check-user-stack=false turns it off.
+
+What the check found on its first run, which is why it exists: throwing a C++
+exception uses 1262 bytes of the 1024 the scripts give the ABI stack, and
+llvm/utils/C166Sim/differential/library.c - a program that only calls the C
+library - uses 936 of them.  Neither had ever been measured.  startup/README.txt
+has the first under "C++ exceptions"; the second is 91% of the stack and passes.
+
+The threshold's default is 6 and the 6 is arithmetic.  Every call pushes two
+bytes of return address onto the system stack, which the stock scripts give 512
+bytes, so a runaway recursion trips STKOV on its 256th call whatever its frames
+look like; the ABI stack in the same scripts is 1024 bytes, so a recursion
+through frames of F bytes reaches the bottom of it on call 1024/F.  The ABI
+stack goes first exactly when F > 4.  A frame of four bytes or less is thus
+already the hardware's to catch, and six is the first size that is not.
+Checking from there up is what makes the two between them cover every straight
+recursion under those scripts; a board with a different map wants a different
+number, which is why it is an option.
+
+What that completeness costs, over the four programs in
+llvm/utils/C166Sim/corpus at -O2 against 44050 bytes of text and 17,089,775
+states: +0.94% of text and +0.113% of the time at the default, +0.27% and
++0.019% at a threshold of 32, +0.15% and nothing measurable at 64.  61% of the
+functions in those programs allocate anything at all and 16% allocate 32 bytes
+or more, so the size difference is most of the functions and the time
+difference is almost none of the work - the large frames are not in the inner
+loops.
+
 Calling convention
 ------------------
 

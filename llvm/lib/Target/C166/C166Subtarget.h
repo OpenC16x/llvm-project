@@ -33,6 +33,7 @@ class C166Subtarget : public C166GenSubtargetInfo {
 
   bool HasExtInstr = false;
   bool HasMAC = false;
+  bool HasStackCheck = false;
   // Which derivative's special function registers this part has, over the set
   // every map here agrees about.  Nothing in code generation reads these - the
   // compiler names no peripheral of its own - but the assembler and the
@@ -60,6 +61,7 @@ public:
 
   bool hasExtInstr() const { return HasExtInstr; }
   bool hasMAC() const { return HasMAC; }
+  bool hasStackCheck() const { return HasStackCheck; }
   bool hasSFRXC164() const { return HasSFRXC164; }
   bool hasSFRC167() const { return HasSFRC167; }
   bool hasSFRST10() const { return HasSFRST10; }

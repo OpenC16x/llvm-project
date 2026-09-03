@@ -1246,7 +1246,48 @@ bool Machine::step() {
   PrevWrotePSW = WrotePSW;
 
   retireExtend();
+  checkUserStack();
   return Stop == StopReason::Running;
+}
+
+void Machine::checkUserStack() {
+  if (!HasUserStackLimit || Stop != StopReason::Running)
+    return;
+  uint16_t SP0 = getWordReg(0);
+  // Arm on the first sight of a sane value, and remember which register bank it
+  // was in.  R0 is zero out of reset and stays there until the startup code
+  // loads it from __user_stack_top, and those instructions are not an
+  // overflow.
+  if (!UserStackArmed) {
+    if (SP0 < UserStackLimit)
+      return;
+    UserStackArmed = true;
+    UserStackCP = CP;
+    return;
+  }
+  // "R0" is whichever sixteen words CP is pointing at, so in a handler with a
+  // register bank of its own it is a different register that happens to have
+  // the same name - and one the prologue only loads with the stack pointer if
+  // the handler needs it, so it usually holds whatever was left in that bank.
+  // Zero, on the first entry to a bank nothing has used.  That is not an
+  // overflow, and the way to not report it as one is to check only in the bank
+  // the ABI stack pointer belongs to.
+  //
+  // The cost is that a banked handler which does use the stack is not watched.
+  // It is a handler: it runs on the same stack, so what it spends shows up in
+  // the checks of everything it interrupted.
+  if (CP != UserStackCP)
+    return;
+  if (SP0 < UserStackLow)
+    UserStackLow = SP0;
+  if (SP0 >= UserStackLimit || !StopOnUserStackOverflow)
+    return;
+  Stop = StopReason::StackFault;
+  StopDetail = (Twine("ABI stack overflow: R0 is ") + addrStr(SP0) +
+                ", below __user_stack_limit at " + addrStr(UserStackLimit) +
+                ".  Nothing on the part checks this - see -mstack-check and "
+                "llvm/lib/Target/C166/startup/README.txt")
+                   .str();
 }
 
 namespace {

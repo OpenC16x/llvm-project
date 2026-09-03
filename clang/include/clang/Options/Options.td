@@ -7298,6 +7298,13 @@ def mmac : Flag<["-"], "mmac">, Group<m_c166_Features_Group>,
   HelpText<"Use the multiply-accumulate coprocessor (C166 only)">;
 def mno_mac : Flag<["-"], "mno-mac">, Group<m_c166_Features_Group>,
   HelpText<"Do not use the multiply-accumulate coprocessor (C166 only)">;
+def mstack_check : Flag<["-"], "mstack-check">, Group<m_c166_Features_Group>,
+  HelpText<"Check the ABI stack pointer against __user_stack_limit on entry to "
+           "a function with a large frame, jumping to __c166_stack_overflow "
+           "when it is past it (C166 only)">;
+def mno_stack_check : Flag<["-"], "mno-stack-check">,
+  Group<m_c166_Features_Group>,
+  HelpText<"Do not check the ABI stack pointer (C166 only)">;
 } // let Flags = [TargetSpecific]
 
 // M68k features flags

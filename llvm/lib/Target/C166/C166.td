@@ -32,6 +32,24 @@ def FeatureMAC
     : SubtargetFeature<"mac", "HasMAC", "true",
                        "Enable the multiply-accumulate unit">;
 
+// Not a property of the part - no C166 has this - but a choice about the code
+// generated for it, carried the same way so that it can be made per function
+// with __attribute__((target(...))) as well as per translation unit.
+//
+// It exists because only one of this part's two stacks is guarded.  STKOV and
+// STKUN compare the hardware stack pointer, which holds return addresses, and
+// take a trap when it leaves its window; the R0 stack that holds frames,
+// spills and locals has nothing watching it at all.  This puts a comparison
+// against __user_stack_limit in the prologue of a function whose frame is
+// large enough for it to be worth the eight bytes, and jumps to
+// __c166_stack_overflow when it fails.  What "large enough" means is
+// -c166-stack-check-threshold, and the reasoning behind its default is in
+// C166FrameLowering.cpp.
+def FeatureStackCheck
+    : SubtargetFeature<"stack-check", "HasStackCheck", "true",
+                       "Check the ABI stack pointer against __user_stack_limit "
+                       "in the prologue of a function with a large frame">;
+
 // One feature and not two, which is worth saying because the ST10's DSP looks
 // at first like a second unit.  It is not: the ST10 Family Programming Manual
 // (PM0036) documents the same unit this backend already describes.  Checked

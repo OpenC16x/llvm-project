@@ -590,11 +590,29 @@ SECTIONS
    * from there to the dual-port RAM is not RAM at all, so a heap that started
    * there began in nothing.  Now it is the room between what is placed in the
    * dual-port RAM and the ABI stack coming down. */
+  /* Where the ABI stack must not go below.  There are two stacks on this part
+   * and only one of them is guarded: STKOV and STKUN compare the hardware
+   * stack pointer SP, which holds return addresses, and take a trap when it
+   * leaves its window.  R0 is the other stack - frames, spills, locals, arrays
+   * - and no register in the part watches it, so a program that recurses too
+   * deep or puts a large array on the stack walks R0 down through whatever is
+   * under it and corrupts that silently.
+   *
+   * This says where "under it" begins, so that something can check.  Two
+   * things do: -mstack-check makes the compiler compare R0 against this symbol
+   * in the prologue of any function whose frame is large enough to be worth
+   * it, and llvm/utils/C166Sim reads this symbol out of the executable and
+   * stops when R0 goes below it, whether or not the program was built with
+   * that flag. */
+  __user_stack_limit = __dprambss_end;
   __heap_start = __dprambss_end;
   __heap_end = __user_stack_top;
 
   /DISCARD/ : { *(.comment) *(.note.*) }
 }
+
+ASSERT(__user_stack_limit < __user_stack_top,
+       "there is no room left for the ABI stack: what is placed below it reaches __user_stack_top")
 
 ASSERT(__c166_unnumbered_vectors_start == __c166_unnumbered_vectors_end,
        "a vector goes in .vectors.NNN, named for its trap number in decimal padded to three digits; plain .vectors has no slot")

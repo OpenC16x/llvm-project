@@ -16,6 +16,7 @@
 namespace llvm {
 
 class C166Subtarget;
+class C166InstrInfo;
 
 /// The C166 has two stacks.  Return addresses (and anything explicitly PUSHed)
 /// live on the small hardware stack addressed by the SP special function
@@ -69,6 +70,13 @@ public:
   void emitUnwindRules(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                        const DebugLoc &DL, unsigned Depth,
                        MachineInstr::MIFlag Flag) const;
+
+  /// Emit the comparison against __user_stack_limit that -mstack-check puts in
+  /// front of a frame of \p StackSize bytes, when that is large enough to be
+  /// worth it.  Nothing else guards the R0 stack: see the definition.
+  void emitStackCheck(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                      const DebugLoc &DL, const C166InstrInfo &TII,
+                      uint64_t StackSize) const;
 
   bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator MI,

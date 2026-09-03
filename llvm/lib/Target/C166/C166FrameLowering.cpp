@@ -25,10 +25,54 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
+
+/// How large a frame has to be before -mstack-check puts the comparison in
+/// front of it.  Eight bytes of code against a frame of this many bytes or
+/// more.
+///
+/// Six, and the six is arithmetic rather than taste.  This part has two
+/// stacks and the hardware watches the other one: every call pushes two bytes
+/// of return address onto the system stack, which the stock linker scripts
+/// give 512 bytes, so a runaway recursion trips STKOV on its 256th call
+/// whatever its frames look like.  The ABI stack in the same scripts is the
+/// 1024 bytes between F600H and FA00H, so a recursion whose frame is F bytes
+/// exhausts it on call 1024/F.  The ABI stack goes first exactly when
+/// 1024/F < 256, which is F > 4.  A frame of four bytes or less is the
+/// hardware's to catch; six is the first one that is not, and checking from
+/// there up is what makes the two checks between them cover every straight
+/// recursion under those scripts.  A board with a different map wants a
+/// different number, which is why this is an option.
+///
+/// The cost of being complete rather than cheap is small.  Over the four
+/// programs in llvm/utils/C166Sim/corpus built for this part at -O2, against
+/// 44050 bytes of text and 17,089,775 states:
+///
+///   threshold  2   text +1.02%   states +0.115%
+///   threshold  6   text +0.94%   states +0.113%
+///   threshold  8   text +0.91%   states +0.113%
+///   threshold 16   text +0.74%   states +0.096%
+///   threshold 32   text +0.27%   states +0.019%
+///   threshold 64   text +0.15%   states +0.000%
+///
+/// The distribution behind that: 61% of the functions in those programs
+/// allocate anything at all, 53% allocate eight bytes or more, 43% sixteen or
+/// more, 16% thirty two or more, and 6% sixty four or more, with one 402 byte
+/// frame at the end of a long tail.  Raising the threshold to 32 buys three
+/// quarters of the code size back and gives up the completeness above, which
+/// is a trade a program that has measured its own stack can make and a
+/// default should not.
+///
+/// The states column is small at every setting because the functions with the
+/// large frames are not the ones in the inner loops.  It is not zero: the
+/// check is a CMP and a JMPA, four states, in every prologue that takes it.
+static cl::opt<unsigned> StackCheckThreshold(
+    "c166-stack-check-threshold", cl::Hidden, cl::init(6),
+    cl::desc("Smallest frame -mstack-check checks, in bytes"));
 
 bool C166FrameLowering::hasFPImpl(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -246,6 +290,58 @@ static bool bankedHandlerNeedsStackPointer(const MachineFunction &MF) {
          MFI.hasVarSizedObjects() || MFI.isFrameAddressTaken();
 }
 
+/// Emit the two instructions that say the frame about to be allocated fits.
+///
+/// The part guards one of its two stacks.  STKOV and STKUN compare SP, which
+/// holds return addresses, and take a trap when it leaves the window they
+/// describe; R0, which holds everything else, has nothing watching it - there
+/// is no second pair of registers and no way to point the first pair at it,
+/// because what STKOV compares is the hardware stack pointer and not a general
+/// purpose register.  So this is code, and it is only in the prologues where
+/// it earns its eight bytes.
+///
+/// It goes before the allocation and compares against the limit plus the frame
+/// size rather than after it against the limit itself.  Both are one CMP - the
+/// addition is the linker's, in the addend of the relocation - and this way a
+/// checked program never puts R0 below the memory it owns at all, not even for
+/// the two instructions it would take to notice.  That matters for the
+/// handler, which then runs with a stack pointer that is still inside the
+/// stack, and it is what lets the simulator's own check (which sees every
+/// value R0 takes, not only the ones a prologue asks about) agree with this
+/// one instead of firing first.
+///
+/// CMP leaves the flags for the JMPA and nothing else in the prologue reads
+/// them, and the jump does not return, so no register is disturbed and the
+/// unwind rules already emitted stay true.
+void C166FrameLowering::emitStackCheck(MachineBasicBlock &MBB,
+                                       MachineBasicBlock::iterator MBBI,
+                                       const DebugLoc &DL,
+                                       const C166InstrInfo &TII,
+                                       uint64_t StackSize) const {
+  const MachineFunction &MF = *MBB.getParent();
+  if (!MF.getSubtarget<C166Subtarget>().hasStackCheck())
+    return;
+
+  // A function that allocates nothing cannot be the one that runs out, and the
+  // handler is such a function - which is what stops the check from finding
+  // itself.
+  if (StackSize < std::max<uint64_t>(StackCheckThreshold, 1))
+    return;
+
+  // "__user_stack_limit + StackSize", which the linker works out: the addend
+  // rides in the relocation and costs the program nothing.
+  MachineOperand Limit = MachineOperand::CreateES("__user_stack_limit");
+  Limit.setOffset(StackSize);
+  BuildMI(MBB, MBBI, DL, TII.get(C166::CMP16ri))
+      .addReg(C166::R0)
+      .add(Limit)
+      .setMIFlag(MachineInstr::FrameSetup);
+  BuildMI(MBB, MBBI, DL, TII.get(C166::JMPAcc))
+      .addExternalSymbol("__c166_stack_overflow")
+      .addImm(C166CC::COND_ULT)
+      .setMIFlag(MachineInstr::FrameSetup);
+}
+
 void C166FrameLowering::emitPrologue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
   MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -339,6 +435,8 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
   if (SavedWords)
     emitUnwindRules(MBB, MBBI, DL, /*Depth=*/2 * SavedWords,
                     MachineInstr::FrameSetup);
+
+  emitStackCheck(MBB, MBBI, DL, TII, StackSize);
 
   // Allocate the frame before the callee saved registers are spilled: their
   // slots are addressed relative to the already adjusted stack pointer.

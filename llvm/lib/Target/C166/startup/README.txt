@@ -40,7 +40,8 @@ saying which part a file is for is how it gets past it.
   unwind-asm.S         the register capture and restore it needs
   cxa.c                the personality routine and the __cxa_ calls
   unwind.h             what a program calls into the unwinder
-  runtime.c            errno, exit, abort and the assert handler
+  runtime.c            errno, exit, abort, the assert handler and the stack
+                       overflow handler
   include/             the standard headers a freestanding part can mean
 
 Building it
@@ -606,6 +607,17 @@ sizes are in the object file: 838 bytes in one function.  What it needs is
 either a part with more internal RAM, an ABI stack somewhere the scripts here
 do not put one, or a decimal conversion written for a part this size.
 
+It is at least no longer silent.  The scripts here define __user_stack_limit at
+the bottom of the ABI stack; the simulator reads it out of the executable and
+stops the moment R0 goes below it, and -mstack-check puts the same comparison
+in the program's own prologues.  Calling strtof("1e39") now says
+
+  error: ABI stack overflow: R0 is 0x00f5fe, below __user_stack_limit at
+  0x00f600
+
+rather than returning 1.4e-45.  llvm/lib/Target/C166/README.txt has both under
+"Checking the ABI stack".
+
 picolibc, or this
 -----------------
 
@@ -697,3 +709,20 @@ because the frame description entries are searched linearly and the call frame
 instructions are interpreted.  The unwinder and the C++ ABI together are about
 13 KByte of Flash, which on a 64 KByte part is a fifth of it.  Exceptions here
 are for what has gone wrong, not for control flow.
+
+And there is a fourth thing, which is not a choice and is not fixed: a throw
+uses more ABI stack than the linker scripts here have to give it.  1262 bytes
+against the 1024 between F600H and FA00H, measured by the check STK-1 added -
+"c166-sim --count-states" prints "abi-stack 1262 of 1024" for
+differential/exceptions.cpp.  It is the unwinder's own frames: __unw_step is
+374 bytes, _Unwind_RaiseException 356 and frameInfo 280, and the first and last
+each hold a Row, which is twenty rules of ten bytes apiece.
+
+That went unnoticed because the simulator's memory is flat, so a write below
+F600H lands somewhere and the program carries on; on the part that address is
+not memory at all.  So "throwing and catching work" above is a statement about
+this simulator and not about a part, and it stays true only for a program whose
+frames leave 1262 bytes clear when the throw happens - which the ones here do
+not.  Making the unwinder's rows smaller is the fix and is its own piece of
+work.  Until then differential/exceptions.cpp runs with the check off and says
+in its own comment why.
