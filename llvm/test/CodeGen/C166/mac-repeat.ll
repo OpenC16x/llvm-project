@@ -11,10 +11,19 @@
 ; the attribute says is in that memory whichever side of the multiply it was
 ; written on.
 ;
+; A stream need not step one word forward.  The unit has four offset registers
+; and pointer update codes 4 to 7 move a pointer by one of them, so any fixed
+; distance the loop keeps to is a stride the instruction walks by itself: a
+; word back is an update code of its own, and anything else is written into
+; QX0 or QR0 first.  What it is not is a wraparound - the part has none, and
+; the C166S V2 Architecture Overview Handbook says so outright, listing "one
+; FIR filter tap per cycle, with no circular buffer management" among the
+; MAC's features.
+;
 ; The loops below that are not this shape keep the loop they started with, and
 ; each is here for a different reason it is not: no array IDX0 can reach, a
-; trip count only the running program knows, a stream walked backwards, and a
-; loop with something in it besides the product.
+; trip count only the running program knows, and a loop with something in it
+; besides the product.
 
 target datalayout = "e-m:e-p:16:16-p1:32:16-i32:16-i64:16-f32:16-f64:16-a:8-n8:16-S16"
 target triple = "c166"
@@ -24,6 +33,7 @@ target triple = "c166"
 @udp = global [64 x i16] zeroinitializer, align 2 #0
 @upl = global [64 x i16] zeroinitializer, align 2
 @n = global i16 0, align 2
+@g = global [64 x i16] zeroinitializer, align 2 #0
 
 define i32 @dot8()  {
 ; CHECK-LABEL: dot8:
@@ -369,24 +379,16 @@ for.body:                                         ; preds = %entry, %for.body
   br i1 %cmp, label %for.body, label %for.cond.cleanup
 }
 
-define i32 @no_stride()  {
-; CHECK-LABEL: no_stride:
+define i32 @dot_reverse()  {
+; CHECK-LABEL: dot_reverse:
 ; CHECK:       ; %bb.0: ; %entry
-; CHECK-NEXT:    mov r4, #0
-; CHECK-NEXT:    mov r2, #30
-; CHECK-NEXT:    mov r3, #pl
-; CHECK-NEXT:    coload r4, r4
-; CHECK-NEXT:  .LBB9_1: ; %for.body
-; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    mov r4, #dp
-; CHECK-NEXT:    add r4, r2
-; CHECK-NEXT:    mov r4, [r4+#0]
-; CHECK-NEXT:    mov r5, [r3+]
-; CHECK-NEXT:    comac r5, r4
-; CHECK-NEXT:    add r2, #-2
-; CHECK-NEXT:    cmp r2, #-2
-; CHECK-NEXT:    jmpr cc_NE, .LBB9_1
-; CHECK-NEXT:  ; %bb.2: ; %for.cond.cleanup
+; CHECK-NEXT:    mov r2, #dp
+; CHECK-NEXT:    add r2, #30
+; CHECK-NEXT:    mov r3, #0
+; CHECK-NEXT:    mov r4, #pl
+; CHECK-NEXT:    mov idx0, r2
+; CHECK-NEXT:    coload r3, r3
+; CHECK-NEXT:  repeat 16 times comac [idx0-], [r4+]
 ; CHECK-NEXT:    costore r2, mal
 ; CHECK-NEXT:    costore r3, mah
 ; CHECK-NEXT:    ret
@@ -463,3 +465,124 @@ for.body:                                         ; preds = %entry, %for.body
 
 attributes #0 = { "c166-dpram" }
 
+; Every third sample, which is a decimating filter.  The stride goes into QR0,
+; and the whole loop is still one instruction.
+define i32 @dot_stride_ptr() {
+; CHECK-LABEL: dot_stride_ptr:
+; CHECK:       ; %bb.0: ; %entry
+; CHECK-NEXT:    mov r2, #0
+; CHECK-NEXT:    mov r4, #pl
+; CHECK-NEXT:    mov r3, #dp
+; CHECK-NEXT:    mov idx0, r3
+; CHECK-NEXT:    mov r5, #6
+; CHECK-NEXT:    mov qr0, r5
+; CHECK-NEXT:    coload r2, r2
+; CHECK-NEXT:  repeat 16 times comac [idx0+], [r4+qr0]
+; CHECK-NEXT:    costore r2, mal
+; CHECK-NEXT:    costore r3, mah
+; CHECK-NEXT:    ret
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %for.body
+  ret i32 %add
+
+for.body:                                         ; preds = %entry, %for.body
+  %i.010 = phi i16 [ 0, %entry ], [ %inc, %for.body ]
+  %a.09 = phi i32 [ 0, %entry ], [ %add, %for.body ]
+  %arrayidx = getelementptr inbounds nuw [2 x i8], ptr @dp, i16 %i.010
+  %0 = load i16, ptr %arrayidx, align 2
+  %conv = sext i16 %0 to i32
+  %arrayidx2.idx = mul nuw nsw i16 %i.010, 6
+  %arrayidx2 = getelementptr inbounds nuw i8, ptr @pl, i16 %arrayidx2.idx
+  %1 = load i16, ptr %arrayidx2, align 2
+  %conv3 = sext i16 %1 to i32
+  %mul4 = mul nsw i32 %conv3, %conv
+  %add = add nsw i32 %mul4, %a.09
+  %inc = add nuw nsw i16 %i.010, 1
+  %exitcond.not = icmp eq i16 %inc, 16
+  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body
+}
+
+; Both streams strided, so both offset registers are written.  QX0 belongs to
+; the IDX pointer and QR0 to the general purpose one.
+define i32 @dot_stride_both() {
+; CHECK-LABEL: dot_stride_both:
+; CHECK:       ; %bb.0: ; %entry
+; CHECK-NEXT:    mov r2, #0
+; CHECK-NEXT:    mov r4, #pl
+; CHECK-NEXT:    mov r3, #g
+; CHECK-NEXT:    mov idx0, r3
+; CHECK-NEXT:    mov r5, #8
+; CHECK-NEXT:    mov qx0, r5
+; CHECK-NEXT:    mov r5, #6
+; CHECK-NEXT:    mov qr0, r5
+; CHECK-NEXT:    coload r2, r2
+; CHECK-NEXT:  repeat 16 times comac [idx0+qx0], [r4+qr0]
+; CHECK-NEXT:    costore r2, mal
+; CHECK-NEXT:    costore r3, mah
+; CHECK-NEXT:    ret
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %for.body
+  ret i32 %add
+
+for.body:                                         ; preds = %entry, %for.body
+  %i.011 = phi i16 [ 0, %entry ], [ %inc, %for.body ]
+  %a.010 = phi i32 [ 0, %entry ], [ %add, %for.body ]
+  %arrayidx.idx = shl nuw nsw i16 %i.011, 3
+  %arrayidx = getelementptr inbounds nuw i8, ptr @g, i16 %arrayidx.idx
+  %0 = load i16, ptr %arrayidx, align 2
+  %conv = sext i16 %0 to i32
+  %arrayidx3.idx = mul nuw nsw i16 %i.011, 6
+  %arrayidx3 = getelementptr inbounds nuw i8, ptr @pl, i16 %arrayidx3.idx
+  %1 = load i16, ptr %arrayidx3, align 2
+  %conv4 = sext i16 %1 to i32
+  %mul5 = mul nsw i32 %conv4, %conv
+  %add = add nsw i32 %mul5, %a.010
+  %inc = add nuw nsw i16 %i.011, 1
+  %exitcond.not = icmp eq i16 %inc, 16
+  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body
+}
+
+; A strided stream walked backwards, which is what a convolution rather than a
+; correlation looks like: update code 5, the offset register subtracted.
+define i32 @dot_stride_back() {
+; CHECK-LABEL: dot_stride_back:
+; CHECK:       ; %bb.0: ; %entry
+; CHECK-NEXT:    mov r4, #pl
+; CHECK-NEXT:    add r4, #90
+; CHECK-NEXT:    mov r2, #0
+; CHECK-NEXT:    mov r3, #dp
+; CHECK-NEXT:    mov idx0, r3
+; CHECK-NEXT:    mov r5, #6
+; CHECK-NEXT:    mov qr0, r5
+; CHECK-NEXT:    coload r2, r2
+; CHECK-NEXT:  repeat 16 times comac [idx0+], [r4-qr0]
+; CHECK-NEXT:    costore r2, mal
+; CHECK-NEXT:    costore r3, mah
+; CHECK-NEXT:    ret
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %for.body
+  ret i32 %add
+
+for.body:                                         ; preds = %entry, %for.body
+  %i.010 = phi i16 [ 0, %entry ], [ %inc, %for.body ]
+  %a.09 = phi i32 [ 0, %entry ], [ %add, %for.body ]
+  %arrayidx = getelementptr inbounds nuw [2 x i8], ptr @dp, i16 %i.010
+  %0 = load i16, ptr %arrayidx, align 2
+  %conv = sext i16 %0 to i32
+  %.idx = mul nsw i16 %i.010, -6
+  %1 = getelementptr i8, ptr @pl, i16 %.idx
+  %arrayidx2 = getelementptr i8, ptr %1, i16 90
+  %2 = load i16, ptr %arrayidx2, align 2
+  %conv3 = sext i16 %2 to i32
+  %mul4 = mul nsw i32 %conv3, %conv
+  %add = add nsw i32 %mul4, %a.09
+  %inc = add nuw nsw i16 %i.010, 1
+  %exitcond.not = icmp eq i16 %inc, 16
+  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body
+}

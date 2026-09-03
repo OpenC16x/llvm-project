@@ -605,22 +605,42 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
     // C166MACRepeat.cpp.
     if (Node->getConstantOperandVal(1) != Intrinsic::c166_comac_repeat)
       break;
-    SDValue Ops[] = {
+    // A stream that moves by one word a repetition is what the pointer's own
+    // update code does; any other fixed distance needs an offset register
+    // written first, which needs a scratch register to write it through.  That
+    // register is the only difference between the two pseudos, so a unit
+    // stride does not pay for one.
+    int16_t IdxStep = int16_t(Node->getConstantOperandVal(8));
+    int16_t PtrStep = int16_t(Node->getConstantOperandVal(9));
+    bool Strided = IdxStep != 2 || PtrStep != 2;
+
+    SmallVector<SDValue, 9> Ops = {
         Node->getOperand(2), // where IDX0 starts, in the dual-port RAM
         Node->getOperand(3), // where the general purpose pointer starts
         Node->getOperand(4), // the accumulator, low word
         Node->getOperand(5), // and high
         CurDAG->getTargetConstant(Node->getConstantOperandVal(6), DL, MVT::i16),
-        CurDAG->getTargetConstant(Node->getConstantOperandVal(7), DL, MVT::i16),
-        Node->getOperand(0)}; // chain
+        CurDAG->getTargetConstant(Node->getConstantOperandVal(7), DL, MVT::i16)};
+    if (Strided) {
+      Ops.push_back(CurDAG->getSignedTargetConstant(IdxStep, DL, MVT::i16));
+      Ops.push_back(CurDAG->getSignedTargetConstant(PtrStep, DL, MVT::i16));
+    }
+    Ops.push_back(Node->getOperand(0)); // chain
+
     // The third result is the stepped pointer, which is $ptr again and which
     // nothing reads; it is there so that the allocator knows the register does
-    // not survive.
+    // not survive.  The strided form has a fourth, the scratch register, which
+    // nothing reads either.
+    SmallVector<EVT, 5> VTs = {MVT::i16, MVT::i16, MVT::i16};
+    if (Strided)
+      VTs.push_back(MVT::i16);
+    VTs.push_back(MVT::Other);
+
     MachineSDNode *New = CurDAG->getMachineNode(
-        C166::MACREP32, DL, {MVT::i16, MVT::i16, MVT::i16, MVT::Other}, Ops);
+        Strided ? C166::MACREP32S : C166::MACREP32, DL, VTs, Ops);
     ReplaceUses(SDValue(Node, 0), SDValue(New, 0));
     ReplaceUses(SDValue(Node, 1), SDValue(New, 1));
-    ReplaceUses(SDValue(Node, 2), SDValue(New, 3));
+    ReplaceUses(SDValue(Node, 2), SDValue(New, VTs.size() - 1));
     CurDAG->RemoveDeadNode(Node);
     return;
   }

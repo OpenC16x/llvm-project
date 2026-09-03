@@ -560,7 +560,8 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
     break;
   }
-  case C166::MACREP32: {
+  case C166::MACREP32:
+  case C166::MACREP32S: {
     // A whole dot product.  IDX0 is pointed at the stream in the dual-port
     // RAM, the accumulator goes into the unit, and one repeated CoMAC walks
     // both streams and adds every product; the two words come back out at the
@@ -571,16 +572,24 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     // the order the hand written sequences in
     // llvm/utils/C166Sim/differential/macrepeat.c use, and putting the two
     // adjacent would be a claim about the pipeline that nothing here checks.
+    // The strided form has one more output - the scratch register the offset
+    // registers are written through - so everything after it moves along by
+    // one.  Both forms are otherwise the same instruction.
+    bool Strided = MI.getOpcode() == C166::MACREP32S;
+    unsigned N = Strided ? 1 : 0;
     Register Lo = MI.getOperand(0).getReg();
     Register Hi = MI.getOperand(1).getReg();
     // Operand 2 is $ptrend, which is $ptr again: the instruction leaves the
     // stepped pointer there and nothing reads it.
-    Register Idx = MI.getOperand(3).getReg();
-    Register Ptr = MI.getOperand(4).getReg();
-    Register AccLo = MI.getOperand(5).getReg();
-    Register AccHi = MI.getOperand(6).getReg();
-    unsigned Count = MI.getOperand(7).getImm();
-    unsigned Kind = MI.getOperand(8).getImm();
+    Register Scratch = Strided ? MI.getOperand(3).getReg() : Register();
+    Register Idx = MI.getOperand(3 + N).getReg();
+    Register Ptr = MI.getOperand(4 + N).getReg();
+    Register AccLo = MI.getOperand(5 + N).getReg();
+    Register AccHi = MI.getOperand(6 + N).getReg();
+    unsigned Count = MI.getOperand(7 + N).getImm();
+    unsigned Kind = MI.getOperand(8 + N).getImm();
+    int64_t IdxStep = Strided ? int16_t(MI.getOperand(9 + N).getImm()) : 2;
+    int64_t PtrStep = Strided ? int16_t(MI.getOperand(10 + N).getImm()) : 2;
 
     // The field is five bits and holds 2 to 31; zero is the plain form and one
     // means take the count from MRW, which holds (MRW[12:0]) + 1 - so a longer
@@ -608,20 +617,54 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         .addImm(C166::getSFRAddressForReg(RI, C166::IDX0))
         .addReg(Idx)
         .addDef(C166::IDX0, RegState::Implicit);
+
+    // What each pointer does to itself after the read, from PM0036 Table 27.
+    // Two forward and two back are update codes of their own; any other fixed
+    // distance goes through an offset register, which is what codes 4 and 5
+    // add and subtract - QX for the IDX pointer and QR for the general purpose
+    // one.  The register is written here rather than by the caller because it
+    // belongs to the instruction being expanded: it is dead the moment the
+    // repeat ends, and nothing else in the function may assume it survives,
+    // which is what the Defs on the pseudo say.
+    //
+    // There is no third case.  The unit has no circular addressing at all -
+    // the C166S V2 Architecture Overview Handbook lists "one FIR filter tap
+    // per cycle, with no circular buffer management" among the MAC's features
+    // - so a stride is a stride and a stream that wraps is not one of these.
+    auto step = [&](int64_t Bytes, MCRegister Offs) -> unsigned {
+      if (Bytes == 2)
+        return 2;
+      if (Bytes == -2)
+        return 3;
+      Emit(C166::MOV16ri).addDef(Scratch).addImm(std::abs(Bytes));
+      Emit(C166::MOV16ar)
+          .addImm(C166::getSFRAddressForReg(RI, Offs))
+          .addReg(Scratch)
+          .addDef(Offs, RegState::Implicit);
+      return Bytes > 0 ? 4 : 5;
+    };
+    unsigned IdxCode = step(IdxStep, C166::QX0);
+    unsigned PtrCode = step(PtrStep, C166::QR0);
+
     Emit(C166::CoLOAD_rr).addReg(AccLo).addReg(AccHi);
-    // Both pointers step forward by a word, which is the 2 in each pair: a
-    // coptr and a coidx are each a register and what happens to it after the
-    // read.  Stepping IDX0 writes it, and a count of one is the one that reads
-    // MRW; both are said so that nothing moves across them.
+    // A coptr and a coidx are each a register and what happens to it after the
+    // read, which is the update code beside each one.  Stepping IDX0 writes
+    // it, a count of one is the one that reads MRW, and an offset register the
+    // codes above chose is read; all of them are said so that nothing moves
+    // across them.
     auto MAC = Emit(C166::getMACIdxOpcode(Kind))
                    .addReg(C166::IDX0)
-                   .addImm(2)
+                   .addImm(IdxCode)
                    .addReg(Ptr)
-                   .addImm(2)
+                   .addImm(PtrCode)
                    .addImm(Field)
                    .addDef(C166::IDX0, RegState::Implicit);
     if (Field == 1)
       MAC.addUse(C166::MRW, RegState::Implicit);
+    if (IdxCode >= 4)
+      MAC.addUse(C166::QX0, RegState::Implicit);
+    if (PtrCode >= 4)
+      MAC.addUse(C166::QR0, RegState::Implicit);
     Emit(C166::CoSTORE_sr).addDef(Lo).addReg(C166::MAL);
     Emit(C166::CoSTORE_sr).addDef(Hi).addReg(C166::MAH);
     break;

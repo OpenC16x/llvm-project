@@ -402,9 +402,31 @@ signed or both unsigned — and the loop has to contain nothing else, because
 the prefix repeats exactly one instruction. `acc -= …` works too. Which of the
 two arrays is written first does not matter: whichever is the `__dpram` one
 goes behind IDX0. Up to 31 taps go in the repeat field and more go through
-MRW, to a limit of 8192. A trip count only the running program knows, a stream
-walked backwards or with a stride, an array that is not in the dual-port RAM,
-or anything else in the loop body leaves it an ordinary loop.
+MRW, to a limit of 8192. A trip count only the running program knows, an array
+that is not in the dual-port RAM, or anything else in the loop body leaves it
+an ordinary loop.
+
+**A stream may stride.** It need not step one element forward: any fixed
+distance the loop keeps to is one the instruction walks by itself, because the
+coprocessor has four offset registers and its pointers can step by one of
+them. Either stream, or both, and in either direction:
+
+```c
+for (int i = 0; i < 16; i++)
+    acc += (long)h[i] * x[i * 3];   /* a decimating filter */
+
+for (int i = 0; i < 16; i++)
+    acc += (long)h[i] * x[15 - i];  /* a convolution */
+```
+
+A sixteen-tap decimating filter goes from 402 states to 74 that way, which is
+25 states a tap against 5.
+
+What it will not do is wrap. The part has no circular addressing — the C166S
+V2 Architecture Overview Handbook lists "one, Finite Impulse Response (FIR)
+filter tap per cycle, with no circular buffer management" among the unit's
+features — so a filter written over a circular buffer, where the index wraps
+back to the start, stays an ordinary loop.
 
 The count has to be a constant because "repeat this many times" is the whole
 instruction. The `__dpram` has to be on a global because that attribute is a

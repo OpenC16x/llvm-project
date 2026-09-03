@@ -51,6 +51,18 @@
 // CoMACsu and CoMACus would not be free that way, and there is no kind for
 // them; combineMAC in C166ISelLowering.cpp says why the DAG never builds one.
 //
+//
+// A stream need not move one word a repetition.  The unit has four offset
+// registers and pointer update codes 4 to 7 step a pointer by one of them, so
+// any fixed distance the loop keeps to is a stride the instruction walks by
+// itself - a decimating filter, one channel of an interleaved stream, a column
+// of a matrix.  What that is not is a wraparound: PM0036 Table 27 enumerates
+// the post-modifications and every one is an add or a subtract, and the C166S
+// V2 Architecture Overview Handbook says so outright in the MAC's feature list
+// - "one, Finite Impulse Response (FIR) filter tap per cycle, with no circular
+// buffer management".  So a stream that wraps is still a loop; a stream that
+// strides is one instruction.
+//
 //===----------------------------------------------------------------------===//
 
 #include "C166.h"
@@ -123,10 +135,12 @@ private:
   bool tryLoop(Loop *L);
 };
 
-/// One stream: the load, where it starts, and which object it is in.
+/// One stream: the load, where it starts, how far it moves each time round,
+/// and which object it is in.
 struct Stream {
   LoadInst *Load = nullptr;
   const SCEV *Start = nullptr;
+  int64_t Step = 0;            ///< Bytes between one element and the next.
   bool InDPRam = false;
 };
 
@@ -155,10 +169,13 @@ static bool isDPRamObject(const Value *V) {
 
 /// The stream a load walks, or nothing where it does not walk one.
 ///
-/// What is wanted is an address that goes up by exactly one word each time
-/// round this loop and nothing else - so an affine recurrence of this loop
-/// with a step of two.  The start is what the pointer register is set to
-/// before the run, and comes back so that it can be materialised there.
+/// What is wanted is an address that moves by the same amount each time round
+/// this loop and nothing else - an affine recurrence of this loop.  The step
+/// need not be one word: the unit has four offset registers, and pointer
+/// update codes 4 to 7 move a pointer by one of them rather than by a word, so
+/// any fixed distance the loop keeps to is a stride the instruction can walk
+/// by itself.  The start is what the pointer register is set to before the
+/// run, and comes back so that it can be materialised there.
 static std::optional<Stream> describeStream(LoadInst *LD, Loop *L,
                                             ScalarEvolution &SE) {
   if (!LD->isSimple() || !LD->getType()->isIntegerTy(16))
@@ -172,13 +189,23 @@ static std::optional<Stream> describeStream(LoadInst *LD, Loop *L,
   const auto *AR = dyn_cast<SCEVAddRecExpr>(SE.getSCEV(LD->getPointerOperand()));
   if (!AR || AR->getLoop() != L || !AR->isAffine())
     return std::nullopt;
+  // The stride goes into an offset register, which is sixteen bits and is
+  // added to the pointer as a signed value; and it has to be even for the same
+  // reason the start does.  A step of zero is not an addressing mode here - it
+  // would be update code 1, which leaves the pointer alone - and it is not a
+  // stream either, since scalar evolution would not have made an add
+  // recurrence of a pointer that does not move.
   const auto *Step = dyn_cast<SCEVConstant>(AR->getStepRecurrence(SE));
-  if (!Step || Step->getAPInt() != 2)
+  if (!Step || !Step->getAPInt().isSignedIntN(16))
+    return std::nullopt;
+  int64_t Bytes = Step->getAPInt().getSExtValue();
+  if (Bytes == 0 || (Bytes & 1))
     return std::nullopt;
 
   Stream S;
   S.Load = LD;
   S.Start = AR->getStart();
+  S.Step = Bytes;
   S.InDPRam = isDPRamObject(LD->getPointerOperand());
   return S;
 }
@@ -379,7 +406,9 @@ bool C166MACRepeat::tryLoop(Loop *L) {
   Value *Call = B.CreateIntrinsic(
       Intrinsic::c166_comac_repeat, {},
       {IdxBase, PtrBase, InitLo, InitHi, ConstantInt::get(I16, DP.Count),
-       ConstantInt::get(I16, DP.Kind)});
+       ConstantInt::get(I16, DP.Kind),
+       ConstantInt::getSigned(I16, Idx.Step),
+       ConstantInt::getSigned(I16, Ptr.Step)});
   Value *Lo = B.CreateExtractValue(Call, 0);
   Value *Hi = B.CreateExtractValue(Call, 1);
   Value *Total = B.CreateOr(B.CreateZExt(Lo, I32),

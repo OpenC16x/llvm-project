@@ -1361,6 +1361,54 @@ Known limitations / things to do
   say "this pointer is in the dual-port RAM" in the type system, which __dpram
   deliberately is not - that decision is written up under __dpram above, and it
   was the right one for placement even though it is what bounds this.
+
+  There is no way round the shift, and that is worth saying rather than
+  leaving as an open question.  A filter over a circular buffer does not shift
+  at all - the newest sample overwrites the oldest and the pointer wraps - so
+  if the pointer could be made to wrap by the unit rather than by the loop, the
+  whole filter would be a repeated CoMAC and the delay line would not move.
+  The unit has four offset registers, QX0, QX1, QR0 and QR1, and pointer update
+  codes 4 to 7 step a pointer by one of them; the question is whether any of
+  that is a modulo.
+
+  It is not.  PM0036 Table 27 enumerates the pointer post-modifications
+  completely, five per pointer kind, and every one of them is an add or a
+  subtract: "(IDXi) <- (IDXi) + (QXj)".  The ST10F269 datasheet's Table 5 is
+  the same table.  And the C166S V2 Architecture Overview Handbook says it
+  outright in the MAC unit's own feature list - "one, Finite Impulse Response
+  (FIR) filter tap per cycle, with no circular buffer management" - which reads
+  as a boast and is a denial: there is no circular buffer support, and CoMACM
+  moving the delay line is what the part offers instead of one.  MCW has two
+  bits, MP and MS, and neither is a modulo.  So the road round CoMACM does not
+  exist, and MAC-10's conclusion stands from the other side as well.
+
+  What the offset registers do give is a stride, and that is worth having on
+  its own.  A stream that moves by a fixed distance other than a word is a
+  decimating filter, one channel of an interleaved stream, or a column of a
+  matrix, and it was the one thing keeping such a loop out of the repeated
+  form: describeStream() asked for a step of exactly two.  It now asks only for
+  an even step that fits in sixteen bits, and the expansion picks the update
+  code from it - 2 for a word forward, 3 for a word back, and 4 or 5 with the
+  distance written into QX0 or QR0 for anything else, on either pointer or on
+  both.
+
+  Writing an offset register needs the value in a register first, since this
+  machine has no move of an immediate to a memory address, and expandPostRAPseudo
+  runs where it cannot make one up; so the strided form is a pseudo of its own,
+  MACREP32S, with an early clobbered scratch operand.  A unit stride keeps
+  MACREP32 and pays for nothing it does not use, which is why MAC-11's own
+  tests come out byte for byte identical.
+
+  Measured per call on a sixteen tap decimating filter, every third sample:
+
+                                  states   text
+    before, a loop with CoMUL        402    548
+    after, one repeated CoMAC         74    540
+
+  which is 25 states a tap against 5, and 5.4 times.  That is the same shape of
+  win the repeat prefix gave the unit-stride case, for the same reason: what
+  goes is the index arithmetic, the two address computations, the compare and
+  the branch, not the multiply.
 * The instruction forms nothing generates are assembled and disassembled but
   their encodings are derived rather than read off the page.  Each ALU group's
   columns were already fixed by the forms the compiler emits - x0 register, x2

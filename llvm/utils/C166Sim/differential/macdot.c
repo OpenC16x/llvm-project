@@ -12,7 +12,9 @@
    through the instruction: which stream is the one in the dual-port RAM, the
    sign of the product, adding against taking away, a count the repeat field
    holds against one that has to go through MRW, an accumulator that does not
-   start at zero, and a stream that starts partway into its array.
+   start at zero, a stream that starts partway into its array, and the pointer
+   update codes - a word forward, a word back, and a stride through one of the
+   unit's offset registers, in either direction and on either pointer.
 
    The negative cases matter as much.  A loop over two ordinary arrays cannot
    use IDX0 at all, one whose trip count is not a constant has nothing to put
@@ -130,13 +132,60 @@ int main(void) {
     puthex((u32)acc, 8);
   }
 
-  /* Walking one array backwards, which steps by a word the wrong way and is
-     not a stream this instruction can walk. */
+  /* Walking one array backwards, which is update code 3 - the pointer a word
+     the other way - and is what a convolution rather than a correlation looks
+     like. */
   {
     s32 acc = 0;
     for (int i = 0; i < 16; i++)
       acc += (s32)xs[15 - i] * ys[i];
     puthex((u32)acc, 8);
+  }
+
+  /* A stride, which goes through one of the unit's offset registers: every
+     third sample of the ordinary array, which is a decimating filter.  QR0
+     belongs to the general purpose pointer. */
+  {
+    s32 acc = 0;
+    for (int i = 0; i < 12; i++)
+      acc += (s32)xs[i] * ys[i * 3];
+    puthex((u32)acc, 8);
+  }
+
+  /* The other pointer strided, so it is QX0 that is written; the dual-port RAM
+     array is the one being decimated this time. */
+  {
+    s32 acc = 0;
+    for (int i = 0; i < 12; i++)
+      acc += (s32)xs[i * 3] * ys[i];
+    puthex((u32)acc, 8);
+  }
+
+  /* Both at once, and neither by a word, so both offset registers are in
+     play. */
+  {
+    s32 acc = 0;
+    for (int i = 0; i < 9; i++)
+      acc += (s32)xs[i * 4] * ys[i * 3];
+    puthex((u32)acc, 8);
+  }
+
+  /* A stride backwards, which is update code 5 - the offset register taken
+     away rather than added. */
+  {
+    s32 acc = 0;
+    for (int i = 0; i < 12; i++)
+      acc += (s32)xs[i] * ys[33 - i * 3];
+    puthex((u32)acc, 8);
+  }
+
+  /* Unsigned and strided, which is a different multiply with the same
+     addressing. */
+  {
+    u32 acc = 0;
+    for (int i = 0; i < 12; i++)
+      acc += (u32)uxs[i] * uys[i * 3];
+    puthex(acc, 8);
   }
 
   /* Neither array in the dual-port RAM, so there is nothing for IDX0 to hold
