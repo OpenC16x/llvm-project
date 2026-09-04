@@ -79,7 +79,10 @@ define i16 @seg_index(i16 %i) {
 }
 
 ; Walking an array, which is where the difference is worth having: the segment
-; half of the pointer is only read, so the loop steps one register.
+; half of the pointer is only read, so the loop steps one register - and the
+; step is folded into the access, which is MEM-3 and is worth two states an
+; element on top.  seg-post-inc.ll is where that is checked on its own; here it
+; is what the loop happens to look like.
 define i16 @seg_walk(ptr addrspace(2) %p, i16 %n) {
 ; CHECK-LABEL: seg_walk:
 ; CHECK:       ; %bb.0: ; %entry
@@ -91,9 +94,8 @@ define i16 @seg_walk(ptr addrspace(2) %p, i16 %n) {
 ; CHECK-NEXT:  .LBB5_2: ; %body
 ; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    exts r3, #1
-; CHECK-NEXT:    mov r6, [r5]
+; CHECK-NEXT:    mov r6, [r5+]
 ; CHECK-NEXT:    add r2, r6
-; CHECK-NEXT:    add r5, #2
 ; CHECK-NEXT:    add r4, #-1
 ; CHECK-NEXT:    jmpr cc_NE, .LBB5_2
 ; CHECK-NEXT:  ; %bb.3: ; %done

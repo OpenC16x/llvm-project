@@ -560,6 +560,24 @@ void DynamicRegisterInfo::Finalize(const ArchSpec &arch) {
       }
       break;
 
+    case llvm::Triple::c166:
+      for (auto &reg : m_regs) {
+        if (strcmp(reg.name, "pc") == 0)
+          reg.kinds[eRegisterKindGeneric] = LLDB_REGNUM_GENERIC_PC;
+        // R0 and not SP.  This part has two stacks: the hardware one SP
+        // addresses holds return addresses and the compiler never touches it,
+        // while frames are on the other one and the canonical frame address is
+        // measured from R0 - "DW_CFA_def_cfa: R0 +0" in the CIE, which
+        // llvm/test/CodeGen/C166/cfi-two-stacks.ll is the statement of.  So R0
+        // is the stack pointer a debugger means by the word, and finding a
+        // return address needs the CFI expression rather than this.
+        else if (strcmp(reg.name, "r0") == 0)
+          reg.kinds[eRegisterKindGeneric] = LLDB_REGNUM_GENERIC_SP;
+        else if (strcmp(reg.name, "psw") == 0)
+          reg.kinds[eRegisterKindGeneric] = LLDB_REGNUM_GENERIC_FLAGS;
+      }
+      break;
+
     case llvm::Triple::arm:
     case llvm::Triple::armeb:
     case llvm::Triple::thumb:

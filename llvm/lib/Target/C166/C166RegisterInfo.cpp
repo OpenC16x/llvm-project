@@ -78,6 +78,13 @@ BitVector C166RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // by whatever emits a form that walks them and read by that form alone.
   Reserved.set(C166::IDX0);
   Reserved.set(C166::IDX1);
+  // And the four offset registers, which are the strides those pointers walk
+  // by.  They are in the extended register space rather than beside the rest,
+  // which changes how they are reached and not what they are.
+  Reserved.set(C166::QX0);
+  Reserved.set(C166::QX1);
+  Reserved.set(C166::QR0);
+  Reserved.set(C166::QR1);
 
   Reserved.set(C166::SYSSP);
   Reserved.set(C166::CP);

@@ -19,6 +19,15 @@
 ;; name - see C166RegisterInfo.td.
 ; CIE: Return address column: 45
 ; CIE: DW_CFA_def_cfa: R0 +0
+
+;; And that the caller's R0 is that same address.  On a machine with one stack
+;; nothing says this: the canonical frame address is where the stack pointer
+;; was, so a debugger that restores the stack pointer has restored the CFA.
+;; Here the return address is on the other stack, so a reader has no reason to
+;; believe R0 is a stack pointer at all, and without this rule it unwinds one
+;; frame and stops - it has the caller's program counter and no way to find
+;; that frame's locals, which are addressed from R0.
+; CIE-NEXT: DW_CFA_val_offset: R0 0
 ; CIE-NEXT: DW_CFA_val_expression: PC DW_OP_bregx CSP+0, DW_OP_const1u 0x10, DW_OP_shl, DW_OP_bregx SYSSP+0, DW_OP_deref_size 0x2, DW_OP_or
 ; CIE-NEXT: DW_CFA_val_expression: SYSSP DW_OP_bregx SYSSP+2
 ; CIE-NEXT: DW_CFA_same_value: CSP

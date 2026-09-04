@@ -583,11 +583,19 @@ void Machine::setByteReg(unsigned N, uint8_t V) { Mem[gprAddress(N)] = V; }
 
 uint32_t Machine::regFieldAddress(unsigned Reg) const {
   Reg &= 0xFF;
+  // The sixteen short addresses from F0H name the general purpose registers
+  // through the context pointer, and EXTR does not touch them: what it
+  // switches is the special function register area under them.
   if (Reg >= 0xF0)
     return gprAddress(2 * (Reg - 0xF0));
+  // With an EXTR in force the same short address names the extended register
+  // at F000H or F100H instead of the ordinary one at FE00H or FF00H.  The two
+  // are indistinguishable once encoded - which is why nothing in a disassembly
+  // can say which was meant - so this is the only place that knows.
+  uint32_t Base = ExtendRegisterSpace ? 0xF000 : 0xFE00;
   if (Reg < 0x80)
-    return 0xFE00 + 2 * Reg;
-  return 0xFF00 + 2 * (Reg - 0x80);
+    return Base + 2 * Reg;
+  return Base + 0x100 + 2 * (Reg - 0x80);
 }
 
 void Machine::push(uint16_t V) {
@@ -612,8 +620,10 @@ uint16_t Machine::pop() {
 }
 
 void Machine::retireExtend() {
-  if (Extend == ExtendKind::None && ExtendCount == 0)
+  if (Extend == ExtendKind::None && ExtendCount == 0 && !ExtendRegisterSpace)
     return;
-  if (ExtendCount > 0 && --ExtendCount == 0)
+  if (ExtendCount > 0 && --ExtendCount == 0) {
     Extend = ExtendKind::None;
+    ExtendRegisterSpace = false;
+  }
 }

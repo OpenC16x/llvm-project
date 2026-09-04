@@ -163,7 +163,7 @@ enum class StopReason {
   Exited,      ///< reached the exit symbol
   Unsupported, ///< an instruction this simulator does not implement
   BadAccess,   ///< a fetch or access that cannot be satisfied
-  StackFault,  ///< the system stack left the STKOV/STKUN window
+  StackFault,  ///< either stack left the memory it is allowed to use
   BadSequence, ///< an ATOMIC or EXTend sequence contained what it must not
   StepLimit,   ///< ran longer than --max-steps
   Halted,      ///< SRST, or PWRDN/IDLE with nothing to wake it
@@ -288,6 +288,12 @@ public:
   /// Run one instruction.  Returns false once Stop is no longer Running.
   bool step();
 
+  /// Stop if R0 has gone below __user_stack_limit.  Called at the end of every
+  /// step, because unlike the system stack there is no one instruction that
+  /// moves this one: a frame is a SUB, an alloca is anything, and code is free
+  /// to put R0 wherever it likes.
+  void checkUserStack();
+
   // -- interrupts --------------------------------------------------------
 
   /// Raise every declared source whose time has come, then hand the CPU the
@@ -402,11 +408,61 @@ public:
   ExtendKind Extend = ExtendKind::None;
   uint32_t ExtendValue = 0;
   unsigned ExtendCount = 0;
+  /// Whether the EXTend in force is an EXTR, which switches what a "reg" field
+  /// names over to the extended special function registers.  It is a flag of
+  /// its own rather than an ExtendKind because EXTR overrides a different
+  /// thing from the others: EXTS and EXTP replace the data page for a "mem"
+  /// operand, and this replaces the base of the register area.  A part cannot
+  /// have both in force at once - the counter is one counter - so one bool
+  /// beside the kind says which of the two the current sequence is.
+  bool ExtendRegisterSpace = false;
 
   /// Where the program is considered finished, and where its result is.  The
   /// harness fills these in from the ELF symbol table.
   uint32_t ExitAddress = ~0u;
   bool HasExitAddress = false;
+
+  /// The bottom of the ABI stack, from the __user_stack_limit the linker
+  /// script defines, and whether the executable had one.
+  ///
+  /// The part checks its other stack and not this one: SP is compared against
+  /// STKOV and STKUN on every push and pop, and R0 - which holds frames,
+  /// spills, locals and arrays - has nothing watching it.  A program that
+  /// recurses too deep or puts a large array on the stack walks R0 down
+  /// through whatever is under it and writes there, which is memory belonging
+  /// to something else and usually still readable, so the program keeps going
+  /// and gives a wrong answer instead of stopping.  That is what this is for.
+  ///
+  /// It is not a model of the part - no C166 does this - and it is not the
+  /// same thing as -mstack-check, which is code in the program and works on
+  /// hardware.  This costs the program nothing and catches every overflow
+  /// rather than the ones a checked prologue happens to see, which is the
+  /// trade a simulator is allowed to make.
+  uint16_t UserStackLimit = 0;
+  /// The top of it, from __user_stack_top, for reporting how much was used and
+  /// for deciding whether an R0 is a stack pointer at all.
+  uint16_t UserStackTop = 0;
+  bool HasUserStackLimit = false;
+  /// Whether __user_stack_top was there.  Without it UserStackTop is the limit
+  /// and says nothing, so the arming below has only a lower bound to go on.
+  bool HasUserStackTop = false;
+  /// Whether crossing the limit stops the program.  Off, R0 is still watched
+  /// and the low water mark below is still kept: measuring and stopping are
+  /// different questions and only the second one is ever unwanted.
+  bool StopOnUserStackOverflow = true;
+  /// Whether R0 has been seen holding a value inside the stack yet.  It comes
+  /// out of reset at zero and stays there until the startup code sets it, and
+  /// that is not an overflow.
+  bool UserStackArmed = false;
+  /// Which register bank that was in.  R0 names different memory under a
+  /// different context pointer, so this is what says whether the R0 in front of
+  /// us is the ABI stack pointer at all.
+  uint16_t UserStackCP = 0;
+  /// The lowest R0 has been while the check was watching, which is what says
+  /// how close a program came.  It is the number to look at before deciding
+  /// that a stack is big enough, and the only way to get it otherwise is to
+  /// fill the memory with a pattern and see how much of it survived.
+  uint16_t UserStackLow = 0xFFFF;
 
   uint64_t Steps = 0;
   uint64_t MaxSteps = 0; ///< 0 means no limit

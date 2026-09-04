@@ -2,6 +2,14 @@
 /* Compiled twice: once for c166 and run in the simulator, once for the host
    and run natively.  The two outputs must match exactly.
 
+   This is also where the ABI stack is measured, because a throw is the deepest
+   thing this backend does: the unwinder holds two Rows of rules at once and
+   walks frames it did not build.  It used to take 1262 bytes of the 1024 the
+   linker scripts give, which the simulator's stack check found the day it was
+   written and which meant throwing did not work on a part at all - the memory
+   below F600H is not memory.  It is 784 now.  "c166-sim --count-states" prints
+   that as "abi-stack 784 of 1024" and is how to check it stays there.
+
    Throwing and catching, which on this part means the unwinder in libc walks
    the call frame information the compiler emitted, on a machine where a return
    address is on a second stack that no generated code touches.

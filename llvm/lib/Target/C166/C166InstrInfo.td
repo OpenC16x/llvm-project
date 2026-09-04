@@ -44,6 +44,13 @@ def SDT_C166FarLoad      : SDTypeProfile<1, 2, [SDTCisInt<0>,
 def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
                                                 SDTCisVT<1, i16>,
                                                 SDTCisVT<2, i16>]>;
+// The same load with the step folded in, which gives back the offset it moved
+// on to as a second result.  Only the offset is stepped; the segment is what
+// makes this a confined access and is passed through untouched.
+def SDT_C166FarLoadPost  : SDTypeProfile<2, 2, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>,
+                                                SDTCisVT<3, i16>]>;
 
 // A 32 bit accumulator as two words and the two 16 bit operands of a signed
 // multiply, giving the accumulated 32 bit result as two words.
@@ -102,6 +109,8 @@ def C166farload  : SDNode<"C166ISD::FAR_LOAD", SDT_C166FarLoad,
                           [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
                           [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+def C166farloadpost : SDNode<"C166ISD::FAR_LOAD_POST", SDT_C166FarLoadPost,
+                             [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
@@ -289,6 +298,15 @@ def reg8 : RegisterOperand<GR16orSFR> {
 def reg8b : RegisterOperand<GR8orSFR> {
   let EncoderMethod = "getReg8bOpValue";
   let DecoderMethod = "decodeReg8bOperand";
+}
+
+// The same field again, naming an extended special function register instead.
+// It shares the encoder - an ESFR's encoding is its short address, exactly as
+// an ordinary one's is - and its decoder is never reached, for the reason
+// C166Disassembler.cpp gives above it.  See EPUSH.
+def ereg8 : RegisterOperand<ESFRAny> {
+  let EncoderMethod = "getReg8OpValue";
+  let DecoderMethod = "decodeEReg8Operand";
 }
 
 // The 8 bit "bitoff" word address of the bit-addressable space, and a bit
@@ -690,6 +708,24 @@ def FARLOAD16 : Pseudo<(outs GR16:$dst), (ins GR16:$off, GR16:$seg),
 def FARLOAD8  : Pseudo<(outs GR8:$dst), (ins GR16:$off, GR16:$seg),
                        "#FARLOAD8",
                        [(set GR8:$dst, (C166farload GR16:$off, GR16:$seg))]>;
+}
+
+// The same load with the step folded into it, which is what an array walk in
+// address space 2 wants: the offset is a plain 16 bit register there, so
+// "exts $seg, #1" followed by "mov $dst, [$off+]" is a legal pair - the EXTS
+// covers the access and the increment is on the register.  Worth two states an
+// element, which is the whole of what separates a confined walk from a near
+// one apart from the EXTS itself; llvm/lib/Target/C166/README.txt measures it.
+//
+// Selected by hand in C166ISelDAGToDAG.cpp for the reason MOV16rpi is: the
+// pointer coming back out makes it a two-result instruction that no pattern
+// describes.  There is no post-incrementing store on this machine, so there is
+// no FARSTORE to match.
+let mayLoad = 1, Constraints = "$off = $offend" in {
+def FARLOAD16POST : Pseudo<(outs GR16:$dst, GR16:$offend),
+                           (ins GR16:$off, GR16:$seg), "#FARLOAD16POST", []>;
+def FARLOAD8POST  : Pseudo<(outs GR8:$dst, GR16:$offend),
+                           (ins GR16:$off, GR16:$seg), "#FARLOAD8POST", []>;
 }
 
 let mayStore = 1 in {
@@ -2250,6 +2286,42 @@ def ATOMIC : InstS<0xD1, (outs), (ins irang2:$range), "atomic\t$range", []> {
   let Inst{15-14} = 0b00;
   let Inst{13-12} = range;
   let Inst{11-8} = 0;
+}
+}
+
+// Pushing and popping an extended special function register, which is the one
+// thing that cannot be done by address: there is no "push mem".  So these are
+// the only way to save one, and an interrupt handler that uses the
+// coprocessor's offset registers needs exactly that.
+//
+// One instruction here and two on the part.  The first word is EXTR #1, which
+// switches what a "reg" field names over to the extended space for the next
+// instruction, and the second is the PUSH or POP itself.  Writing it as one
+// four byte instruction rather than as a pseudo that expands into two is what
+// guarantees the constraint the sequence has: nothing may fall between the
+// EXTR and what it covers, and nothing can fall inside an instruction.
+//
+// A disassembly still shows the two.  The 16 bit decoder table is tried first,
+// so those four bytes come back as "extr #1" followed by a push of the
+// ordinary register with the same short address - which is what the bytes say
+// and all they say, since the two spaces are indistinguishable once encoded.
+// That reassembles to the same bytes, which is what roundtrip.sh checks.
+let Defs = !listconcat([SYSSP], FlagsEZN), Uses = [SYSSP] in {
+def EPUSH : InstL<0xD1, (outs), (ins ereg8:$src), "push\t$src", []> {
+  bits<8> src;
+  let Inst{15-14} = 0b10;   // EXTR
+  let Inst{13-12} = 0b00;   // #1
+  let Inst{11-8} = 0;
+  let Inst{23-16} = 0xEC;   // PUSH
+  let Inst{31-24} = src;
+}
+def EPOP : InstL<0xD1, (outs ereg8:$dst), (ins), "pop\t$dst", []> {
+  bits<8> dst;
+  let Inst{15-14} = 0b10;
+  let Inst{13-12} = 0b00;
+  let Inst{11-8} = 0;
+  let Inst{23-16} = 0xFC;   // POP
+  let Inst{31-24} = dst;
 }
 }
 

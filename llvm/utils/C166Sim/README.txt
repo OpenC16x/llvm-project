@@ -92,17 +92,151 @@ own - nothing is written into the program - which is something a simulator can
 do and a part cannot.
 
 The registers are described to the client rather than assumed, through
-qXfer:features:read, and the numbers in that description are the DWARF ones
-from C166RegisterInfo.td.  So there is one register numbering across the
-assembler, the debug information and this.  PC is not a register any
-instruction can name: it is the 24 bit CSP:IP pair, reported as one 32 bit
-register because that is what an address in the debug information is.
+qXfer:features:read.  There are two numberings in that description and they are
+different things, which is worth saying because getting it wrong here was a bug
+that lasted until a real debugger arrived: regnum is the protocol's own number,
+which the protocol defines as the position in the "g" packet, and dwarf_regnum
+is the number the unwind information is written in, from C166RegisterInfo.td.
+A client that reads the description uses the first; a client that cannot -
+LLDB has no XML parser unless it is built with one - counts "g" packet
+positions, which is the same numbering.  Advertising the DWARF numbers as
+regnum made those two disagree above R15, and nothing noticed, because
+rsp-client.py reads whole register dumps and never asks for one register.
+llvm/test/tools/c166-sim/gdb-stub.test asks.
 
-No debugger knows the C166 architecture yet, so nothing can put a source level
-front end on this today; a port of GDB or LLDB to this target is what that
-would take.  The protocol itself is not architecture specific, though, so an
-ordinary remote client works, and tools/rsp-client.py is one - it is what the
-tests drive the stub with, and it prints what came back:
+PC is not a register any instruction can name: it is the 24 bit CSP:IP pair,
+reported as one 32 bit register because that is what an address in the debug
+information is.
+
+"target remote |" is GDB's spelling, and not every debugger has a pipe form -
+LLDB has none.  So the stub will listen on a socket instead:
+
+  $ c166-sim --gdb-port=0 prog.elf &
+  listening on port 43505
+
+A port of zero asks the system for a free one and prints the number it got,
+which is what a script should use: guessing a port races whatever else wanted
+it.  The stdin and stdout form above is still the default and is still what the
+tests use, because it needs no port and leaves nothing listening if the
+debugger goes away.
+
+LLDB knows the C166 now - that is what the ArchSpec entry, the register
+fallback and the generic register mapping under lldb/ are for - so it will
+connect to the port above and debug:
+
+  $ lldb prog.elf -o "gdb-remote 43505" -o "breakpoint set -n add" -o run
+
+A breakpoint set by name, the source line and column at the stop, the argument
+registers, disassembly with the current instruction marked, stepping, a
+backtrace across both stacks, and locals in any frame all work:
+
+  (lldb) bt
+  * thread #1, stop reason = breakpoint 1.1
+    * frame #0: 0x00c0014e dbg.elf`leaf(a=15, b=7) at dbg.c:3:13
+      frame #1: 0x00c0019c dbg.elf`middle(n=5) at dbg.c:9:10
+      frame #2: 0x00c001b0 dbg.elf`main at dbg.c:12:11
+  (lldb) frame select 1
+  (lldb) frame variable
+  (int) n = 5
+  (int) local = 15
+
+Three things had to be true for that, and none of them was.
+
+  The register list this stub serves had to carry the DWARF numbers.  Without
+  them a local, which is described as an offset from DWARF register 0, is
+  "unable to convert register kind=1 reg_num=0 to a native register number" -
+  the registers could be printed and none of them could be found.
+
+  The call frame information had to say that the caller's R0 is the canonical
+  frame address.  On a machine with one stack nothing says that: the CFA is
+  where the stack pointer was, so restoring the stack pointer restores it.
+  Here the return address is on the other stack and R0 is a general purpose
+  register, so a reader has no reason to believe it is a stack pointer at all.
+  The rule is now in the CIE - llvm/test/CodeGen/C166/cfi-two-stacks.ll has it
+  - and without it the walk got the caller's program counter, could not work
+  out the caller's R0, and stopped one frame up with its locals unreadable.
+
+  And LLDB had to be able to read that rule out of a CIE, which it could not:
+  DW_CFA_val_offset was handled in the code that walks a frame description
+  entry and not in the code both share, and a CIE stops at the first opcode
+  that is not handled - so the rule was not merely ignored, it took the two
+  expressions after it with it.
+
+"sp" means the register that holds return addresses on this part and it also
+means what a frame is measured from, and those are two different registers.
+LLDB's generic stack pointer has to be R0, because that is what a frame is
+measured from, so "register read sp" answers with R0.  The hardware one is
+reachable as "syssp":
+
+  (lldb) register read sp syssp
+    r0 = 0xf9f0
+    sp = 0xfbfa
+
+A far pointer reads as one now too:
+
+  (lldb) frame variable
+  (const __far char *) fp = 0x00c0c000 "far string"
+  (__far int *) ip = 0x00e00000
+  (const char *) np = 0x01ce
+
+It used to print 0xc000 for the first of those - two bytes of a four byte
+pointer - because nothing said how wide it was.  The debug information says
+now: clang gives such a pointer a DW_AT_address_class, whose values are the
+target's to choose, and LLDB reads it back through the same target and builds
+the pointer into that address space, which is what decides its width in the
+type system.  Both halves of that mapping are one target hook,
+getDWARFAddressSpace() and getAddressSpaceFromDWARFAddressClass(), so a target
+that emits no address classes is unaffected and one that emits its own is
+asked rather than assumed.
+
+Dereferencing one in an expression works now as well, through either width,
+and so does writing through it:
+
+  (lldb) p *nip
+  (int) 22136
+  (lldb) p *ip
+  (__attribute__((address_space(1))) int) 4660
+  (lldb) p fp->x
+  (__attribute__((address_space(1))) int) 11
+  (lldb) expr *nip = 99
+
+Two things were wrong and both were about a width.  The expression evaluator
+runs the compiled expression over a map of made up memory, and a pointer
+stored in that memory was written and read back as the architecture's address
+size - four bytes here, because a far address is 24 bits - while the slot the
+module's data layout had reserved for it was two.  So each pointer was read
+four bytes wide out of a two byte slot, and consecutive slots overlapped.
+IRInterpreter now says how wide the pointer it is reading or writing actually
+is, which it can, because it has the data layout of the module it is running.
+
+The second is where that made up memory sits.  The map put it at 0xEE000000,
+which is where a target with four byte addresses puts it, and no near pointer
+can hold that: an alloca's result and the address of the materialized struct
+are both near pointers here.  A map is now told how wide a pointer that has to
+hold one of its own addresses is - IRExecutionUnit reads it off the module -
+and with two bytes it allocates from 0x8000 and keeps the frame it interprets
+on to 512 bytes rather than half a megabyte, which is what the one other
+16 bit target in LLDB asks its ABI plugin for.
+
+What still does not work is naming a __far global directly - "p fpt", or even
+"target variable fpt", answers "unimplemented opcode DW_OP_xderef".  That is
+not about pointer widths and not about the expression path: clang describes
+such a global with a location expression that ends in DW_OP_xderef, which is
+DWARF's "load through an address in this address space", and LLDB decodes that
+opcode without evaluating it.  Everything reached through a pointer, which is
+what a program mostly does, works; the global by name does not.
+
+lldb/unittests/Expression/IRMemoryMapTest.cpp covers the allocation half.  The
+rest of it is not a lit test, and the reason is worth writing down rather than
+leaving to be rediscovered.  The workflow that runs these tests does not build
+LLDB, and LLDB's own test suite has no C166 toolchain to build a program with,
+so a test there would be a test nothing runs.  What is tested is the half that
+can be - the stub - and gdb-stub.test beside the others drives it with
+rsp-client.py.
+
+The protocol is not architecture specific, so an ordinary remote client works
+too, and tools/rsp-client.py is one - it is what the tests drive the stub with,
+and it prints what came back:
 
   $ rsp-client.py -- c166-sim --gdb prog.elf <<'END'
   send Z0,c00100,2
@@ -112,6 +246,15 @@ tests drive the stub with, and it prints what came back:
   Z0,c00100,2 -> OK
   c -> S05
   pc = 00c00100
+
+EXTR is modelled, which the others are not quite the same as.  EXTS and EXTP
+replace the data page a "mem" operand goes through; EXTR replaces the base of
+the register area, so for the next few instructions a "reg" field names the
+register at F000H rather than the one at FE00H with the same short address.
+Nothing else distinguishes the two - the short address is the same number
+either way - so a simulator that did not model it would push the wrong register
+and say nothing.  It is one flag beside the EXTend kind and one line in
+regFieldAddress(); llvm/test/tools/c166-sim/esfr.s is what checks it.
 
 Two addresses are the simulator rather than storage.  They are in the top
 segment, which no C166 part populates and no linker script here places

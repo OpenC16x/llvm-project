@@ -358,6 +358,43 @@ bool C166InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     Emit(Indirect ? C166::TAILJMPi : C166::TAILJMPa).add(MI.getOperand(0));
     break;
   }
+  case C166::FARLOAD16POST:
+  case C166::FARLOAD8POST: {
+    // The same EXTS and the same access, with the step folded into it.  The
+    // operands are (value, offsetend, offset, segment) - the offset is tied to
+    // the second result, which is the register the access itself writes back,
+    // so the pair the machine runs is "exts seg, #1" and "mov val, [off+]".
+    //
+    // It is a form of its own rather than a case of the one below because the
+    // access is a different instruction with a different operand shape, not
+    // the same instruction with a different addressing mode.
+    bool IsByte = MI.getOpcode() == C166::FARLOAD8POST;
+    const MachineOperand &Value = MI.getOperand(0);
+    const MachineOperand &Offset = MI.getOperand(2);
+    const MachineOperand &Segment = MI.getOperand(3);
+
+    MachineInstrBuilder Exts;
+    if (Segment.isReg())
+      Exts = Emit(C166::EXTSr)
+                 .addReg(Segment.getReg(), getKillRegState(Segment.isKill()))
+                 .addImm(1);
+    else
+      Exts = Emit(C166::EXTSi).add(Segment).addImm(1);
+
+    MachineInstrBuilder Access =
+        Emit(IsByte ? C166::MOVB8rpi : C166::MOV16rpi)
+            .add(Value)
+            .addReg(MI.getOperand(1).getReg(), RegState::Define)
+            .addReg(Offset.getReg(), getKillRegState(Offset.isKill()));
+    Access.cloneMemRefs(MI);
+
+    // The post-RA scheduler runs straight after this pass and would happily
+    // drop an unrelated instruction into the middle of the pair, so tie the
+    // two together where nothing can get at them - the same bundling the
+    // unstepped forms below get, and for the same reason.
+    finalizeBundle(MBB, Exts->getIterator(), std::next(Access->getIterator()));
+    break;
+  }
   case C166::FARLOAD16:
   case C166::FARLOAD8:
   case C166::FARSTORE16:

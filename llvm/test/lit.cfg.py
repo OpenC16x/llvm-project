@@ -242,6 +242,21 @@ tools = [
     ToolSubst("%c166_sim", FindTool("c166-sim"), unresolved="ignore"),
 ]
 
+# The client that drives the simulator's GDB stub.  It is a script rather than
+# a built tool, so it is named by where it is rather than found on a path.
+config.substitutions.append(
+    (
+        "%c166_rsp",
+        "'%s' %s"
+        % (
+            sys.executable,
+            os.path.join(
+                config.llvm_src_root, "utils", "C166Sim", "tools", "rsp-client.py"
+            ),
+        ),
+    )
+)
+
 # FIXME: Why do we have both `lli` and `%lli` that do slightly different things?
 tools.extend(
     [

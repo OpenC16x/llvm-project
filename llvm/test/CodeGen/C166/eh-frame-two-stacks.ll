@@ -19,6 +19,8 @@
 
 ; CHECK: Return address column: 45
 ; CHECK: DW_CFA_def_cfa: R0 +0
+;; And that the caller's R0 is that address: cfi-two-stacks.ll says why.
+; CHECK-NEXT: DW_CFA_val_offset: R0 0
 ; CHECK-NEXT: DW_CFA_val_expression: PC DW_OP_bregx CSP+0, DW_OP_const1u 0x10, DW_OP_shl, DW_OP_bregx SYSSP+0, DW_OP_deref_size 0x2, DW_OP_or
 ; CHECK-NEXT: DW_CFA_val_expression: SYSSP DW_OP_bregx SYSSP+2
 ; CHECK-NEXT: DW_CFA_same_value: CSP

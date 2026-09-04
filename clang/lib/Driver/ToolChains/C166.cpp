@@ -54,6 +54,18 @@ void c166::getC166TargetFeatures(const Driver &D, const ArgList &Args,
   if (const Arg *A = Args.getLastArg(options::OPT_mmac, options::OPT_mno_mac))
     Features.push_back(A->getOption().matches(options::OPT_mmac) ? "+mac"
                                                                  : "-mac");
+
+  // Not a property of any part: no C166 watches the R0 stack, which is the
+  // whole reason for the option.  It is carried as a feature so that it can be
+  // asked for per function as well as per translation unit, and it is off
+  // unless asked for - the check is eight bytes and four states in every
+  // prologue that takes it, and a program that has measured its stack does not
+  // need to pay them.
+  if (const Arg *A = Args.getLastArg(options::OPT_mstack_check,
+                                     options::OPT_mno_stack_check))
+    Features.push_back(A->getOption().matches(options::OPT_mstack_check)
+                           ? "+stack-check"
+                           : "-stack-check");
 }
 
 C166ToolChain::C166ToolChain(const Driver &D, const llvm::Triple &Triple,

@@ -758,6 +758,17 @@ def ESFRST10 : RegisterClass<"C166", [i16], 16,
   let CopyCost = -1;
 }
 
+// Every extended special function register, whichever map it came from.  A
+// "reg" field that names one has to be one operand class, because which map a
+// name belongs to is not the matcher's question - isSFRInSelectedMap is where
+// that is asked, and it is asked of the name rather than of the field.  The
+// two classes overlap in the coprocessor's four offset registers, which belong
+// to the unit rather than to either part.
+def ESFRAny : RegisterClass<"C166", [i16], 16, (add ESFR, ESFRST10)> {
+  let isAllocatable = 0;
+  let CopyCost = -1;
+}
+
 // The two pointers the MAC unit's indirect forms run on.
 def CoIDX : RegisterClass<"C166", [i16], 16, (add IDX0, IDX1)> {
   let isAllocatable = 0;

@@ -1,0 +1,48 @@
+# REQUIRES: c166-registered-target
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: llvm-mc -filetype=obj -triple=c166 %S/Inputs/gdb-stub.s -o %t/prog.o
+# RUN: ld.lld -Ttext=0xc00100 -e _start %t/prog.o -o %t/prog.elf
+
+## The register numbers the GDB remote protocol uses, which are the stub's own
+## and are not the DWARF ones.
+##
+## "p" and "P" take the number from the target description where the client
+## read one, and otherwise the position in the "g" packet - so the description
+## has to advertise those positions or the two disagree.  It used to advertise
+## the DWARF numbers instead, which are what the unwind information is written
+## in and are a different numbering: 0 to 15 for R0 to R15 and then 32 upward.
+## A client that read the description agreed with the stub, and a client that
+## did not got R0 to R15 right by coincidence and nothing else - which is
+## exactly what LLDB does, having no XML parser unless it is built with one.
+##
+## The bug survived because the only client in this tree reads whole register
+## dumps with "g" and never asks for one register, so nothing exercised "p" at
+## all.  These do.
+
+# RUN: %c166_rsp -- %c166_sim --gdb %t/prog.elf < %s.commands 2>&1 \
+# RUN:   | FileCheck %s
+
+## R0 is register 0 either way, which is why the old numbering looked right.
+# CHECK: p0 -> 0000
+
+## PSW is the seventeenth register in the "g" packet, so it is 10H.  Under the
+## old numbering this was the DWARF number 32 and 10H found nothing.
+# CHECK: p10 -> 0000
+
+## And the last one, the program counter: number 1DH, four bytes rather than
+## two, holding CSP:IP.  The program is linked at C0'0100H, and the protocol
+## carries a register least significant byte first - so 00'C0'01'00 comes back
+## as the bytes 00 01 C0 00.
+# CHECK: p1d -> 0001c000
+
+## Writing goes by the same number, in the same byte order: this sets R2 to
+## 1234H and reads back the same four digits.
+# CHECK: P2=3412 -> OK
+# CHECK: p2 -> 3412
+
+## A number past the end is an error rather than a read of whatever is there.
+# CHECK: p1e -> E01
+
+## The description says both numberings, each in the attribute meant for it.
+# CHECK: regnum="16" dwarf_regnum="32"
+# CHECK: regnum="29" dwarf_regnum="45"

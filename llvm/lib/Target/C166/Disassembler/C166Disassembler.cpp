@@ -156,6 +156,32 @@ static DecodeStatus decodeSFRShortAddress(MCInst &MI, uint64_t Imm,
   return MCDisassembler::Fail;
 }
 
+/// The same short address, read as the extended register at F000H rather than
+/// the ordinary one at FE00H.
+///
+/// Nothing reaches this in practice.  It is the operand of EPUSH and EPOP,
+/// which are four bytes whose first two are an EXTR - and the 16 bit decoder
+/// table is tried first, so those bytes come back as an EXTR followed by a
+/// push of the ordinary register with the same short address.  That is what
+/// the bytes say and all they say, and it reassembles to the same bytes.  This
+/// exists because the generated table names it and because, if the two tables
+/// were ever tried the other way round, this is the answer it would need.
+static DecodeStatus decodeEReg8Operand(MCInst &MI, uint64_t Imm,
+                                       uint64_t Address,
+                                       const MCDisassembler *Decoder) {
+  const MCRegisterInfo *MRI = Decoder->getContext().getRegisterInfo();
+  for (unsigned ClassID : {C166::ESFRRegClassID, C166::ESFRST10RegClassID})
+    for (MCPhysReg Reg : getC166MCRegisterClass(ClassID)) {
+      if (MRI->getEncodingValue(Reg) != Imm)
+        continue;
+      if (!C166::isSFRInSelectedMap(Reg, Decoder->getSubtargetInfo()))
+        continue;
+      MI.addOperand(MCOperand::createReg(Reg));
+      return MCDisassembler::Success;
+    }
+  return MCDisassembler::Fail;
+}
+
 /// The 8 bit "reg" field of PUSH and POP: F0H + n is a general purpose
 /// register, anything else is the short address of a special function
 /// register.  Only the special function registers the backend models can be

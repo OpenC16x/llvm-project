@@ -512,11 +512,37 @@ SECTIONS
   /* Nothing here implements a heap; these say where one could go.  After the
    * last thing placed rather than after .bss, because on a part with an
    * extension RAM the memory between E800H and the internal RAM is not RAM. */
+  /* Where the ABI stack must not go below.  There are two stacks on this part
+   * and only one of them is guarded: STKOV and STKUN compare the hardware
+   * stack pointer SP, which holds return addresses, and take a trap when it
+   * leaves its window.  R0 is the other stack - frames, spills, locals, arrays
+   * - and no register in the part watches it, so a program that recurses too
+   * deep or puts a large array on the stack walks R0 down through whatever is
+   * under it and corrupts that silently.
+   *
+   * This says where "under it" begins, so that something can check.  Two
+   * things do: -mstack-check makes the compiler compare R0 against this symbol
+   * in the prologue of any function whose frame is large enough to be worth
+   * it, and llvm/utils/C166Sim reads this symbol out of the executable and
+   * stops when R0 goes below it, whether or not the program was built with
+   * that flag. */
+  __user_stack_limit = __dprambss_end;
   __heap_start = __dprambss_end;
   __heap_end = __user_stack_top;
 
   /DISCARD/ : { *(.comment) *(.note.*) }
 }
+
+ASSERT(__user_stack_limit < __user_stack_top,
+       "there is no room left for the ABI stack: what is placed below it reaches __user_stack_top")
+
+/* The call frame information has to fit in a sixteen bit offset from its own
+ * start, because that is how startup/unwind.c stores where an expression is -
+ * see the note on Rule there, which is about the two Rows a walk holds and the
+ * 1 KByte of ABI stack they have to fit in.  Nothing on any part in the table
+ * comes close: the whole of the near program memory is 48 KByte. */
+ASSERT(__eh_frame_end - __eh_frame_start <= 0xFFFF,
+       "the call frame information is larger than the unwinder can index")
 
 ASSERT(__c166_unnumbered_vectors_start == __c166_unnumbered_vectors_end,
        "a vector goes in .vectors.NNN, named for its trap number in decimal padded to three digits; plain .vectors has no slot")

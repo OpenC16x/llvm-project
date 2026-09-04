@@ -50,6 +50,14 @@ static cl::opt<std::string>
                    "-mmac there."),
           cl::value_desc("+feature,-feature"));
 
+static cl::opt<bool>
+    CheckUserStack("check-user-stack", cl::init(true),
+                   cl::desc("stop when R0 goes below __user_stack_limit, which "
+                            "is the ABI stack overflowing.  The part does not "
+                            "check this and the simulator can, so it does.  "
+                            "Turning it off still measures how far R0 went, "
+                            "which --count-states reports"));
+
 static cl::opt<std::string>
     ExitSymbol("exit-symbol", cl::init("__c166_exit"),
                cl::desc("halt when execution reaches this symbol "
@@ -80,6 +88,13 @@ static cl::opt<bool>
                         "stdout instead of running the program, so that a "
                         "debugger can drive it: target remote | c166-sim "
                         "--gdb prog.elf"));
+static cl::opt<int> GDBPort(
+    "gdb-port",
+    cl::desc("serve the protocol on this TCP port of the loopback interface "
+             "rather than on stdin and stdout, for a debugger with no pipe "
+             "form - LLDB among them.  Zero asks for a free port and prints "
+             "the one it got.  Implies --gdb"),
+    cl::init(-1));
 static cl::opt<bool> Backtrace(
     "backtrace",
     cl::desc("walk the stack when the program stops, using the call frame "
@@ -176,6 +191,8 @@ int main(int argc, char **argv) {
   M.TraceOS = &errs();
   // The debugger owns stdout while it is connected, so the program's console
   // output goes the other way rather than into the middle of a packet.
+  if (GDBPort >= 0)
+    GDB = true;
   M.ConsoleOS = GDB ? &errs() : &outs();
 
   for (auto &&[Specs, Periodic] : {std::make_pair(&InterruptAt, false),
@@ -213,6 +230,13 @@ int main(int argc, char **argv) {
         errs() << formatv("  interrupts {0}", M.InterruptsTaken);
       if (M.PECTransfers)
         errs() << formatv("  pec {0}", M.PECTransfers);
+      // How much of the ABI stack the program actually used, which is the
+      // question anyone who has just read about __user_stack_limit asks next.
+      // Only when there was a limit to measure against.
+      if (M.HasUserStackLimit && M.UserStackLow != 0xFFFF)
+        errs() << formatv("  abi-stack {0} of {1}",
+                          M.UserStackTop - M.UserStackLow,
+                          M.UserStackTop - M.UserStackLimit);
       errs() << "\n";
     }
     switch (M.Stop) {
@@ -292,23 +316,55 @@ int main(int argc, char **argv) {
   // is arranged by the reset configuration rather than by any code.
   M.VECSEG = M.CSP;
 
-  if (!ExitSymbol.empty()) {
+  // One walk of the symbol table for the two names the simulator wants out of
+  // it: where a finished program ends up, and where the ABI stack runs out.
+  auto Lookup = [&](StringRef Want) -> std::optional<uint64_t> {
+    if (Want.empty())
+      return std::nullopt;
     for (const object::SymbolRef &S : Obj->symbols()) {
       Expected<StringRef> NameOrErr = S.getName();
       if (!NameOrErr) {
         consumeError(NameOrErr.takeError());
         continue;
       }
-      if (*NameOrErr != ExitSymbol)
+      if (*NameOrErr != Want)
         continue;
       Expected<uint64_t> AddrOrErr = S.getAddress();
       if (!AddrOrErr) {
         consumeError(AddrOrErr.takeError());
         continue;
       }
-      M.ExitAddress = uint32_t(*AddrOrErr);
+      return *AddrOrErr;
+    }
+    return std::nullopt;
+  };
+
+  // The bottom of the ABI stack, if the linker script said where it is.  A
+  // script that does not define it, and a flat image with no symbols at all,
+  // simply do not get the check: it is worth having and it is not worth
+  // refusing to run a program over.
+  if (std::optional<uint64_t> A = Lookup("__user_stack_limit")) {
+    M.UserStackLimit = uint16_t(*A);
+    M.HasUserStackLimit = true;
+    // The top as well, when it is there, so that --count-states can report how
+    // much of the stack was used rather than only where it ended.
+    if (std::optional<uint64_t> T = Lookup("__user_stack_top")) {
+      M.UserStackTop = uint16_t(*T);
+      M.HasUserStackTop = true;
+    } else {
+      M.UserStackTop = M.UserStackLimit;
+    }
+    // --check-user-stack=false only stops the stopping.  Watching R0 costs one
+    // comparison a step, and the low water mark it leaves behind is how a
+    // program that has just been told its stack is too small finds out by how
+    // much - which it cannot do if crossing the line ends the run.
+    M.StopOnUserStackOverflow = CheckUserStack;
+  }
+
+  if (!ExitSymbol.empty()) {
+    if (std::optional<uint64_t> A = Lookup(ExitSymbol)) {
+      M.ExitAddress = uint32_t(*A);
       M.HasExitAddress = true;
-      break;
     }
     // Without one there is nothing to say a program has finished, which only
     // matters when the simulator is the one deciding to stop.  A debugger
@@ -321,7 +377,7 @@ int main(int argc, char **argv) {
   }
 
   if (GDB)
-    return serveGDB(M);
+    return serveGDB(M, GDBPort);
 
   while (M.step())
     ;

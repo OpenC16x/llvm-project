@@ -122,6 +122,18 @@ found a fourth, which nothing in the four had reached:
   IntegerLiteral.  That one is not libc's at all: three lines of C++ reach it,
   and it is the reason to sweep everything rather than the part being measured.
 
+Compiling is not running, and for a long time that was the whole of what this
+checked: the drivers here reach about thirty of the sources, and the rest went
+into the sysroot's libc.a having never been executed.
+llvm/utils/C166Sim/differential/library.c is what runs the others - it calls
+them through their public C names, out of the archive, and checks every answer
+against the host.  What that found is in
+llvm/lib/Target/C166/startup/README.txt under "The C library": the floating
+point string conversions overrun the ABI stack, silently, because
+simple_decimal_conversion puts an 800 byte object on a stack that is 1 KByte
+altogether.  Nothing in the compiler is wrong there and no amount of compiling
+would have found it.
+
 What is left is mostly not about this target.  Seventeen of the twenty five
 sources still failing in the four directories fail on an #error inside libc
 itself - locale_t, __atexithandler_t and mbstate_t are declared unavailable in

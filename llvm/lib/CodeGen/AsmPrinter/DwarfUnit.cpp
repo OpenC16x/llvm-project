@@ -888,10 +888,20 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy) {
   }
 
   // Add size if non-zero (derived types might be zero-sized.)
-  if (Size && Tag != dwarf::DW_TAG_pointer_type
-           && Tag != dwarf::DW_TAG_ptr_to_member_type
-           && Tag != dwarf::DW_TAG_reference_type
-           && Tag != dwarf::DW_TAG_rvalue_reference_type)
+  //
+  // A pointer normally goes without: DWARF says a consumer that finds no
+  // DW_AT_byte_size on one uses the compilation unit's address size, and on
+  // almost every target every pointer is that size, so the attribute would be
+  // the same number on every pointer in the file.  A target with more than one
+  // pointer width is the exception - C166's far pointers are 32 bits where its
+  // near ones are 16 - and there the omission is not a saving but a wrong
+  // answer, because nothing else in the debug information says how wide the
+  // pointer is.  So it is emitted when, and only when, it differs.
+  bool IsPointerLike = Tag == dwarf::DW_TAG_pointer_type ||
+                       Tag == dwarf::DW_TAG_ptr_to_member_type ||
+                       Tag == dwarf::DW_TAG_reference_type ||
+                       Tag == dwarf::DW_TAG_rvalue_reference_type;
+  if (Size && (!IsPointerLike || Size != Asm->MAI.getCodePointerSize()))
     addUInt(Buffer, dwarf::DW_AT_byte_size, std::nullopt, Size);
 
   if (Tag == dwarf::DW_TAG_ptr_to_member_type)

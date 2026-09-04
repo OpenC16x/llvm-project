@@ -79,6 +79,41 @@ public:
 
 } // namespace
 
+// A map whose addresses have to fit in a pointer narrower than the
+// architecture's address size hands out addresses that fit in it.  That is
+// what a target with two pointer widths needs: an allocation's address ends up
+// in an alloca's result pointer and in the pointer to the materialized struct,
+// and a 24 bit address does not fit in a 16 bit one.
+TEST_F(IRMemoryMapTest, AllocationAddressByteSize) {
+  ArchSpec arch("i386-pc-linux");
+  Platform::SetHostPlatform(
+      platform_linux::PlatformLinux::CreateInstance(true, &arch));
+
+  DebuggerSP debugger_sp = Debugger::CreateInstance();
+  ASSERT_TRUE(debugger_sp);
+
+  TargetSP target_sp;
+  PlatformSP platform_sp;
+  Status error = debugger_sp->GetTargetList().CreateTarget(
+      *debugger_sp, "", arch, eLoadDependentsNo, platform_sp, target_sp);
+  ASSERT_TRUE(target_sp);
+
+  TestIRMemoryMap memory_map(target_sp);
+
+  // Nothing has said otherwise, so it is the architecture's address size.
+  EXPECT_EQ(memory_map.GetAllocationAddressByteSize(), 4u);
+
+  memory_map.SetAllocationAddressByteSize(2);
+  EXPECT_EQ(memory_map.GetAllocationAddressByteSize(), 2u);
+
+  auto addr_or_err =
+      memory_map.Malloc(64, 8, ePermissionsReadable | ePermissionsWritable,
+                        IRMemoryMap::eAllocationPolicyHostOnly, false);
+  ASSERT_THAT_EXPECTED(addr_or_err, llvm::Succeeded());
+  EXPECT_NE(*addr_or_err, LLDB_INVALID_ADDRESS);
+  EXPECT_LE(*addr_or_err + 64, 0x10000ULL);
+}
+
 // Verify that FindSpace handles partial memory region coverage gracefully.
 TEST_F(IRMemoryMapTest, FindSpacePartialRegionCoverage) {
   ArchSpec arch("i386-pc-linux");

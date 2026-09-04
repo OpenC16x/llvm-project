@@ -1246,7 +1246,57 @@ bool Machine::step() {
   PrevWrotePSW = WrotePSW;
 
   retireExtend();
+  checkUserStack();
   return Stop == StopReason::Running;
+}
+
+void Machine::checkUserStack() {
+  if (!HasUserStackLimit || Stop != StopReason::Running)
+    return;
+  uint16_t SP0 = getWordReg(0);
+  // Arm on the first sight of a value inside the stack, and remember which
+  // register bank it was in.  R0 is zero out of reset and stays there until the
+  // startup code loads it from __user_stack_top, and those instructions are not
+  // an overflow.
+  //
+  // Inside, and not merely above the limit: a program that never sets R0 and
+  // takes an interrupt has a handler whose prologue subtracts its frame from
+  // zero, which wraps to just under 64K.  That is above the limit and is not a
+  // stack pointer, and arming on it means the matching addition in the epilogue
+  // - back to zero - is reported as an overflow.  The upper bound is what
+  // rejects it, so it is applied only when __user_stack_top said where the top
+  // is; without that symbol there is nothing to compare against and the older,
+  // looser test is all there is.
+  if (!UserStackArmed) {
+    if (SP0 < UserStackLimit || (HasUserStackTop && SP0 > UserStackTop))
+      return;
+    UserStackArmed = true;
+    UserStackCP = CP;
+    return;
+  }
+  // "R0" is whichever sixteen words CP is pointing at, so in a handler with a
+  // register bank of its own it is a different register that happens to have
+  // the same name - and one the prologue only loads with the stack pointer if
+  // the handler needs it, so it usually holds whatever was left in that bank.
+  // Zero, on the first entry to a bank nothing has used.  That is not an
+  // overflow, and the way to not report it as one is to check only in the bank
+  // the ABI stack pointer belongs to.
+  //
+  // The cost is that a banked handler which does use the stack is not watched.
+  // It is a handler: it runs on the same stack, so what it spends shows up in
+  // the checks of everything it interrupted.
+  if (CP != UserStackCP)
+    return;
+  if (SP0 < UserStackLow)
+    UserStackLow = SP0;
+  if (SP0 >= UserStackLimit || !StopOnUserStackOverflow)
+    return;
+  Stop = StopReason::StackFault;
+  StopDetail = (Twine("ABI stack overflow: R0 is ") + addrStr(SP0) +
+                ", below __user_stack_limit at " + addrStr(UserStackLimit) +
+                ".  Nothing on the part checks this - see -mstack-check and "
+                "llvm/lib/Target/C166/startup/README.txt")
+                   .str();
 }
 
 namespace {
@@ -2898,9 +2948,11 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.ExtendCount = Imm(1) + 1;
     break;
   case Op::EXTR:
-    // Only the SFR space switch, which this simulator does not model because
-    // nothing here uses the extended SFRs.  Counting it keeps the sequence
-    // length right.
+    // The extended special function registers, which is the whole of what this
+    // one does: for the next few instructions a "reg" field names the register
+    // at F000H rather than the one at FE00H with the same short address.
+    // regFieldAddress() is where that is applied.
+    M.ExtendRegisterSpace = true;
     M.ExtendCount = Imm(0) + 1;
     break;
   case Op::ATOMIC:

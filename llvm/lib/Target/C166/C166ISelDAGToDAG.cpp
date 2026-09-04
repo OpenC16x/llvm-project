@@ -55,6 +55,7 @@ public:
   // Complex pattern selectors.
   bool SelectAddrR(SDValue Addr, SDValue &Base);
   bool trySelectPostIncLoad(SDNode *Node);
+  bool trySelectFarPostIncLoad(SDNode *Node);
   bool trySelectBitRMW(SDNode *Node);
   bool trySelectBitBranch(SDNode *Node);
   bool trySelectAtomicRMW(SDNode *Node);
@@ -303,6 +304,29 @@ bool C166DAGToDAGISel::trySelectPostIncLoad(SDNode *Node) {
   MachineSDNode *New =
       CurDAG->getMachineNode(Opc, SDLoc(Node), VT, MVT::i16, MVT::Other,
                              LD->getBasePtr(), LD->getChain());
+  CurDAG->setNodeMemRefs(New, {LD->getMemOperand()});
+  ReplaceNode(Node, New);
+  return true;
+}
+
+/// The same for a confined far walk, whose step
+/// C166ISelLowering.cpp's combineFarLoadPost() has already folded into the
+/// load.  Three results here too - the value, the stepped offset and the
+/// chain - and the segment rides along to become the EXTS.
+bool C166DAGToDAGISel::trySelectFarPostIncLoad(SDNode *Node) {
+  auto *LD = cast<MemSDNode>(Node);
+  unsigned Opc;
+  MVT VT = LD->getMemoryVT().getSimpleVT();
+  if (VT == MVT::i16)
+    Opc = C166::FARLOAD16POST;
+  else if (VT == MVT::i8)
+    Opc = C166::FARLOAD8POST;
+  else
+    return false;
+
+  MachineSDNode *New = CurDAG->getMachineNode(
+      Opc, SDLoc(Node), VT, MVT::i16, MVT::Other, Node->getOperand(1),
+      Node->getOperand(2), Node->getOperand(0));
   CurDAG->setNodeMemRefs(New, {LD->getMemOperand()});
   ReplaceNode(Node, New);
   return true;
@@ -648,6 +672,11 @@ void C166DAGToDAGISel::Select(SDNode *Node) {
     // A post-incrementing load writes the stepped pointer back as well as the
     // value, which no pattern describes, so it is selected by hand.
     if (trySelectPostIncLoad(Node))
+      return;
+    break;
+  case C166ISD::FAR_LOAD_POST:
+    // And the far one, for the same reason.
+    if (trySelectFarPostIncLoad(Node))
       return;
     break;
   case ISD::ATOMIC_LOAD_ADD:

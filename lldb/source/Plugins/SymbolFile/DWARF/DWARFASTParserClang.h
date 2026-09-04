@@ -567,6 +567,9 @@ struct ParsedDWARFTypeAttributes {
   std::optional<uint64_t> byte_size;
   std::optional<uint64_t> data_bit_size;
   std::optional<uint64_t> alignment;
+  ///< The DW_AT_address_class of a pointer, which on a target with more than
+  ///< one pointer width is what says which width this one is.
+  std::optional<uint64_t> address_class;
   size_t calling_convention = llvm::dwarf::DW_CC_normal;
   uint32_t bit_stride = 0;
   uint32_t byte_stride = 0;

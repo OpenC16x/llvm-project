@@ -23,6 +23,79 @@ is an ordinary general purpose register, so frame slots are reachable with the
 [Rw + #data16] addressing mode; the hardware stack pointer is not.  R1 is the
 frame pointer when a function needs one.
 
+Only one of the two is guarded.  STKOV and STKUN are registers the hardware
+compares SP against on every push and pop, and crossing either takes a trap;
+what they compare is the hardware stack pointer, so there is no way to aim them
+at R0 and no second pair to aim.  The ABI stack therefore has nothing watching
+it, and a program that recurses too deep or puts a large array on the stack
+walks R0 down through whatever is under it and keeps running.  On a part with
+2 KByte of dual-port RAM that is not an exotic failure: it is what
+llvm/utils/C166Sim/differential/library.c found llvm-libc's strtof doing, an
+800 byte object on a 1 KByte stack.
+
+Checking the ABI stack
+----------------------
+
+Three things now watch it, and it is worth knowing which of them run where.
+
+  __user_stack_limit is a symbol the linker scripts in startup/ define, at the
+  bottom of the ABI stack, with an assertion beside it that what is placed
+  below has not reached the top.  It is the address the other two compare
+  against.
+
+  -mstack-check puts two instructions in the prologue of any function whose
+  frame is at least -c166-stack-check-threshold bytes: a CMP of R0 against
+  __user_stack_limit plus this frame's size, and a JMPA to
+  __c166_stack_overflow when it is below.  The addition is the linker's, in the
+  addend of the relocation, so it is eight bytes and four states; comparing
+  before the allocation rather than after it means a checked program never puts
+  R0 below its own stack at all.  __c166_stack_overflow is weak, defined in
+  startup/runtime.c to stop the machine, and replaceable by a program that
+  wants to say something first - a replacement must need no frame of its own.
+
+  llvm/utils/C166Sim reads __user_stack_limit out of the executable and stops
+  when R0 goes below it, whether or not the program was built with the flag.
+  That costs the program nothing and catches every crossing rather than the
+  ones a checked prologue happens to see, which is a trade only a simulator can
+  make.  --check-user-stack=false turns it off.
+
+What the check found on its first run, which is why it exists: throwing a C++
+exception used 1262 bytes of the 1024 the scripts give the ABI stack - not a
+slow program but one writing below F600H, where there is no memory - and
+llvm/utils/C166Sim/differential/library.c, which only calls the C library, uses
+936 of them.  Neither had ever been measured.  The first is fixed: the rules the
+unwinder holds went from ten bytes to four and a throw is 812 bytes now, which
+startup/README.txt explains under "C++ exceptions".  The second is 91% of the
+stack and passes, and is the next thing that will go over.
+
+The third thing it found is the fuzzer, and it is not a bug: one seed in two
+hundred generates a function with a 512 byte frame calling one with a 280 byte
+frame, which at -O0 wants 1112 bytes of the 1024 there are.  A program too big
+for the part is the same kind of fact as one too big for the near ROM, which
+fuzz.sh already passed over, so it passes over this too and says so in its
+count.  What it must not do is call it a disagreement: a program stopped for
+overflowing the stack produced no answer to disagree with.
+
+The threshold's default is 6 and the 6 is arithmetic.  Every call pushes two
+bytes of return address onto the system stack, which the stock scripts give 512
+bytes, so a runaway recursion trips STKOV on its 256th call whatever its frames
+look like; the ABI stack in the same scripts is 1024 bytes, so a recursion
+through frames of F bytes reaches the bottom of it on call 1024/F.  The ABI
+stack goes first exactly when F > 4.  A frame of four bytes or less is thus
+already the hardware's to catch, and six is the first size that is not.
+Checking from there up is what makes the two between them cover every straight
+recursion under those scripts; a board with a different map wants a different
+number, which is why it is an option.
+
+What that completeness costs, over the four programs in
+llvm/utils/C166Sim/corpus at -O2 against 44050 bytes of text and 17,089,775
+states: +0.94% of text and +0.113% of the time at the default, +0.27% and
++0.019% at a threshold of 32, +0.15% and nothing measurable at 64.  61% of the
+functions in those programs allocate anything at all and 16% allocate 32 bytes
+or more, so the size difference is most of the functions and the time
+difference is almost none of the work - the large frames are not in the inner
+loops.
+
 Calling convention
 ------------------
 
@@ -268,6 +341,30 @@ Measured on a loop walking a far array a word at a time: nine instructions to
 six, 20 states an element to 14, and 22 bytes off the function.  The saving is
 one ADDC and the register shuffling that keeping a written value rather than a
 read one costs.
+
+The step folds into the access as well, which is the rest of it.  A near walk
+gets "mov r5, [r4+]" from the generic post-index machinery, and a confined one
+cannot: the pointer is 32 bits and the pass above has already rewritten the
+arithmetic into an add on its low half wrapped back up with an OR, so there is
+no ADD on a pointer for getPostIndexedAddressParts() to recognise.  After the
+load is lowered there is one again - the address has been split into an offset
+and a segment, both plain i16, and the offset feeds an "add offset, 2" - and
+combineFarLoadPost() in C166ISelLowering.cpp folds it there.  "exts r3, #1"
+followed by "mov r7, [r5+]" is a legal pair: the EXTS covers the access and the
+increment is on the register.
+
+Over the same loop run 4000 times, in states an element:
+
+  near         17.20
+  confined     19.21   the EXTS, and nothing else
+  far          23.21   the EXTS, the step, and the ADDC into the segment
+
+The confined walk was 21.21 before, so the fold is worth two states an element
+and 2 bytes off the loop, and what is left between it and a near walk is the
+one instruction that cannot go away.  An unconfined far pointer is left alone,
+because its arithmetic carries into the segment and stepping the offset on its
+own would be a different address; there is no post-incrementing store on this
+machine, so a walk that writes still steps its own pointer.
 
 Arithmetic that leaves the segment is undefined, and undefined the way that
 does not report itself: the offset wraps and the access lands at the foot of
@@ -919,13 +1016,48 @@ A symbol whose name merely starts "cc_" is still rejected rather than quoted,
 since only the sixteen conditions themselves are in the set.  That is a
 diagnostic and not a wrong program, which is the difference that mattered.
 
-The extended special function registers are in the table too, but only as
-addresses.  They sit at the same short addresses as the ordinary ones, mapped
-from F000H and F100H instead of FE00H and FF00H, so a "reg" field cannot tell
-the two apart and reaching one that way needs an EXTR the backend never emits.
-By address there is no such problem - the default DPPs already cover F000H - so
-"mov syscon1, r2" is a MOV mem, reg, and the registers are in a class of their
-own that no "reg" field can name.
+The extended special function registers are in the table too, and are reached
+two ways.  They sit at the same short addresses as the ordinary ones, mapped
+from F000H and F100H instead of FE00H and FF00H, so by address there is no
+problem at all - the default DPPs already cover F000H, and "mov syscon1, r2" is
+an ordinary MOV mem, reg.
+
+Through a "reg" field there is, because the field cannot tell the two apart:
+what distinguishes them is an EXTR in front of the instruction, which switches
+the register area over for the next few.  "push qx0" is that, written as one
+four byte instruction whose first word is the EXTR - one instruction rather
+than a pseudo that expands into two, because nothing may fall between an EXTR
+and what it covers and nothing can fall inside an instruction.
+
+That is the only way to reach one of these at all for pushing and popping,
+since there is no "push mem", and it is what an interrupt handler that uses the
+coprocessor's offset registers needs: those are QX0, QX1, QR0 and QR1, they are
+what a repeated CoMAC over a strided stream writes, and until this existed a
+handler that wrote one took the interrupted code's stride with it.
+
+That is checked the way it would go wrong rather than by reading the assembly:
+llvm/utils/C166Sim/differential/macoffsets.c puts two values in QX0 and QR0,
+runs while a handler doing a strided dot product fires into it, and reads them
+back.  Taking the four Q registers out of the save list makes it fail at -O1,
+-O2 and -Os with the handler's own strides in them, which is what says the
+program is testing anything.
+
+The check should have arrived with the EXTR work and did not, and the reason
+given at the time was wrong: it said a strided repeated CoMAC was not reachable
+from ordinary C at -O2, that the unroller wrote the loop out before selection
+saw it, and that the loop surviving -fno-unroll-loops was not the right shape
+either.  None of that was the cause.  The test loop accumulated into an int,
+which is sixteen bits here, so the optimiser had narrowed the multiply to i16
+and there was no 32 bit accumulation left to match - see the accumulator note
+under the repeat prefix below.  With a long accumulator it selects at -O2 with
+unrolling on, strided and unstrided alike, and macdot.c had been covering the
+plain form from C since MAC-11.
+
+A disassembly still shows the two instructions, because the bytes are two and
+say nothing else: the 16 bit decoder table is tried first, so "push qx0" reads
+back as an EXTR followed by a push of the ordinary register with the same short
+address.  That reassembles to the same bytes, which is what roundtrip.sh
+checks.
 
 TRAP is the software entry to a vector.  It does not read a vector through the
 table: it branches to the table entry itself, at 4 * the trap number, so the
@@ -1341,6 +1473,22 @@ Known limitations / things to do
   instruction, which is what the hook is for.  The recognition is therefore
   asked twice and written once.
 
+  A third thing is not about the pass at all but is what anyone writing one of
+  these loops will hit first, so it belongs here: the accumulator has to be 32
+  bits, and on this part that means "long".  int is sixteen bits here, and a
+  loop that accumulates into an int is a sixteen bit accumulation - so the
+  optimiser narrows the multiply to i16 long before the pass looks, and what
+  reaches it is not a widening product any more.  The unit accumulates in
+  forty and the pass matches the 32 bit form, so an int accumulator gets a run
+  of ordinary multiplies and nothing says why.
+
+  That is worth being blunt about because it produced a wrong finding once,
+  which is recorded under the extended special function registers above: a
+  test written with an int accumulator did not select, the unroller was blamed
+  for it, and the conclusion drawn - that a strided repeated CoMAC is not
+  reachable from ordinary C at -O2 - was false.  It selects at -O2 with
+  unrolling on, and macdot.c had been checking exactly that all along.
+
   Measured again on what was built, per call, with the state counter:
 
                      taps    loop    repeat   bytes, loop / repeat
@@ -1432,11 +1580,39 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
+
   Setting it from the branch probabilities is a small change and is not made,
-  because nothing here could measure it: the simulator charges a taken branch
-  what Table 11 says and a mispredicted one the same, so the number after the
-  change would equal the number before by construction.  A taken-branch penalty
-  in the simulator is what this waits on.
+  and the reason is now a number rather than a missing one.  The bit is on
+  JMPA and CALLA; the two byte relative JMPR has no room for one and is what a
+  conditional branch is selected as, with the assembler and the linker growing
+  only the ones that will not reach.  So the bit applies to the branches that
+  did not fit, and over the four corpus programs at -O2, counted from a trace
+  of the first 400,000 instructions of each, those are:
+
+    strings     29346 conditional branches,    79 JMPA or CALLA   0.27%
+    sorting     25000 conditional branches,  1250 JMPA or CALLA   5.00%
+    parsing     15453 conditional branches,   833 JMPA or CALLA   5.39%
+    numbers     15815 conditional branches,  1065 JMPA or CALLA   6.73%
+
+  Conditional branches are 19% of the instructions strings executes, so
+  branching is not a small part of what this part does - but 95% or more of it
+  is through an instruction the bit is not on.  Even taking the largest column
+  and assuming every one of those JMPAs mispredicts today and none would
+  after, the saving is 1065 events against 400,000 instructions, which at any
+  per-event penalty the pipeline could plausibly carry is a few tenths of one
+  percent.  Half of them are already right, too: 0 means "assumed taken" and
+  the JMPAs strings executes are taken about half the time.
+
+  llvm/utils/C166Sim/tools/branches.sh is what counted them, so the four rows
+  above can be re-derived rather than believed.
+
+  That is a bound rather than a measurement, because the simulator still
+  charges a mispredicted branch what Table 11 charges a predicted one - Table
+  11 is the original C166's, from a core with no prediction at all, and the
+  XC16x figure is in a manual this tree does not have.  But the bound does not
+  need it: the frequency settles the question whatever the penalty turns out
+  to be.  This was on the list waiting for a taken-branch penalty in the
+  simulator, which was the wrong thing to wait for.
 * Three SFR maps are modelled and the subtarget picks between them, because
   the same short address names different registers on different derivatives.
   What they all agree about - 97 names at the same short address, which is the
@@ -1513,12 +1689,8 @@ Known limitations / things to do
   gives the instruction set, which is where it settled a different question:
   the ST10's MAC is this MAC, sharing every function code, so there is one mac
   feature rather than one per derivative.
-* An extended special function register is reachable by address but not
-  through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
-  Getting at one that way needs an EXTR, and once encoded it is the same bytes
-  as the register with the same short address in the ordinary space, so there
-  would be nothing for a disassembly to go on.  Three of the XC164CM's are
-  still missing because its manual contradicts itself about where they are and
+* Three of the XC164CM's extended special function registers are still
+  missing, because its manual contradicts itself about where they are and
   nothing in it breaks the tie; the register file names which.  Two of the
   three are the pair the ST10F269 datasheet resolves for its own map and not
   for this one, which is written down there rather than acted on here.
@@ -1579,13 +1751,22 @@ Known limitations / things to do
   why almost everything in them is declared and not defined;
   llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
   what it found.
-* No debugger knows the c166 architecture, so nothing puts a source level front
-  end on this yet.  What is in place is everything under one: the debug
-  information is right, the unwind information is right and the simulator walks
-  it, and "c166-sim --gdb" serves the GDB remote serial protocol over stdin and
-  stdout - registers, memory, breakpoints, stepping - with the registers
-  described to the client rather than assumed.  A port of GDB or LLDB to this
-  target is what is left.
+* A __far global cannot be read by name, and that is the last thing a debugger
+  here gets wrong.  LLDB does the rest: it connects to "c166-sim --gdb", sets a
+  breakpoint by name, shows the source line, walks the stack across both
+  stacks, reads a local in any frame, shows a __far pointer as the 24 bit
+  address it is, and dereferences either width of pointer in an expression -
+  "p *ip", "p fp->x", "expr *nip = 99" - which is what the expression path
+  needed two width fixes in LLDB to do.
+
+  What is left is "p fpt" or "target variable fpt" on a global declared __far,
+  which answers "unimplemented opcode DW_OP_xderef".  Clang describes such a
+  global with a location expression that ends in DW_OP_xderef, DWARF's "load
+  through an address in this address space", and LLDB decodes that opcode
+  without evaluating it - there is no address space in its idea of a value to
+  evaluate it into.  Everything reached through a pointer works, which is most
+  of what a program does with far memory; the global named directly does not.
+  llvm/utils/C166Sim/README.txt has the whole of what works and what does not.
 * The cost model's time answers are correct and nothing reads them.  There is
   a scheduling model now - C166Schedule.td, in states, from the same table of
   the instruction set manual the simulator counts with - and the two numbers
@@ -1625,9 +1806,10 @@ Known limitations / things to do
   instruction retires whole, a taken branch costs what Table 11 says rather
   than what a thrown-away pipeline costs, and the forwarding that "resolves
   most of the possible conflicts in a time optimized way" is not there to
-  resolve anything.  The one thing that wants is a taken-branch penalty, which
-  is what the prediction bit of JMPA and CALLA would be measured against; the
-  bullet on that bit above says the rest.
+  resolve anything.  A taken-branch penalty is the one thing that would add,
+  and it is worth less than it looks: it was going to be what the prediction
+  bit of JMPA and CALLA was measured against, and counting the branches showed
+  that bit reaches 5% of them.  The bullet on it above has the numbers.
 * One peripheral is modelled in the simulator and the rest are not.  GPT1's
   three timers count on the clock at the manual's rate and raise their requests
   through their own interrupt control registers, which is what makes the whole

@@ -65,20 +65,44 @@ public:
                    size_t size, Status &error);
   void WriteScalarToMemory(lldb::addr_t process_address, Scalar &scalar,
                            size_t size, Status &error);
+  /// Write \a pointer into \a size bytes at \a process_address.  A size of
+  /// zero means the architecture's address size, which is right whenever
+  /// every pointer on the target is that wide.  A caller that knows how wide
+  /// the pointer it is writing actually is - because it has the data layout
+  /// of the module the pointer came from, and the target has more than one
+  /// pointer width - says so instead.
   void WritePointerToMemory(lldb::addr_t process_address, lldb::addr_t pointer,
-                            Status &error);
+                            Status &error, size_t size = 0);
   void ReadMemory(uint8_t *bytes, lldb::addr_t process_address, size_t size,
                   Status &error);
   void ReadScalarFromMemory(Scalar &scalar, lldb::addr_t process_address,
                             size_t size, Status &error);
+  /// Read a pointer out of \a size bytes at \a process_address.  A size of
+  /// zero means the architecture's address size; see WritePointerToMemory.
   void ReadPointerFromMemory(lldb::addr_t *address,
-                             lldb::addr_t process_address, Status &error);
+                             lldb::addr_t process_address, Status &error,
+                             size_t size = 0);
   bool GetAllocSize(lldb::addr_t address, size_t &size);
   void GetMemoryData(DataExtractor &extractor, lldb::addr_t process_address,
                      size_t size, Status &error);
 
   lldb::ByteOrder GetByteOrder();
   uint32_t GetAddressByteSize();
+
+  /// How wide a pointer that has to hold one of this map's own addresses is.
+  ///
+  /// That is the architecture's address size on a target where every pointer
+  /// is that wide, which is nearly every target, and it is the default.  Where
+  /// it is not - a part with a near pointer and a far one - an allocation this
+  /// map hands out has to fit in the narrow one, because an alloca's result
+  /// and the address of the materialized struct are stored in pointers of that
+  /// width.  Whoever knows the layout of the module being run says so with
+  /// SetAllocationAddressByteSize; a size of zero means "ask the
+  /// architecture", which is what an unset map does.
+  uint32_t GetAllocationAddressByteSize();
+  void SetAllocationAddressByteSize(uint32_t size) {
+    m_allocation_addr_byte_size = size;
+  }
 
   // This function can return NULL.
   ExecutionContextScope *GetBestExecutionContextScope() const;
@@ -92,6 +116,8 @@ protected:
   lldb::ProcessWP &GetProcessWP() { return m_process_wp; }
 
 private:
+  uint32_t m_allocation_addr_byte_size = 0;
+
   struct Allocation {
     lldb::addr_t
         m_process_alloc; ///< The (unaligned) base for the remote allocation.

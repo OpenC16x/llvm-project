@@ -9,6 +9,7 @@
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DiagnosticHandler.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/LLVMContext.h"
@@ -40,6 +41,7 @@
 #include "lldb/Utility/Log.h"
 #include "lldb/lldb-defines.h"
 
+#include <algorithm>
 #include <optional>
 
 using namespace lldb_private;
@@ -55,7 +57,19 @@ IRExecutionUnit::IRExecutionUnit(std::unique_ptr<llvm::LLVMContext> &context_up,
       m_cpu_features(cpu_features), m_name(name), m_sym_ctx(sym_ctx),
       m_did_jit(false), m_function_load_addr(LLDB_INVALID_ADDRESS),
       m_function_end_load_addr(LLDB_INVALID_ADDRESS),
-      m_reported_allocations(false), m_preferred_modules() {}
+      m_reported_allocations(false), m_preferred_modules() {
+  // An address this unit hands out ends up in an alloca's result pointer and
+  // in the pointer to the materialized struct, so it has to fit in whichever
+  // of those two is narrower.  On nearly every target both are the
+  // architecture's address size and this says exactly that; on a part with a
+  // near pointer and a far one it is the near one, and saying so is what keeps
+  // a scratch address representable.
+  if (m_module) {
+    const llvm::DataLayout &dl = m_module->getDataLayout();
+    SetAllocationAddressByteSize(std::min(
+        dl.getPointerSize(0), dl.getPointerSize(dl.getAllocaAddrSpace())));
+  }
+}
 
 lldb::addr_t IRExecutionUnit::WriteNow(const uint8_t *bytes, size_t size,
                                        Status &error) {

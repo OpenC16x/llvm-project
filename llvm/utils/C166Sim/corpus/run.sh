@@ -49,9 +49,13 @@ for SRC in "$HERE"/*.cpp; do
   done
 
   # The reference, built with the host's own compiler settings but the same
-  # libc sources.
+  # libc sources.  It is the machine's compiler rather than the one just built,
+  # which is what differential/run.sh does and for the same reason: a tree
+  # configured for this target and nothing else has no back end for the machine
+  # doing the building, and the just-built clang++ answers -print-targets with
+  # "c166" alone.  CXX overrides it.
   # shellcheck disable=SC2086
-  "$BIN/clang++" -O2 -w $COMMON "$SRC" $SOURCES -o "$TMP/$NAME.host"
+  "${CXX:-c++}" -O2 -w $COMMON "$SRC" $SOURCES -o "$TMP/$NAME.host"
   "$TMP/$NAME.host" > "$TMP/$NAME.expected"
 
   for OPT in $LEVELS; do

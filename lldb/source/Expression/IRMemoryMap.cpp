@@ -93,7 +93,7 @@ lldb::addr_t IRMemoryMap::FindSpace(size_t size) {
   }
 
   uint64_t end_of_memory;
-  switch (GetAddressByteSize()) {
+  switch (GetAllocationAddressByteSize()) {
   case 2:
     end_of_memory = 0xffffull;
     break;
@@ -165,7 +165,7 @@ lldb::addr_t IRMemoryMap::FindSpace(size_t size) {
       }
       ret = alloc_address;
     } else {
-      uint32_t address_byte_size = GetAddressByteSize();
+      uint32_t address_byte_size = GetAllocationAddressByteSize();
       if (address_byte_size != UINT32_MAX) {
         switch (address_byte_size) {
         case 2:
@@ -285,6 +285,12 @@ uint32_t IRMemoryMap::GetAddressByteSize() {
     return target_sp->GetArchitecture().GetAddressByteSize();
 
   return UINT32_MAX;
+}
+
+uint32_t IRMemoryMap::GetAllocationAddressByteSize() {
+  if (m_allocation_addr_byte_size)
+    return m_allocation_addr_byte_size;
+  return GetAddressByteSize();
 }
 
 ExecutionContextScope *IRMemoryMap::GetBestExecutionContextScope() const {
@@ -638,7 +644,8 @@ void IRMemoryMap::WriteScalarToMemory(lldb::addr_t process_address,
 }
 
 void IRMemoryMap::WritePointerToMemory(lldb::addr_t process_address,
-                                       lldb::addr_t pointer, Status &error) {
+                                       lldb::addr_t pointer, Status &error,
+                                       size_t size) {
   error.Clear();
 
   /// Only ask the Process to fix `pointer` if the address belongs to the
@@ -652,7 +659,8 @@ void IRMemoryMap::WritePointerToMemory(lldb::addr_t process_address,
 
   Scalar scalar(pointer);
 
-  WriteScalarToMemory(process_address, scalar, GetAddressByteSize(), error);
+  WriteScalarToMemory(process_address, scalar,
+                      size ? size : GetAddressByteSize(), error);
 }
 
 void IRMemoryMap::ReadMemory(uint8_t *bytes, lldb::addr_t process_address,
@@ -789,12 +797,12 @@ void IRMemoryMap::ReadScalarFromMemory(Scalar &scalar,
 
 void IRMemoryMap::ReadPointerFromMemory(lldb::addr_t *address,
                                         lldb::addr_t process_address,
-                                        Status &error) {
+                                        Status &error, size_t size) {
   error.Clear();
 
   Scalar pointer_scalar;
-  ReadScalarFromMemory(pointer_scalar, process_address, GetAddressByteSize(),
-                       error);
+  ReadScalarFromMemory(pointer_scalar, process_address,
+                       size ? size : GetAddressByteSize(), error);
 
   if (!error.Success())
     return;

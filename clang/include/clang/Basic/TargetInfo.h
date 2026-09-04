@@ -1911,6 +1911,21 @@ public:
     return std::nullopt;
   }
 
+  /// The reverse of getDWARFAddressSpace(): the target address space a
+  /// DW_AT_address_class names.
+  ///
+  /// A debugger reading debug information finds a number this target chose and
+  /// has to get back to what it meant - on a target with more than one pointer
+  /// width that is the difference between reading a pointer and reading half
+  /// of one.  The forward mapping is this class's, so the reverse is too.
+  ///
+  /// \returns std::nullopt for a target that emits no address classes, and for
+  /// a class this target does not recognise.
+  virtual std::optional<unsigned>
+  getAddressSpaceFromDWARFAddressClass(unsigned DWARFAddressClass) const {
+    return std::nullopt;
+  }
+
   /// \returns The version of the SDK which was used during the compilation if
   /// one was specified, or an empty version otherwise.
   const llvm::VersionTuple &getSDKVersion() const {
