@@ -37,3 +37,19 @@
 # RUN:     --defsym=__c166_exit=0xc00000 %t/unset.o -o %t/unset.elf
 # RUN: %c166_sim %t/unset.elf | FileCheck %s --check-prefix=UNSET
 # UNSET: unset
+
+## And "above the limit" is not enough to arm on, which is the way that went
+## wrong.  A program that never sets R0 and takes an interrupt has a handler
+## whose prologue subtracts its frame from zero: that wraps to just under 64K,
+## which is above the limit and is not a stack pointer at all, and the matching
+## addition in the epilogue brings it back to zero.  Arming on the wrapped value
+## reported that return as an overflow and stopped a program that had done
+## nothing wrong - which is what lld/test/ELF/c166-vectors.s found.  The value
+## has to be inside the stack, so __user_stack_top is defined here as the stock
+## linker scripts define it.
+# RUN: llvm-mc -filetype=obj -triple=c166 %S/Inputs/user-stack-wrap.s -o %t/wrap.o
+# RUN: ld.lld -Ttext=0xc00100 -e _start --defsym=__user_stack_limit=0xf600 \
+# RUN:     --defsym=__user_stack_top=0xfa00 --defsym=__c166_exit=0xc00000 \
+# RUN:     --section-start=.vectors.008=0xc00020 %t/wrap.o -o %t/wrap.elf
+# RUN: %c166_sim --interrupt-at=20:8:8 %t/wrap.elf | FileCheck %s --check-prefix=WRAP
+# WRAP: wrap

@@ -348,10 +348,12 @@ int main(int argc, char **argv) {
     M.HasUserStackLimit = true;
     // The top as well, when it is there, so that --count-states can report how
     // much of the stack was used rather than only where it ended.
-    if (std::optional<uint64_t> T = Lookup("__user_stack_top"))
+    if (std::optional<uint64_t> T = Lookup("__user_stack_top")) {
       M.UserStackTop = uint16_t(*T);
-    else
+      M.HasUserStackTop = true;
+    } else {
       M.UserStackTop = M.UserStackLimit;
+    }
     // --check-user-stack=false only stops the stopping.  Watching R0 costs one
     // comparison a step, and the low water mark it leaves behind is how a
     // program that has just been told its stack is too small finds out by how

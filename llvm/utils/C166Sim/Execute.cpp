@@ -1254,12 +1254,21 @@ void Machine::checkUserStack() {
   if (!HasUserStackLimit || Stop != StopReason::Running)
     return;
   uint16_t SP0 = getWordReg(0);
-  // Arm on the first sight of a sane value, and remember which register bank it
-  // was in.  R0 is zero out of reset and stays there until the startup code
-  // loads it from __user_stack_top, and those instructions are not an
-  // overflow.
+  // Arm on the first sight of a value inside the stack, and remember which
+  // register bank it was in.  R0 is zero out of reset and stays there until the
+  // startup code loads it from __user_stack_top, and those instructions are not
+  // an overflow.
+  //
+  // Inside, and not merely above the limit: a program that never sets R0 and
+  // takes an interrupt has a handler whose prologue subtracts its frame from
+  // zero, which wraps to just under 64K.  That is above the limit and is not a
+  // stack pointer, and arming on it means the matching addition in the epilogue
+  // - back to zero - is reported as an overflow.  The upper bound is what
+  // rejects it, so it is applied only when __user_stack_top said where the top
+  // is; without that symbol there is nothing to compare against and the older,
+  // looser test is all there is.
   if (!UserStackArmed) {
-    if (SP0 < UserStackLimit)
+    if (SP0 < UserStackLimit || (HasUserStackTop && SP0 > UserStackTop))
       return;
     UserStackArmed = true;
     UserStackCP = CP;

@@ -439,16 +439,20 @@ public:
   /// rather than the ones a checked prologue happens to see, which is the
   /// trade a simulator is allowed to make.
   uint16_t UserStackLimit = 0;
-  /// The top of it, from __user_stack_top, for reporting how much was used.
+  /// The top of it, from __user_stack_top, for reporting how much was used and
+  /// for deciding whether an R0 is a stack pointer at all.
   uint16_t UserStackTop = 0;
   bool HasUserStackLimit = false;
+  /// Whether __user_stack_top was there.  Without it UserStackTop is the limit
+  /// and says nothing, so the arming below has only a lower bound to go on.
+  bool HasUserStackTop = false;
   /// Whether crossing the limit stops the program.  Off, R0 is still watched
   /// and the low water mark below is still kept: measuring and stopping are
   /// different questions and only the second one is ever unwanted.
   bool StopOnUserStackOverflow = true;
-  /// Whether R0 has been seen above the limit yet.  It comes out of reset at
-  /// zero and stays there until the startup code sets it, and that is not an
-  /// overflow.
+  /// Whether R0 has been seen holding a value inside the stack yet.  It comes
+  /// out of reset at zero and stays there until the startup code sets it, and
+  /// that is not an overflow.
   bool UserStackArmed = false;
   /// Which register bank that was in.  R0 names different memory under a
   /// different context pointer, so this is what says whether the R0 in front of
