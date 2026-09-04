@@ -1514,11 +1514,39 @@ Known limitations / things to do
   less, which is a distance that always relaxes to a JMPR here, so nothing is
   lost by it.  Branch prediction is enabled out of reset on an XC164CM
   (CPUCON1.BP), so a conditional JMPA that is usually not taken mispredicts.
+
   Setting it from the branch probabilities is a small change and is not made,
-  because nothing here could measure it: the simulator charges a taken branch
-  what Table 11 says and a mispredicted one the same, so the number after the
-  change would equal the number before by construction.  A taken-branch penalty
-  in the simulator is what this waits on.
+  and the reason is now a number rather than a missing one.  The bit is on
+  JMPA and CALLA; the two byte relative JMPR has no room for one and is what a
+  conditional branch is selected as, with the assembler and the linker growing
+  only the ones that will not reach.  So the bit applies to the branches that
+  did not fit, and over the four corpus programs at -O2, counted from a trace
+  of the first 400,000 instructions of each, those are:
+
+    strings     29346 conditional branches,    79 JMPA or CALLA   0.27%
+    sorting     25000 conditional branches,  1250 JMPA or CALLA   5.00%
+    parsing     15453 conditional branches,   833 JMPA or CALLA   5.39%
+    numbers     15815 conditional branches,  1065 JMPA or CALLA   6.73%
+
+  Conditional branches are 19% of the instructions strings executes, so
+  branching is not a small part of what this part does - but 95% or more of it
+  is through an instruction the bit is not on.  Even taking the largest column
+  and assuming every one of those JMPAs mispredicts today and none would
+  after, the saving is 1065 events against 400,000 instructions, which at any
+  per-event penalty the pipeline could plausibly carry is a few tenths of one
+  percent.  Half of them are already right, too: 0 means "assumed taken" and
+  the JMPAs strings executes are taken about half the time.
+
+  llvm/utils/C166Sim/tools/branches.sh is what counted them, so the four rows
+  above can be re-derived rather than believed.
+
+  That is a bound rather than a measurement, because the simulator still
+  charges a mispredicted branch what Table 11 charges a predicted one - Table
+  11 is the original C166's, from a core with no prediction at all, and the
+  XC16x figure is in a manual this tree does not have.  But the bound does not
+  need it: the frequency settles the question whatever the penalty turns out
+  to be.  This was on the list waiting for a taken-branch penalty in the
+  simulator, which was the wrong thing to wait for.
 * Three SFR maps are modelled and the subtarget picks between them, because
   the same short address names different registers on different derivatives.
   What they all agree about - 97 names at the same short address, which is the
@@ -1708,9 +1736,10 @@ Known limitations / things to do
   instruction retires whole, a taken branch costs what Table 11 says rather
   than what a thrown-away pipeline costs, and the forwarding that "resolves
   most of the possible conflicts in a time optimized way" is not there to
-  resolve anything.  The one thing that wants is a taken-branch penalty, which
-  is what the prediction bit of JMPA and CALLA would be measured against; the
-  bullet on that bit above says the rest.
+  resolve anything.  A taken-branch penalty is the one thing that would add,
+  and it is worth less than it looks: it was going to be what the prediction
+  bit of JMPA and CALLA was measured against, and counting the branches showed
+  that bit reaches 5% of them.  The bullet on it above has the numbers.
 * One peripheral is modelled in the simulator and the rest are not.  GPT1's
   three timers count on the clock at the manual's rate and raise their requests
   through their own interrupt control registers, which is what makes the whole
