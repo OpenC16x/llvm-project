@@ -88,6 +88,13 @@ public:
 
   bool ContainsThreadLocalStorage() const;
 
+  /// Take the address class marker off every expression in this list, and
+  /// return the class when they all named the same one.  See
+  /// DWARFExpression::TakeAddressClassMarker for what the marker is; a
+  /// variable in an address space carries it on each of its locations, since
+  /// moving between registers and memory does not move it between spaces.
+  std::optional<uint32_t> TakeAddressClassMarker();
+
   bool LinkThreadLocalStorage(
       lldb::ModuleSP new_module_sp,
       std::function<lldb::addr_t(lldb::addr_t file_addr)> const

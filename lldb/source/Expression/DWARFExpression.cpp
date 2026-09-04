@@ -568,6 +568,57 @@ bool DWARFExpression::ContainsThreadLocalStorage(
   return false;
 }
 
+std::optional<uint32_t> DWARFExpression::TakeAddressClassMarker(
+    const DWARFExpression::Delegate *dwarf_cu) {
+  // Walk forwards rather than reading back from the end: an operation's
+  // arguments are variable length, so the only way to know where the last
+  // three start is to have parsed everything before them.  Three offsets are
+  // enough - the class, the swap and the xderef.
+  struct Op {
+    lldb::offset_t start;
+    LocationAtom op;
+    lldb::offset_t arg_start;
+  };
+  Op last[3] = {};
+  unsigned count = 0;
+
+  lldb::offset_t offset = 0;
+  while (m_data.ValidOffset(offset)) {
+    const lldb::offset_t start = offset;
+    const LocationAtom op = static_cast<LocationAtom>(m_data.GetU8(&offset));
+    const lldb::offset_t arg_start = offset;
+    const lldb::offset_t op_arg_size =
+        GetOpcodeDataSize(m_data, offset, op, dwarf_cu);
+    if (op_arg_size == LLDB_INVALID_OFFSET)
+      return std::nullopt;
+    offset += op_arg_size;
+    last[0] = last[1];
+    last[1] = last[2];
+    last[2] = {start, op, arg_start};
+    ++count;
+  }
+
+  // The marker is three operations and it is never the whole expression -
+  // something has to have computed the address it qualifies.
+  if (count < 4 || last[2].op != DW_OP_xderef || last[1].op != DW_OP_swap)
+    return std::nullopt;
+
+  uint32_t address_class;
+  if (last[0].op == DW_OP_constu) {
+    lldb::offset_t arg = last[0].arg_start;
+    address_class = static_cast<uint32_t>(m_data.GetULEB128(&arg));
+  } else if (last[0].op >= DW_OP_lit0 && last[0].op <= DW_OP_lit31) {
+    address_class = last[0].op - DW_OP_lit0;
+  } else {
+    return std::nullopt;
+  }
+
+  // Keep everything before the marker.  A DataExtractor over the same buffer
+  // with a shorter length shares the bytes rather than copying them.
+  m_data = DataExtractor(m_data, 0, last[0].start);
+  return address_class;
+}
+
 bool DWARFExpression::IsImplicit(
     const DWARFExpression::Delegate *dwarf_cu) const {
   lldb::offset_t offset = 0;

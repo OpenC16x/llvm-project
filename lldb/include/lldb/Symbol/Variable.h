@@ -18,6 +18,7 @@
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-private.h"
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace lldb_private {
@@ -103,6 +104,19 @@ public:
 
   void SetLocationIsConstantValueData(bool b) { m_loc_is_const_data = b; }
 
+  /// Which address space this variable lives in, as the producer numbered it,
+  /// or nothing when it said nothing - which is every variable on a target
+  /// with one address space.  The number means whatever the target says it
+  /// means; TargetInfo::getAddressSpaceFromDWARFAddressClass() is the only
+  /// thing that reads it.
+  std::optional<uint32_t> GetDWARFAddressClass() const {
+    return m_address_class;
+  }
+
+  void SetDWARFAddressClass(std::optional<uint32_t> address_class) {
+    m_address_class = address_class;
+  }
+
   typedef size_t (*GetVariableCallback)(void *baton, const char *name,
                                         VariableList &var_list);
 
@@ -144,6 +158,8 @@ protected:
   /// The m_location expression contains the constant variable value
   /// data, not a DWARF location.
   unsigned m_loc_is_const_data : 1;
+  /// See GetDWARFAddressClass().
+  std::optional<uint32_t> m_address_class;
   /// Non-zero if variable is static member of a class or struct.
   unsigned m_static_member : 1;
   /// The value of DW_AT_LLVM_tag_offset if present.

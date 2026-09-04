@@ -1751,22 +1751,21 @@ Known limitations / things to do
   why almost everything in them is declared and not defined;
   llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
   what it found.
-* A __far global cannot be read by name, and that is the last thing a debugger
-  here gets wrong.  LLDB does the rest: it connects to "c166-sim --gdb", sets a
-  breakpoint by name, shows the source line, walks the stack across both
+* A debugger works here, and what is left to say about it is where it is
+  tested rather than what it cannot do.  LLDB connects to "c166-sim --gdb",
+  sets a breakpoint by name, shows the source line, walks the stack across both
   stacks, reads a local in any frame, shows a __far pointer as the 24 bit
-  address it is, and dereferences either width of pointer in an expression -
-  "p *ip", "p fp->x", "expr *nip = 99" - which is what the expression path
-  needed two width fixes in LLDB to do.
+  address it is, dereferences either width of pointer in an expression, and
+  reads a __far global by name.  Four pieces of work in LLDB got it there, and
+  three of them are about this part having two pointer widths where every other
+  target has one; llvm/utils/C166Sim/README.txt has them.
 
-  What is left is "p fpt" or "target variable fpt" on a global declared __far,
-  which answers "unimplemented opcode DW_OP_xderef".  Clang describes such a
-  global with a location expression that ends in DW_OP_xderef, DWARF's "load
-  through an address in this address space", and LLDB decodes that opcode
-  without evaluating it - there is no address space in its idea of a value to
-  evaluate it into.  Everything reached through a pointer works, which is most
-  of what a program does with far memory; the global named directly does not.
-  llvm/utils/C166Sim/README.txt has the whole of what works and what does not.
+  None of it is a lit test.  The workflow does not build LLDB and LLDB's own
+  suite has no C166 toolchain to build a program with, so a test there would be
+  a test nothing runs - the pieces that could be tested where they live are,
+  in lldb/unittests, and the rest is a session in that README to be repeated by
+  hand.  Making CI build LLDB is the thing that would change that, and it is a
+  decision about what the workflow is for rather than a defect.
 * The cost model's time answers are correct and nothing reads them.  There is
   a scheduling model now - C166Schedule.td, in states, from the same table of
   the instruction set manual the simulator counts with - and the two numbers

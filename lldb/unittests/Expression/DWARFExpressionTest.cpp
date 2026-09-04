@@ -382,6 +382,68 @@ static bool CreateTestContext(TestContext *ctx, llvm::StringRef triple,
   return true;
 }
 
+/// Build a DWARFExpression over \a expr, take its address class marker off,
+/// and report what came back and what the expression is left holding.
+static std::pair<std::optional<uint32_t>, std::vector<uint8_t>>
+TakeAddressClassMarker(llvm::ArrayRef<uint8_t> expr) {
+  DataExtractor extractor(expr.data(), expr.size(), lldb::eByteOrderLittle,
+                          /*addr_size*/ 4);
+  DWARFExpression dwarf_expr(extractor);
+  MockDwarfDelegate delegate;
+  std::optional<uint32_t> address_class =
+      dwarf_expr.TakeAddressClassMarker(&delegate);
+  DataExtractor left;
+  dwarf_expr.GetExpressionData(left);
+  return {address_class,
+          std::vector<uint8_t>(left.GetDataStart(), left.GetDataEnd())};
+}
+
+TEST(DWARFExpression, TakeAddressClassMarker) {
+  // What clang writes for a global in a non-default address space, in both the
+  // spellings the constant can take: DW_OP_constu of a small number is usually
+  // assembled as DW_OP_litN.
+  {
+    auto [address_class, left] = TakeAddressClassMarker(
+        {DW_OP_addrx, 0x03, DW_OP_constu, 0x01, DW_OP_swap, DW_OP_xderef});
+    EXPECT_EQ(address_class, std::optional<uint32_t>(1));
+    EXPECT_EQ(left, std::vector<uint8_t>({DW_OP_addrx, 0x03}));
+  }
+  {
+    auto [address_class, left] = TakeAddressClassMarker(
+        {DW_OP_addrx, 0x03, DW_OP_lit2, DW_OP_swap, DW_OP_xderef});
+    EXPECT_EQ(address_class, std::optional<uint32_t>(2));
+    EXPECT_EQ(left, std::vector<uint8_t>({DW_OP_addrx, 0x03}));
+  }
+  // A class that needs more than one byte of ULEB128.
+  {
+    auto [address_class, left] =
+        TakeAddressClassMarker({DW_OP_addr, 0x00, 0x00, 0xe0, 0x00,
+                                DW_OP_constu, 0x81, 0x01, DW_OP_swap,
+                                DW_OP_xderef});
+    EXPECT_EQ(address_class, std::optional<uint32_t>(129));
+    EXPECT_EQ(left,
+              std::vector<uint8_t>({DW_OP_addr, 0x00, 0x00, 0xe0, 0x00}));
+  }
+
+  // And what must be left alone.  An expression with no marker, one whose
+  // trailing bytes only look like a marker because they are the arguments of
+  // something else, and a marker with nothing in front of it to qualify.
+  const std::vector<std::vector<uint8_t>> unchanged = {
+      {DW_OP_addrx, 0x03},
+      {DW_OP_addrx, 0x03, DW_OP_swap, DW_OP_xderef},
+      {DW_OP_lit1, DW_OP_swap, DW_OP_xderef},
+      // DW_OP_const1u takes one byte, so the DW_OP_swap here is its argument
+      // rather than an operation - reading the bytes backwards would find a
+      // marker that is not there.
+      {DW_OP_addrx, 0x03, DW_OP_const1u, DW_OP_swap, DW_OP_xderef},
+  };
+  for (const std::vector<uint8_t> &expr : unchanged) {
+    auto [address_class, left] = TakeAddressClassMarker(expr);
+    EXPECT_EQ(address_class, std::nullopt);
+    EXPECT_EQ(left, expr);
+  }
+}
+
 TEST(DWARFExpression, DW_OP_pick) {
   EXPECT_THAT_EXPECTED(Evaluate({DW_OP_lit1, DW_OP_lit0, DW_OP_pick, 0}),
                        ExpectScalar(0));

@@ -114,6 +114,21 @@ DWARFExpressionList::GetMutableExpressionAtAddress(lldb::addr_t func_load_addr,
   return &m_exprs.GetMutableEntryAtIndex(index)->data;
 }
 
+std::optional<uint32_t> DWARFExpressionList::TakeAddressClassMarker() {
+  std::optional<uint32_t> address_class;
+  for (size_t i = 0; i < m_exprs.GetSize(); ++i) {
+    std::optional<uint32_t> one =
+        m_exprs.GetMutableEntryAtIndex(i)->data.TakeAddressClassMarker(
+            m_dwarf_cu);
+    // One location saying it and another not is not something a producer
+    // writes, and guessing which is right would be worse than saying nothing.
+    if (i && one != address_class)
+      return std::nullopt;
+    address_class = one;
+  }
+  return address_class;
+}
+
 bool DWARFExpressionList::ContainsThreadLocalStorage() const {
   // We are assuming for now that any thread local variable will not have a
   // location list. This has been true for all thread local variables we have

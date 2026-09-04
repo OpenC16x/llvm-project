@@ -2271,6 +2271,33 @@ CompilerType TypeSystemClang::CreatePointerTypeForDWARFAddressClass(
   return GetType(m_ast_up->getPointerType(qualified));
 }
 
+CompilerType
+TypeSystemClang::AddDWARFAddressClassQualifier(const CompilerType &type,
+                                               unsigned address_class) {
+  // Same mapping as CreatePointerTypeForDWARFAddressClass, read the same way:
+  // the class is a number the target chose and only the target can say what
+  // address space it meant.
+  TargetInfo *target_info = getTargetInfo();
+  if (!target_info)
+    return CompilerType();
+  std::optional<unsigned> address_space =
+      target_info->getAddressSpaceFromDWARFAddressClass(address_class);
+  if (!address_space)
+    return CompilerType();
+
+  QualType qual_type = ClangUtil::GetQualType(type);
+  if (qual_type.isNull())
+    return CompilerType();
+  // Already qualified is not something to qualify again: getAddrSpaceQualType
+  // asserts on it, and a type that says where it lives is not one this has
+  // anything to add to.
+  if (qual_type.getAddressSpace() != clang::LangAS::Default)
+    return CompilerType();
+
+  return GetType(m_ast_up->getAddrSpaceQualType(
+      qual_type, getLangASFromTargetAS(*address_space)));
+}
+
 #pragma mark Array Types
 
 CompilerType

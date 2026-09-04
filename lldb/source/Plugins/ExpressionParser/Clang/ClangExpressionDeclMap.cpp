@@ -1522,6 +1522,19 @@ bool ClangExpressionDeclMap::GetVariableValue(VariableSP &var,
     return false;
   }
 
+  // A variable whose location said which address space it is in needs its type
+  // to say so too.  The type comes from the DW_AT_type it shares with every
+  // other variable of that type, so it cannot carry this by itself; without it
+  // "&global" is a pointer of the target's default width, and on a target with
+  // more than one pointer width that is the wrong width and usually too narrow
+  // to hold the address at all.
+  if (std::optional<uint32_t> address_class = var->GetDWARFAddressClass()) {
+    if (auto ts = var_clang_type.GetTypeSystem<TypeSystemClang>())
+      if (CompilerType qualified =
+              ts->AddDWARFAddressClassQualifier(var_clang_type, *address_class))
+        var_clang_type = qualified;
+  }
+
   DWARFExpressionList &var_location_list = var->LocationExpressionList();
 
   Target *target = m_parser_vars->m_exe_ctx.GetTargetPtr();

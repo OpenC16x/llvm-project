@@ -96,6 +96,26 @@ public:
 
   bool ContainsThreadLocalStorage(const Delegate *dwarf_cu) const;
 
+  /// If this expression ends in the marker a producer appends to say which
+  /// address space the object it describes lives in, remove the marker and
+  /// return the address class it names.
+  ///
+  /// The marker is "DW_OP_constu <class> DW_OP_swap DW_OP_xderef" - written
+  /// by clang's CGDebugInfo::AppendAddressSpaceXDeref for a variable in a
+  /// non-default address space, and recognised again by LLVM's own
+  /// DIExpression::extractAddressClass.  DW_OP_constu of a small number is
+  /// usually assembled as DW_OP_litN, so both spellings are accepted.
+  ///
+  /// It is a producer convention rather than DWARF.  Read literally,
+  /// DW_OP_xderef loads through the address, which would make the loaded word
+  /// the object's address rather than the address the rest of the expression
+  /// computed - so a consumer that evaluates it as written gets the wrong
+  /// answer, and one that does not implement DW_OP_xderef at all cannot read
+  /// the variable. Taking the marker off leaves the address the producer
+  /// meant, and the class it named is how a caller learns which address space
+  /// that address is in.
+  std::optional<uint32_t> TakeAddressClassMarker(const Delegate *dwarf_cu);
+
   /// Return true if this expression produces a DWARF implicit or
   /// composite location description that LLDB cannot write a new
   /// value back to. Scans the opcodes without evaluating the

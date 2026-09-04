@@ -3869,10 +3869,19 @@ VariableSP SymbolFileDWARF::ParseVariableDIE(const SymbolContext &sc,
     }
   }
 
-  return std::make_shared<Variable>(
+  // A variable in a non-default address space carries a marker on its
+  // location saying which one; taking it off leaves the address the producer
+  // meant.  Without this the expression is unreadable - DW_OP_xderef is not
+  // something LLDB evaluates - so the variable has no location at all, which
+  // is what "unimplemented opcode DW_OP_xderef" was.
+  std::optional<uint32_t> address_class = location_list.TakeAddressClassMarker();
+
+  auto var_sp = std::make_shared<Variable>(
       die.GetID(), name, mangled, type_sp, scope, symbol_context_scope,
       scope_ranges, &decl, location_list, is_external, is_artificial,
       location_is_const_value_data, is_static_member, tag_offset);
+  var_sp->SetDWARFAddressClass(address_class);
+  return var_sp;
 }
 
 DWARFDIE

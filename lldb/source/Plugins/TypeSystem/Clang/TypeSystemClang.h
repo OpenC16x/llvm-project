@@ -506,6 +506,19 @@ public:
   CompilerType CreatePointerTypeForDWARFAddressClass(const CompilerType &pointee,
                                                      unsigned address_class);
 
+  /// Qualify \a type with the address space a DWARF address class names.
+  ///
+  /// This is for an object rather than a pointer to one: a variable whose
+  /// location carried an address space marker lives in that space, and its
+  /// type has to say so or taking its address gives a pointer of the target's
+  /// default width - which on a target with more than one pointer width is the
+  /// wrong one, and too narrow to hold the address.
+  ///
+  /// Returns nothing when the target does not recognise the class or the type
+  /// is already qualified.
+  CompilerType AddDWARFAddressClassQualifier(const CompilerType &type,
+                                             unsigned address_class);
+
   // Array Types
 
   CompilerType CreateArrayType(const CompilerType &element_type,

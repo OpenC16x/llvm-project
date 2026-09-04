@@ -218,13 +218,36 @@ and with two bytes it allocates from 0x8000 and keeps the frame it interprets
 on to 512 bytes rather than half a megabyte, which is what the one other
 16 bit target in LLDB asks its ABI plugin for.
 
-What still does not work is naming a __far global directly - "p fpt", or even
-"target variable fpt", answers "unimplemented opcode DW_OP_xderef".  That is
-not about pointer widths and not about the expression path: clang describes
-such a global with a location expression that ends in DW_OP_xderef, which is
-DWARF's "load through an address in this address space", and LLDB decodes that
-opcode without evaluating it.  Everything reached through a pointer, which is
-what a program mostly does, works; the global by name does not.
+A __far global reads by name now too, which was the last of it:
+
+  (lldb) target variable fpt
+  (pt) fpt = (x = 11, y = 22)
+  (lldb) p fpt.y + npt.x
+  (int) 55
+  (lldb) p &fpt
+  (__attribute__((address_space(1))) pt *) 0x00e00000
+
+It used to answer "unimplemented opcode DW_OP_xderef" to every one of those.
+Clang ends such a global's location with "DW_OP_constu <class> DW_OP_swap
+DW_OP_xderef", which is how it says which address space the object is in.  That
+is a producer convention rather than DWARF: read literally, DW_OP_xderef loads
+through the address, so the loaded word would be the object's address.  LLVM
+writes the marker in CGDebugInfo::AppendAddressSpaceXDeref and reads it back in
+DIExpression::extractAddressClass, and until now LLDB did neither - it tried to
+evaluate it, had no DW_OP_xderef, and gave up on the whole location.
+
+LLDB takes the marker off when it parses the variable and keeps the class it
+named.  That is two things rather than one, and both were needed.  The address
+is then what the rest of the expression computed, which is what "target
+variable" and "frame variable" read.  And the class qualifies the variable's
+type in an expression, which is what "&fpt" needs: without it that is a near
+pointer, and 0x00E00000 does not fit in a near pointer - it came out as NULL,
+so "p fpt" read address zero and printed zeroes.  The type cannot carry this by
+itself, because "pt" is one DW_AT_type shared with every other pt in the
+program; it is the variable that is in the far space, not the type.
+
+The same marker is what NVPTX and AMDGPU emit for a global in one of their
+address spaces, so this is not only about this part.
 
 lldb/unittests/Expression/IRMemoryMapTest.cpp covers the allocation half.  The
 rest of it is not a lit test, and the reason is worth writing down rather than
