@@ -172,11 +172,31 @@ reachable as "syssp":
     r0 = 0xf9f0
     sp = 0xfbfa
 
-What does not work is a far pointer.  The debug information now describes one
-correctly - clang gives it DW_AT_address_class and, where the width is not the
-address size, DW_AT_byte_size - but LLDB has no handling of DW_AT_address_class
-at all, so it builds a pointer of the target's default width and reads two
-bytes of a four byte pointer.  "p fp" on a __far pointer prints its low half.
+A far pointer reads as one now too:
+
+  (lldb) frame variable
+  (const __far char *) fp = 0x00c0c000 "far string"
+  (__far int *) ip = 0x00e00000
+  (const char *) np = 0x01ce
+
+It used to print 0xc000 for the first of those - two bytes of a four byte
+pointer - because nothing said how wide it was.  The debug information says
+now: clang gives such a pointer a DW_AT_address_class, whose values are the
+target's to choose, and LLDB reads it back through the same target and builds
+the pointer into that address space, which is what decides its width in the
+type system.  Both halves of that mapping are one target hook,
+getDWARFAddressSpace() and getAddressSpaceFromDWARFAddressClass(), so a target
+that emits no address classes is unaffected and one that emits its own is
+asked rather than assumed.
+
+What does not work, and did not before either, is dereferencing a pointer
+inside an expression: "p *ip" says 0 where "memory read" at the same address
+says 0x1234, and "p *nip" through a near pointer says 0 as well.  The
+expression evaluator reads through IRMemoryMap, which has one address size for
+the whole architecture, and a machine with two pointer widths has no way to
+tell it which one is meant.  That is a limitation of the expression path rather
+than of the type, and it is the same on both pointers - what this fixed is the
+value and the type, which is what "frame variable" and "p <pointer>" show.
 
 None of that is a lit test, and the reason is worth writing down rather than
 leaving to be rediscovered.  The workflow that runs these tests does not build

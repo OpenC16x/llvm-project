@@ -2245,6 +2245,32 @@ TypeSystemClang::CreateBlockPointerType(const CompilerType &function_type) {
   return GetType(block_type);
 }
 
+CompilerType TypeSystemClang::CreatePointerTypeForDWARFAddressClass(
+    const CompilerType &pointee, unsigned address_class) {
+  // What the class means is the target's to say - it chose the numbers when it
+  // emitted them, and getAddressSpaceFromDWARFAddressClass() is the same
+  // mapping read backwards.
+  TargetInfo *target_info = getTargetInfo();
+  if (!target_info)
+    return CompilerType();
+  std::optional<unsigned> address_space =
+      target_info->getAddressSpaceFromDWARFAddressClass(address_class);
+  if (!address_space)
+    return CompilerType();
+
+  QualType pointee_type =
+      clang::QualType::getFromOpaquePtr(pointee.GetOpaqueQualType());
+  if (pointee_type.isNull())
+    return CompilerType();
+
+  // The address space goes on what is pointed at rather than on the pointer,
+  // which is where clang keeps it and where getTypeInfo() looks to decide how
+  // wide the pointer is.
+  QualType qualified = m_ast_up->getAddrSpaceQualType(
+      pointee_type, getLangASFromTargetAS(*address_space));
+  return GetType(m_ast_up->getPointerType(qualified));
+}
+
 #pragma mark Array Types
 
 CompilerType

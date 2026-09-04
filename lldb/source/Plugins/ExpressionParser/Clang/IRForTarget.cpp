@@ -333,10 +333,16 @@ bool IRForTarget::CreateResultVariable(llvm::Function &llvm_function) {
 
   // Construct a new result global and set up its metadata
 
+  // In the address space the old one is in, which is not always zero: an
+  // expression whose result type is address-space qualified - a target with
+  // more than one pointer width has such types - puts its result global
+  // there, and replacing it with one in address space zero is replacing a
+  // value with another of a different type, which asserts.
   GlobalVariable *new_result_global = new GlobalVariable(
       (*m_module), result_global->getValueType(), false, /* not constant */
       GlobalValue::ExternalLinkage, nullptr,             /* no initializer */
-      m_result_name.GetCString());
+      m_result_name.GetCString(), nullptr,
+      GlobalValue::NotThreadLocal, result_global->getAddressSpace());
 
   // It's too late in compilation to create a new VarDecl for this, but we
   // don't need to.  We point the metadata at the old VarDecl.  This creates an

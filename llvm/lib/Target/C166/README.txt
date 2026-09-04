@@ -1709,18 +1709,16 @@ Known limitations / things to do
   why almost everything in them is declared and not defined;
   llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
   what it found.
-* A far pointer is the one thing a debugger still gets wrong.  LLDB knows this
-  architecture now and does the rest: it connects to "c166-sim --gdb", sets a
-  breakpoint by name, shows the source line, walks the stack across both stacks
-  and reads a local in any frame.  What it cannot do is read a __far pointer,
-  and the reason is not the debug information - clang gives such a pointer a
-  DW_AT_address_class, and a DW_AT_byte_size where the width is not the
-  compilation unit's address size, so the DWARF says exactly how wide it is.
-  LLDB has no handling of DW_AT_address_class at all: it builds a pointer of
-  the target's default width and reads two bytes of a four byte one.  Teaching
-  it is a change to the DWARF parser and the type system rather than to
-  anything here.  llvm/utils/C166Sim/README.txt has what does work and the
-  three things that had to be true for it.
+* An expression cannot dereference a pointer, and that is the last thing a
+  debugger here gets wrong.  LLDB does the rest: it connects to
+  "c166-sim --gdb", sets a breakpoint by name, shows the source line, walks the
+  stack across both stacks, reads a local in any frame, and shows a __far
+  pointer as the 24 bit address it is.  What "p *p" reads is zero, for a near
+  pointer as much as a far one: the expression evaluator goes through
+  IRMemoryMap, which has one address size for the whole architecture, and this
+  machine has two pointer widths.  Telling it which one a load meant is a
+  change to the expression path in LLDB rather than to anything here.
+  llvm/utils/C166Sim/README.txt has what does work.
 * The cost model's time answers are correct and nothing reads them.  There is
   a scheduling model now - C166Schedule.td, in states, from the same table of
   the instruction set manual the simulator counts with - and the two numbers

@@ -205,6 +205,17 @@ public:
     return AddressSpace;
   }
 
+  /// And back again, which is what a debugger needs: the number in
+  /// DW_AT_address_class is the address space, so the two directions are the
+  /// same function.  Only the two that exist answer; a class this target never
+  /// emitted is one it cannot say anything about.
+  std::optional<unsigned>
+  getAddressSpaceFromDWARFAddressClass(unsigned Class) const override {
+    if (Class == 1 || Class == 2)
+      return Class;
+    return std::nullopt;
+  }
+
   uint64_t getMaxPointerWidth() const override { return 32; }
 
   ArrayRef<const char *> getGCCRegNames() const override;

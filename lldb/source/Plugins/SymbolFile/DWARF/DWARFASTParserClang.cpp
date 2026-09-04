@@ -437,6 +437,10 @@ ParsedDWARFTypeAttributes::ParsedDWARFTypeAttributes(const DWARFDIE &die) {
       byte_size = form_value.Unsigned();
       break;
 
+    case DW_AT_address_class:
+      address_class = form_value.Unsigned();
+      break;
+
     case DW_AT_bit_size:
       data_bit_size = form_value.Unsigned();
       break;
@@ -845,6 +849,37 @@ DWARFASTParserClang::ParseTypeModifier(const SymbolContext &sc,
                       encoding_data_type == Type::eEncodingIsTypedefUID)) {
     if (tag == DW_TAG_pointer_type) {
       DWARFDIE target_die = die.GetReferencedDIE(DW_AT_type);
+
+      // A pointer that says which address space it points into is built here
+      // rather than left to the lazy path below, because the lazy path has
+      // nowhere to carry the class: it remembers the pointee and calls
+      // GetPointerType() on it later.  On a target with one pointer width
+      // that loses nothing.  On one with more - C166's near pointers are
+      // sixteen bits and its far ones thirty two - it is the difference
+      // between reading a pointer and reading half of one, because what
+      // decides a pointer's width in the AST is the address space of what it
+      // points at.
+      if (attrs.address_class && *attrs.address_class != 0) {
+        CompilerType pointee_type;
+        if (target_die) {
+          if (TypeSP pointee_sp = ParseTypeFromDWARF(sc, target_die, nullptr))
+            pointee_type = pointee_sp->GetForwardCompilerType();
+        } else {
+          pointee_type = m_ast.GetBasicType(eBasicTypeVoid);
+        }
+        if (pointee_type) {
+          CompilerType qualified = m_ast.CreatePointerTypeForDWARFAddressClass(
+              pointee_type, *attrs.address_class);
+          // An empty answer means the target has no mapping for this class, in
+          // which case an ordinary pointer is a better guess than none.
+          if (qualified) {
+            clang_type = qualified;
+            encoding_data_type = Type::eEncodingIsUID;
+            attrs.type.Clear();
+            resolve_state = Type::ResolveState::Full;
+          }
+        }
+      }
 
       if (target_die.GetAttributeValueAsUnsigned(DW_AT_APPLE_block, 0)) {
         // Blocks have a __FuncPtr inside them which is a pointer to a

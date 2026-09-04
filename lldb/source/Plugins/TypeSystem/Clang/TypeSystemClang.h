@@ -490,6 +490,22 @@ public:
 
   CompilerType CreateBlockPointerType(const CompilerType &function_type);
 
+  /// A pointer into the address space a DW_AT_address_class names.
+  ///
+  /// On a target with one pointer width this is the same as GetPointerType()
+  /// and is not worth asking for.  On one with more than one - C166's near
+  /// pointers are sixteen bits and its far ones thirty two - it is the
+  /// difference between reading a pointer and reading half of one, because
+  /// what decides a pointer's width in the AST is the address space of what it
+  /// points at.
+  ///
+  /// Returns an invalid type when the target has no mapping for the class, in
+  /// which case the caller should build an ordinary pointer: a debugger that
+  /// cannot interpret the number is better off with the default than with a
+  /// guess.
+  CompilerType CreatePointerTypeForDWARFAddressClass(const CompilerType &pointee,
+                                                     unsigned address_class);
+
   // Array Types
 
   CompilerType CreateArrayType(const CompilerType &element_type,
