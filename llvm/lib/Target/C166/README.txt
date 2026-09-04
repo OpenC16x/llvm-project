@@ -1644,13 +1644,18 @@ Known limitations / things to do
   why almost everything in them is declared and not defined;
   llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
   what it found.
-* No debugger knows the c166 architecture, so nothing puts a source level front
-  end on this yet.  What is in place is everything under one: the debug
-  information is right, the unwind information is right and the simulator walks
-  it, and "c166-sim --gdb" serves the GDB remote serial protocol over stdin and
-  stdout - registers, memory, breakpoints, stepping - with the registers
-  described to the client rather than assumed.  A port of GDB or LLDB to this
-  target is what is left.
+* A far pointer is the one thing a debugger still gets wrong.  LLDB knows this
+  architecture now and does the rest: it connects to "c166-sim --gdb", sets a
+  breakpoint by name, shows the source line, walks the stack across both stacks
+  and reads a local in any frame.  What it cannot do is read a __far pointer,
+  and the reason is not the debug information - clang gives such a pointer a
+  DW_AT_address_class, and a DW_AT_byte_size where the width is not the
+  compilation unit's address size, so the DWARF says exactly how wide it is.
+  LLDB has no handling of DW_AT_address_class at all: it builds a pointer of
+  the target's default width and reads two bytes of a four byte one.  Teaching
+  it is a change to the DWARF parser and the type system rather than to
+  anything here.  llvm/utils/C166Sim/README.txt has what does work and the
+  three things that had to be true for it.
 * The cost model's time answers are correct and nothing reads them.  There is
   a scheduling model now - C166Schedule.td, in states, from the same table of
   the instruction set manual the simulator counts with - and the two numbers

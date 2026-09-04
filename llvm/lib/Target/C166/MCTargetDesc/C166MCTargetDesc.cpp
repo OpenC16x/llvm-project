@@ -125,6 +125,19 @@ static MCAsmInfo *createC166MCAsmInfo(const MCRegisterInfo &MRI,
   MAI->addInitialFrameState(MCCFIInstruction::cfiDefCfa(
       nullptr, MRI.getDwarfRegNum(C166::R0, /*isEH=*/false), 0));
 
+  // And that the caller's R0 is that same address, which is true by the line
+  // above and is still worth saying.  On a machine with one stack a debugger
+  // assumes it: the canonical frame address is where the stack pointer was, so
+  // restoring the stack pointer is restoring the CFA and no rule is needed.
+  // Here it is not an assumption anything makes, because the return address is
+  // on the other stack and a reader has no reason to believe R0 is a stack
+  // pointer at all.  Without this rule LLDB unwinds one frame and stops: it
+  // gets the caller's program counter from the expression below, cannot work
+  // out the caller's R0, and so cannot find that frame's locals - which are
+  // addressed from R0 - or the frame under it.  Two bytes in the CIE, once.
+  MAI->addInitialFrameState(MCCFIInstruction::createValOffset(
+      nullptr, MRI.getDwarfRegNum(C166::R0, /*isEH=*/false), 0));
+
   // And where that return address is.  Almost every function was entered with
   // a near call and has pushed nothing else, so those rules go here rather than
   // into every frame; the other shapes say so in their own.

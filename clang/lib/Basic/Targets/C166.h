@@ -183,6 +183,28 @@ public:
     return (TA == 1 || TA == 2) && B == LangAS::Default;
   }
 
+  /// What a debugger is told about a pointer's address space.
+  ///
+  /// Without this every pointer here is a DW_TAG_pointer_type and nothing
+  /// else, so a debugger sees "__far const char *" and "const char *" as the
+  /// same type - which is not a cosmetic difference, because one is four bytes
+  /// and the other two, and reading a far pointer as a near one reads half of
+  /// it and then whatever is next to it.  DW_AT_address_class is what DWARF
+  /// has for saying so, and its values are the target's to choose.
+  ///
+  /// These are the LLVM address space numbers, which is the least surprising
+  /// choice: the debug information then says the same number the IR does, and
+  /// llvm/lib/Target/C166/C166.h is the one place that names them.  Zero is
+  /// the near space and is left out, because it is the default and a reader
+  /// that knows nothing about this target should not have to know anything to
+  /// read a near pointer.
+  std::optional<unsigned>
+  getDWARFAddressSpace(unsigned AddressSpace) const override {
+    if (AddressSpace == 0)
+      return std::nullopt;
+    return AddressSpace;
+  }
+
   uint64_t getMaxPointerWidth() const override { return 32; }
 
   ArrayRef<const char *> getGCCRegNames() const override;

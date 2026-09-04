@@ -785,32 +785,6 @@ DWARFCallFrameInfo::ParseFDE(dw_offset_t dwarf_offset,
           break;
         }
 
-        case DW_CFA_val_offset: { // 0x14
-          // takes two unsigned LEB128 operands representing a register number
-          // and a factored offset. The required action is to change the rule
-          // for the register indicated by the register number to be a
-          // val_offset(N) rule where the value of N is factored_offset*
-          // data_alignment_factor
-          uint32_t reg_num = (uint32_t)m_cfi_data.GetULEB128(&offset);
-          int32_t op_offset =
-              (int32_t)m_cfi_data.GetULEB128(&offset) * data_align;
-          reg_location.SetIsCFAPlusOffset(op_offset);
-          row.SetRegisterInfo(reg_num, reg_location);
-          break;
-        }
-        case DW_CFA_val_offset_sf: { // 0x15
-          // takes two operands: an unsigned LEB128 value representing a
-          // register number and a signed LEB128 factored offset. This
-          // instruction is identical to DW_CFA_val_offset except that the
-          // second operand is signed and factored. The resulting offset is
-          // factored_offset* data_alignment_factor.
-          uint32_t reg_num = (uint32_t)m_cfi_data.GetULEB128(&offset);
-          int32_t op_offset =
-              (int32_t)m_cfi_data.GetSLEB128(&offset) * data_align;
-          reg_location.SetIsCFAPlusOffset(op_offset);
-          row.SetRegisterInfo(reg_num, reg_location);
-          break;
-        }
         default:
           break;
         }
@@ -821,6 +795,15 @@ DWARFCallFrameInfo::ParseFDE(dw_offset_t dwarf_offset,
   return fde;
 }
 
+/// The opcodes that mean the same thing wherever they appear, which is every
+/// one that is not about advancing the location.
+///
+/// A CIE's initial instructions go through here and nowhere else, and ParseCIE
+/// stops at the first opcode this returns false for - so an opcode missing from
+/// the switch below does not merely go unread, it takes the rest of the CIE
+/// with it.  DW_CFA_val_offset used to be handled only in FDEToUnwindPlan for
+/// that reason, and a CIE that said a register's value is the canonical frame
+/// address lost every rule after it.
 bool DWARFCallFrameInfo::HandleCommonDwarfOpcode(uint8_t primary_opcode,
                                                  uint8_t extended_opcode,
                                                  int32_t data_align,
@@ -994,6 +977,33 @@ bool DWARFCallFrameInfo::HandleCommonDwarfOpcode(uint8_t primary_opcode,
       int32_t op_offset = (int32_t)m_cfi_data.GetSLEB128(&offset) * data_align;
       uint32_t cfa_regnum = row.GetCFAValue().GetRegisterNumber();
       row.GetCFAValue().SetIsRegisterPlusOffset(cfa_regnum, op_offset);
+      return true;
+    }
+
+    case DW_CFA_val_offset: // 0x14
+    {
+      // takes two unsigned LEB128 operands representing a register number and
+      // a factored offset. The required action is to change the rule for the
+      // register indicated by the register number to be a val_offset(N) rule
+      // where the value of N is factored_offset* data_alignment_factor
+      uint32_t reg_num = (uint32_t)m_cfi_data.GetULEB128(&offset);
+      int32_t op_offset = (int32_t)m_cfi_data.GetULEB128(&offset) * data_align;
+      reg_location.SetIsCFAPlusOffset(op_offset);
+      row.SetRegisterInfo(reg_num, reg_location);
+      return true;
+    }
+
+    case DW_CFA_val_offset_sf: // 0x15
+    {
+      // takes two operands: an unsigned LEB128 value representing a register
+      // number and a signed LEB128 factored offset. This instruction is
+      // identical to DW_CFA_val_offset except that the second operand is
+      // signed and factored. The resulting offset is factored_offset*
+      // data_alignment_factor.
+      uint32_t reg_num = (uint32_t)m_cfi_data.GetULEB128(&offset);
+      int32_t op_offset = (int32_t)m_cfi_data.GetSLEB128(&offset) * data_align;
+      reg_location.SetIsCFAPlusOffset(op_offset);
+      row.SetRegisterInfo(reg_num, reg_location);
       return true;
     }
 

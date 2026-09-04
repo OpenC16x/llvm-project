@@ -127,11 +127,56 @@ connect to the port above and debug:
   $ lldb prog.elf -o "gdb-remote 43505" -o "breakpoint set -n add" -o run
 
 A breakpoint set by name, the source line and column at the stop, the argument
-registers, disassembly with the current instruction marked, and stepping all
-work.  What does not yet is the ABI plugin, so the stack stops at one frame and
-a local reads as unavailable: the return address is on the other stack, and
-finding it needs the CFI expression llvm/test/CodeGen/C166/cfi-two-stacks.ll
-describes.
+registers, disassembly with the current instruction marked, stepping, a
+backtrace across both stacks, and locals in any frame all work:
+
+  (lldb) bt
+  * thread #1, stop reason = breakpoint 1.1
+    * frame #0: 0x00c0014e dbg.elf`leaf(a=15, b=7) at dbg.c:3:13
+      frame #1: 0x00c0019c dbg.elf`middle(n=5) at dbg.c:9:10
+      frame #2: 0x00c001b0 dbg.elf`main at dbg.c:12:11
+  (lldb) frame select 1
+  (lldb) frame variable
+  (int) n = 5
+  (int) local = 15
+
+Three things had to be true for that, and none of them was.
+
+  The register list this stub serves had to carry the DWARF numbers.  Without
+  them a local, which is described as an offset from DWARF register 0, is
+  "unable to convert register kind=1 reg_num=0 to a native register number" -
+  the registers could be printed and none of them could be found.
+
+  The call frame information had to say that the caller's R0 is the canonical
+  frame address.  On a machine with one stack nothing says that: the CFA is
+  where the stack pointer was, so restoring the stack pointer restores it.
+  Here the return address is on the other stack and R0 is a general purpose
+  register, so a reader has no reason to believe it is a stack pointer at all.
+  The rule is now in the CIE - llvm/test/CodeGen/C166/cfi-two-stacks.ll has it
+  - and without it the walk got the caller's program counter, could not work
+  out the caller's R0, and stopped one frame up with its locals unreadable.
+
+  And LLDB had to be able to read that rule out of a CIE, which it could not:
+  DW_CFA_val_offset was handled in the code that walks a frame description
+  entry and not in the code both share, and a CIE stops at the first opcode
+  that is not handled - so the rule was not merely ignored, it took the two
+  expressions after it with it.
+
+"sp" means the register that holds return addresses on this part and it also
+means what a frame is measured from, and those are two different registers.
+LLDB's generic stack pointer has to be R0, because that is what a frame is
+measured from, so "register read sp" answers with R0.  The hardware one is
+reachable as "syssp":
+
+  (lldb) register read sp syssp
+    r0 = 0xf9f0
+    sp = 0xfbfa
+
+What does not work is a far pointer.  The debug information now describes one
+correctly - clang gives it DW_AT_address_class and, where the width is not the
+address size, DW_AT_byte_size - but LLDB has no handling of DW_AT_address_class
+at all, so it builds a pointer of the target's default width and reads two
+bytes of a four byte pointer.  "p fp" on a __far pointer prints its low half.
 
 None of that is a lit test, and the reason is worth writing down rather than
 leaving to be rediscovered.  The workflow that runs these tests does not build
