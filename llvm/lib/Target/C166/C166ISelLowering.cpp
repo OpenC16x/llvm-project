@@ -862,9 +862,84 @@ static SDValue combineMAC(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
 /// linker can do the adding.  Without this the offset survives to become a
 /// real 32 bit add, since the near path only folds one at selection time and
 /// by then a far address has been split into its two halves.
+/// Fold the step of a walk into the access it steps, for address space 2.
+///
+/// A near walk gets this from the generic post-index machinery: the pointer is
+/// one register, the step is an ADD on it, and getPostIndexedAddressParts()
+/// says yes.  A far one cannot, and not only because of the EXTS.  The pointer
+/// is 32 bits and C166LowerSegPointers has already rewritten the arithmetic
+/// into an add on its low half wrapped back up with an OR, so by the time the
+/// DAG sees it there is no ADD on a pointer for that hook to recognise.
+///
+/// After LowerLOAD there is one again.  The address has been split into an
+/// offset and a segment, both plain i16, and a walk's offset feeds an
+/// "add offset, 2" whose only other user is the next iteration.  That is the
+/// same shape the generic combine looks for, one level down, and this is it:
+/// the ADD becomes a second result of the load.
+///
+/// The safety question is the generic one.  Folding pins the increment to the
+/// load's position, which is fine as long as the load does not already depend
+/// on it - hasPredecessorHelper is what asks, exactly as
+/// CombineToPostIndexedLoadStore does.
+static SDValue combineFarLoadPost(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
+  SelectionDAG &DAG = DCI.DAG;
+  auto *LD = cast<MemSDNode>(N);
+
+  // Only the confined space.  A plain far pointer's arithmetic carries into
+  // the segment, so stepping its offset alone would be a different address.
+  if (LD->getAddressSpace() != C166AS::Seg)
+    return SDValue();
+
+  EVT VT = LD->getMemoryVT();
+  if (VT != MVT::i8 && VT != MVT::i16)
+    return SDValue();
+  uint64_t Step = VT == MVT::i16 ? 2 : 1;
+
+  SDValue Offset = N->getOperand(1);
+  SDValue Segment = N->getOperand(2);
+
+  // The one ADD on the offset that steps it by exactly this access's width.
+  SDNode *Inc = nullptr;
+  for (SDNode *User : Offset->users()) {
+    if (User == N || User->getOpcode() != ISD::ADD)
+      continue;
+    auto *C = dyn_cast<ConstantSDNode>(User->getOperand(1));
+    if (!C || C->getZExtValue() != Step || User->getValueType(0) != MVT::i16)
+      continue;
+    if (Inc)
+      return SDValue(); // More than one: leave it alone rather than choose.
+    Inc = User;
+  }
+  if (!Inc)
+    return SDValue();
+
+  SmallPtrSet<const SDNode *, 16> Visited;
+  SmallVector<const SDNode *, 8> Worklist(1, N);
+  if (SDNode::hasPredecessorHelper(Inc, Visited, Worklist))
+    return SDValue();
+
+  SDLoc DL(N);
+  SDValue Ops[] = {LD->getChain(), Offset, Segment};
+  SDValue New = DAG.getMemIntrinsicNode(
+      C166ISD::FAR_LOAD_POST, DL,
+      DAG.getVTList(N->getValueType(0), MVT::i16, MVT::Other), Ops, VT,
+      LD->getMemOperand());
+
+  DAG.ReplaceAllUsesOfValueWith(SDValue(N, 0), New.getValue(0));
+  DAG.ReplaceAllUsesOfValueWith(SDValue(Inc, 0), New.getValue(1));
+  DAG.ReplaceAllUsesOfValueWith(SDValue(N, 1), New.getValue(2));
+  DCI.recursivelyDeleteUnusedNodes(Inc);
+  return SDValue(N, 0);
+}
+
 SDValue C166TargetLowering::PerformDAGCombine(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
+  // A target node reaches here without being registered: the combiner calls
+  // this for every opcode past ISD::BUILTIN_OP_END, which is what the ones
+  // below have to be asked for.
   switch (N->getOpcode()) {
+  case C166ISD::FAR_LOAD:
+    return combineFarLoadPost(N, DCI);
   case ISD::SDIV:
   case ISD::UDIV:
   case ISD::SREM:

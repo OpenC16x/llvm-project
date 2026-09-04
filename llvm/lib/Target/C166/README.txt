@@ -334,6 +334,30 @@ six, 20 states an element to 14, and 22 bytes off the function.  The saving is
 one ADDC and the register shuffling that keeping a written value rather than a
 read one costs.
 
+The step folds into the access as well, which is the rest of it.  A near walk
+gets "mov r5, [r4+]" from the generic post-index machinery, and a confined one
+cannot: the pointer is 32 bits and the pass above has already rewritten the
+arithmetic into an add on its low half wrapped back up with an OR, so there is
+no ADD on a pointer for getPostIndexedAddressParts() to recognise.  After the
+load is lowered there is one again - the address has been split into an offset
+and a segment, both plain i16, and the offset feeds an "add offset, 2" - and
+combineFarLoadPost() in C166ISelLowering.cpp folds it there.  "exts r3, #1"
+followed by "mov r7, [r5+]" is a legal pair: the EXTS covers the access and the
+increment is on the register.
+
+Over the same loop run 4000 times, in states an element:
+
+  near         17.20
+  confined     19.21   the EXTS, and nothing else
+  far          23.21   the EXTS, the step, and the ADDC into the segment
+
+The confined walk was 21.21 before, so the fold is worth two states an element
+and 2 bytes off the loop, and what is left between it and a near walk is the
+one instruction that cannot go away.  An unconfined far pointer is left alone,
+because its arithmetic carries into the segment and stepping the offset on its
+own would be a different address; there is no post-incrementing store on this
+machine, so a walk that writes still steps its own pointer.
+
 Arithmetic that leaves the segment is undefined, and undefined the way that
 does not report itself: the offset wraps and the access lands at the foot of
 the same segment.  utils/C166Sim/differential/segptr.c therefore stays inside

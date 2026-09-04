@@ -44,6 +44,13 @@ def SDT_C166FarLoad      : SDTypeProfile<1, 2, [SDTCisInt<0>,
 def SDT_C166FarStore     : SDTypeProfile<0, 3, [SDTCisInt<0>,
                                                 SDTCisVT<1, i16>,
                                                 SDTCisVT<2, i16>]>;
+// The same load with the step folded in, which gives back the offset it moved
+// on to as a second result.  Only the offset is stepped; the segment is what
+// makes this a confined access and is passed through untouched.
+def SDT_C166FarLoadPost  : SDTypeProfile<2, 2, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisVT<2, i16>,
+                                                SDTCisVT<3, i16>]>;
 
 // A 32 bit accumulator as two words and the two 16 bit operands of a signed
 // multiply, giving the accumulated 32 bit result as two words.
@@ -102,6 +109,8 @@ def C166farload  : SDNode<"C166ISD::FAR_LOAD", SDT_C166FarLoad,
                           [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def C166farstore : SDNode<"C166ISD::FAR_STORE", SDT_C166FarStore,
                           [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
+def C166farloadpost : SDNode<"C166ISD::FAR_LOAD_POST", SDT_C166FarLoadPost,
+                             [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 def C166tcret    : SDNode<"C166ISD::TC_RETURN", SDT_C166Call,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def C166tcretseg : SDNode<"C166ISD::TC_RETURN_SEG", SDT_C166CallSeg,
@@ -699,6 +708,24 @@ def FARLOAD16 : Pseudo<(outs GR16:$dst), (ins GR16:$off, GR16:$seg),
 def FARLOAD8  : Pseudo<(outs GR8:$dst), (ins GR16:$off, GR16:$seg),
                        "#FARLOAD8",
                        [(set GR8:$dst, (C166farload GR16:$off, GR16:$seg))]>;
+}
+
+// The same load with the step folded into it, which is what an array walk in
+// address space 2 wants: the offset is a plain 16 bit register there, so
+// "exts $seg, #1" followed by "mov $dst, [$off+]" is a legal pair - the EXTS
+// covers the access and the increment is on the register.  Worth two states an
+// element, which is the whole of what separates a confined walk from a near
+// one apart from the EXTS itself; llvm/lib/Target/C166/README.txt measures it.
+//
+// Selected by hand in C166ISelDAGToDAG.cpp for the reason MOV16rpi is: the
+// pointer coming back out makes it a two-result instruction that no pattern
+// describes.  There is no post-incrementing store on this machine, so there is
+// no FARSTORE to match.
+let mayLoad = 1, Constraints = "$off = $offend" in {
+def FARLOAD16POST : Pseudo<(outs GR16:$dst, GR16:$offend),
+                           (ins GR16:$off, GR16:$seg), "#FARLOAD16POST", []>;
+def FARLOAD8POST  : Pseudo<(outs GR8:$dst, GR16:$offend),
+                           (ins GR16:$off, GR16:$seg), "#FARLOAD8POST", []>;
 }
 
 let mayStore = 1 in {
