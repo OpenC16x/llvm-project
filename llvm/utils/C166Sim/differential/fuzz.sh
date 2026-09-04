@@ -54,6 +54,18 @@ while [ "$SEED" -lt "$END" ]; do
     fi
     RAN=$((RAN + 1))
     if ! "$BIN/c166-sim" "$OUT/prog.elf" > "$OUT/got" 2> "$OUT/run.err"; then
+      # Running out of the kilobyte of ABI stack the part has is a fact about
+      # the part and not a wrong answer, in the same way as running out of the
+      # near ROM above, and it is what a generated program with a 512 byte
+      # frame calling one with a 280 byte frame does at -O0.  There is no
+      # answer to compare, so the seed is passed over at that level rather
+      # than counted as a disagreement.  That seed fits at -O2 and is checked
+      # there, which is what a per-level skip keeps.
+      if grep -q "ABI stack overflow" "$OUT/run.err"; then
+        RAN=$((RAN - 1))
+        SKIPPED=$((SKIPPED + 1))
+        continue
+      fi
       echo "FAIL seed $SEED $OPT (run): $(head -1 "$OUT/run.err")"
       STATUS=1
       continue
@@ -68,6 +80,6 @@ while [ "$SEED" -lt "$END" ]; do
   SEED=$((SEED + 1))
 done
 
-echo "ran $RAN builds over $COUNT seeds, $SKIPPED too big to link"
+echo "ran $RAN builds over $COUNT seeds, $SKIPPED too big for the part"
 [ "$STATUS" -eq 0 ] && echo "no disagreements"
 exit $STATUS

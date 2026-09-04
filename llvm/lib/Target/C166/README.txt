@@ -68,6 +68,14 @@ unwinder holds went from ten bytes to four and a throw is 812 bytes now, which
 startup/README.txt explains under "C++ exceptions".  The second is 91% of the
 stack and passes, and is the next thing that will go over.
 
+The third thing it found is the fuzzer, and it is not a bug: one seed in two
+hundred generates a function with a 512 byte frame calling one with a 280 byte
+frame, which at -O0 wants 1112 bytes of the 1024 there are.  A program too big
+for the part is the same kind of fact as one too big for the near ROM, which
+fuzz.sh already passed over, so it passes over this too and says so in its
+count.  What it must not do is call it a disagreement: a program stopped for
+overflowing the stack produced no answer to disagree with.
+
 The threshold's default is 6 and the 6 is arithmetic.  Every call pushes two
 bytes of return address onto the system stack, which the stock scripts give 512
 bytes, so a runaway recursion trips STKOV on its 256th call whatever its frames
@@ -1027,6 +1035,24 @@ coprocessor's offset registers needs: those are QX0, QX1, QR0 and QR1, they are
 what a repeated CoMAC over a strided stream writes, and until this existed a
 handler that wrote one took the interrupted code's stride with it.
 
+That is checked the way it would go wrong rather than by reading the assembly:
+llvm/utils/C166Sim/differential/macoffsets.c puts two values in QX0 and QR0,
+runs while a handler doing a strided dot product fires into it, and reads them
+back.  Taking the four Q registers out of the save list makes it fail at -O1,
+-O2 and -Os with the handler's own strides in them, which is what says the
+program is testing anything.
+
+The check should have arrived with the EXTR work and did not, and the reason
+given at the time was wrong: it said a strided repeated CoMAC was not reachable
+from ordinary C at -O2, that the unroller wrote the loop out before selection
+saw it, and that the loop surviving -fno-unroll-loops was not the right shape
+either.  None of that was the cause.  The test loop accumulated into an int,
+which is sixteen bits here, so the optimiser had narrowed the multiply to i16
+and there was no 32 bit accumulation left to match - see the accumulator note
+under the repeat prefix below.  With a long accumulator it selects at -O2 with
+unrolling on, strided and unstrided alike, and macdot.c had been covering the
+plain form from C since MAC-11.
+
 A disassembly still shows the two instructions, because the bytes are two and
 say nothing else: the 16 bit decoder table is tried first, so "push qx0" reads
 back as an EXTR followed by a push of the ordinary register with the same short
@@ -1446,6 +1472,22 @@ Known limitations / things to do
   question and refuses to unroll a loop that is about to become one
   instruction, which is what the hook is for.  The recognition is therefore
   asked twice and written once.
+
+  A third thing is not about the pass at all but is what anyone writing one of
+  these loops will hit first, so it belongs here: the accumulator has to be 32
+  bits, and on this part that means "long".  int is sixteen bits here, and a
+  loop that accumulates into an int is a sixteen bit accumulation - so the
+  optimiser narrows the multiply to i16 long before the pass looks, and what
+  reaches it is not a widening product any more.  The unit accumulates in
+  forty and the pass matches the 32 bit form, so an int accumulator gets a run
+  of ordinary multiplies and nothing says why.
+
+  That is worth being blunt about because it produced a wrong finding once,
+  which is recorded under the extended special function registers above: a
+  test written with an int accumulator did not select, the unroller was blamed
+  for it, and the conclusion drawn - that a strided repeated CoMAC is not
+  reachable from ordinary C at -O2 - was false.  It selects at -O2 with
+  unrolling on, and macdot.c had been checking exactly that all along.
 
   Measured again on what was built, per call, with the state counter:
 
