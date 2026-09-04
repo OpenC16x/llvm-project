@@ -107,14 +107,17 @@ jobs:
 
       # Assertions are on, so a malformed node or a bad assumption stops the
       # build rather than producing something that only looks right.
+      #
+      # This is the whole list, and testdirs.txt is the whole of it: a second
+      # step with a second list is what let a regression through, by passing a
+      # local sweep over that file while an lld test the file did not name was
+      # failing.  Unquoted, and run from the root of the tree, because a line
+      # of it may be a glob - the lld tests are one - and the shell is what
+      # expands it.
       - name: Lit tests
         run: |
           ./build/bin/llvm-lit -sv $(grep -v '^#' \
             llvm/utils/C166Sim/differential/testdirs.txt)
-
-      - name: lld tests for C166
-        run: |
-          ./build/bin/llvm-lit -sv $(git ls-files 'lld/test/ELF/*c166*')
 
       # What comes out of the compiler has to assemble back to the same bytes,
       # which is what catches a name or a syntax the assembler reads

@@ -21,6 +21,10 @@ BIN=$(cd "$BIN" && pwd)
 # one list rather than two is the point: this script exists to notice a test
 # that needs a tool the build does not make, and it can only notice one in a
 # directory it was told about.
+#
+# Unquoted on purpose below, and expanded after the cd to the root of the tree:
+# a line of that file may be a glob, and quoting it here would hand the pattern
+# to lit and to the loop instead of the files.
 TESTS=$(grep -v '^#' "$HERE/testdirs.txt")
 
 # Every test file, which is what gets read for the tool names.  The directories
@@ -38,11 +42,13 @@ for T in $TESTS; do
   elif [ -f "$T" ]; then
     FILES="$FILES $T"
   else
+    # A glob that matched nothing arrives here as the pattern itself, which is
+    # the same failure as a directory that was moved and is reported the same
+    # way.
     echo "checktools.sh: $T is in testdirs.txt and does not exist"
     STATUS=1
   fi
 done
-FILES="$FILES $(git ls-files 'lld/test/ELF/*c166*')"
 
 # The RUN lines name their tools; ld.lld comes from the lld target and lit
 # substitutes %c166_sim itself, so those two are spelled the way they are built.

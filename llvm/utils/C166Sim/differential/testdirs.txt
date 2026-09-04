@@ -1,17 +1,31 @@
 # The lit targets this target has tests in, one per line.  A line is a
-# directory or a single test file; the clang driver tests are files because
-# the directory they live in is the whole clang driver suite.
+# directory, a single test file, or a glob; the clang driver tests are files
+# because the directory they live in is the whole clang driver suite, and the
+# lld tests are a glob because they share a directory with the whole of lld's
+# ELF suite and there is no telling how many of them there will be.
 #
-# A test not named here is a test CI does not run, which is how the clang
-# side came to be running only its two driver tests: everything else under
-# clang and the disassembler's own directory were written and then never
-# checked again.
+# A test not named here is a test nobody runs.  That is how the clang side came
+# to be running only its two driver tests - everything else under clang and the
+# disassembler's own directory was written and then never checked again - and
+# it is how a stack check regression reached CI while a full local sweep over
+# this file passed: the lld tests were run by a step of the workflow's own and
+# named nowhere here, so running what this file says was not running the tests.
 #
-# There are two readers and they must not drift apart: the workflow runs lit
-# over these, and checktools.sh reads the RUN lines in them to work out which
-# tools the build has to produce.  Adding a directory to one and not the other
-# is what let a test needing "opt" reach CI - the checker written to catch that
-# was not looking at the directory the test was in.
+# Every reader expands these with the shell, from the root of the tree and
+# without quoting, so a glob line becomes the files it matches.  A reader that
+# quotes it gets the pattern instead and finds nothing.
+#
+# What catches a glob that has stopped matching is checktools.sh, which stops
+# with "is in testdirs.txt and does not exist" and runs before the tests in the
+# workflow.  lit does not: given a pattern alongside paths that do match, it
+# warns that the input contained no tests and exits 0, so the run goes green
+# with a suite missing.  That is the reason the checker goes first.
+#
+# The readers must not drift apart: the workflow runs lit over these, and
+# checktools.sh reads the RUN lines in them to work out which tools the build
+# has to produce.  Adding a directory to one and not the other is what let a
+# test needing "opt" reach CI - the checker written to catch that was not
+# looking at the directory the test was in.
 llvm/test/CodeGen/C166
 llvm/test/MC/C166
 llvm/test/MC/Disassembler/C166
@@ -28,3 +42,4 @@ clang/test/Sema/attr-c166-interrupt.c
 clang/test/Sema/c166-bitaddr.c
 clang/test/Sema/c166-dpram.c
 clang/test/Sema/inline-asm-c166.c
+lld/test/ELF/*c166*
