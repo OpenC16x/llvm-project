@@ -349,6 +349,12 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
         ABISP abi_sp;
         if (process && (abi_sp = process->GetABI()))
           stack_frame_size = abi_sp->GetStackFrameSize();
+        else if (m_execution_unit_sp->GetAllocationAddressByteSize() <= 2)
+          // Half a megabyte does not fit in a sixteen bit address space, and
+          // the address of this frame has to fit in a pointer the interpreted
+          // program can hold.  512 bytes is what the one ABI plugin for a part
+          // that size asks for.
+          stack_frame_size = 512;
         else
           stack_frame_size = 512 * 1024;
       }

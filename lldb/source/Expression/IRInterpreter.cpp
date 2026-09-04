@@ -350,7 +350,9 @@ public:
 
     lldb_private::Status write_error;
 
-    m_execution_unit.WritePointerToMemory(data_address, address, write_error);
+    m_execution_unit.WritePointerToMemory(
+        data_address, address, write_error,
+        m_target_data.getTypeStoreSize(value->getType()));
 
     if (!write_error.Success()) {
       lldb_private::Status free_error;
@@ -937,7 +939,8 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
 
       lldb_private::Status write_error;
 
-      execution_unit.WritePointerToMemory(P, R, write_error);
+      execution_unit.WritePointerToMemory(
+          P, R, write_error, data_layout.getTypeStoreSize(Tptr));
 
       if (!write_error.Success()) {
         LLDB_LOGF(log, "Couldn't write the result pointer for an AllocaInst");
@@ -1348,7 +1351,9 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
 
       lldb::addr_t R;
       lldb_private::Status read_error;
-      execution_unit.ReadPointerFromMemory(&R, P, read_error);
+      execution_unit.ReadPointerFromMemory(
+          &R, P, read_error,
+          data_layout.getTypeStoreSize(pointer_operand->getType()));
 
       if (!read_error.Success()) {
         LLDB_LOGF(log, "Couldn't read the address to be loaded for a LoadInst");
@@ -1415,7 +1420,9 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
 
       lldb::addr_t R;
       lldb_private::Status read_error;
-      execution_unit.ReadPointerFromMemory(&R, P, read_error);
+      execution_unit.ReadPointerFromMemory(
+          &R, P, read_error,
+          data_layout.getTypeStoreSize(pointer_operand->getType()));
 
       if (!read_error.Success()) {
         LLDB_LOGF(log, "Couldn't read the address to be loaded for a LoadInst");

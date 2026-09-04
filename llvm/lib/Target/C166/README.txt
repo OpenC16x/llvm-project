@@ -1751,16 +1751,22 @@ Known limitations / things to do
   why almost everything in them is declared and not defined;
   llvm/utils/C166Sim/corpus/README.txt has how that number was measured and
   what it found.
-* An expression cannot dereference a pointer, and that is the last thing a
-  debugger here gets wrong.  LLDB does the rest: it connects to
-  "c166-sim --gdb", sets a breakpoint by name, shows the source line, walks the
-  stack across both stacks, reads a local in any frame, and shows a __far
-  pointer as the 24 bit address it is.  What "p *p" reads is zero, for a near
-  pointer as much as a far one: the expression evaluator goes through
-  IRMemoryMap, which has one address size for the whole architecture, and this
-  machine has two pointer widths.  Telling it which one a load meant is a
-  change to the expression path in LLDB rather than to anything here.
-  llvm/utils/C166Sim/README.txt has what does work.
+* A __far global cannot be read by name, and that is the last thing a debugger
+  here gets wrong.  LLDB does the rest: it connects to "c166-sim --gdb", sets a
+  breakpoint by name, shows the source line, walks the stack across both
+  stacks, reads a local in any frame, shows a __far pointer as the 24 bit
+  address it is, and dereferences either width of pointer in an expression -
+  "p *ip", "p fp->x", "expr *nip = 99" - which is what the expression path
+  needed two width fixes in LLDB to do.
+
+  What is left is "p fpt" or "target variable fpt" on a global declared __far,
+  which answers "unimplemented opcode DW_OP_xderef".  Clang describes such a
+  global with a location expression that ends in DW_OP_xderef, DWARF's "load
+  through an address in this address space", and LLDB decodes that opcode
+  without evaluating it - there is no address space in its idea of a value to
+  evaluate it into.  Everything reached through a pointer works, which is most
+  of what a program does with far memory; the global named directly does not.
+  llvm/utils/C166Sim/README.txt has the whole of what works and what does not.
 * The cost model's time answers are correct and nothing reads them.  There is
   a scheduling model now - C166Schedule.td, in states, from the same table of
   the instruction set manual the simulator counts with - and the two numbers

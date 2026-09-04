@@ -189,16 +189,45 @@ getDWARFAddressSpace() and getAddressSpaceFromDWARFAddressClass(), so a target
 that emits no address classes is unaffected and one that emits its own is
 asked rather than assumed.
 
-What does not work, and did not before either, is dereferencing a pointer
-inside an expression: "p *ip" says 0 where "memory read" at the same address
-says 0x1234, and "p *nip" through a near pointer says 0 as well.  The
-expression evaluator reads through IRMemoryMap, which has one address size for
-the whole architecture, and a machine with two pointer widths has no way to
-tell it which one is meant.  That is a limitation of the expression path rather
-than of the type, and it is the same on both pointers - what this fixed is the
-value and the type, which is what "frame variable" and "p <pointer>" show.
+Dereferencing one in an expression works now as well, through either width,
+and so does writing through it:
 
-None of that is a lit test, and the reason is worth writing down rather than
+  (lldb) p *nip
+  (int) 22136
+  (lldb) p *ip
+  (__attribute__((address_space(1))) int) 4660
+  (lldb) p fp->x
+  (__attribute__((address_space(1))) int) 11
+  (lldb) expr *nip = 99
+
+Two things were wrong and both were about a width.  The expression evaluator
+runs the compiled expression over a map of made up memory, and a pointer
+stored in that memory was written and read back as the architecture's address
+size - four bytes here, because a far address is 24 bits - while the slot the
+module's data layout had reserved for it was two.  So each pointer was read
+four bytes wide out of a two byte slot, and consecutive slots overlapped.
+IRInterpreter now says how wide the pointer it is reading or writing actually
+is, which it can, because it has the data layout of the module it is running.
+
+The second is where that made up memory sits.  The map put it at 0xEE000000,
+which is where a target with four byte addresses puts it, and no near pointer
+can hold that: an alloca's result and the address of the materialized struct
+are both near pointers here.  A map is now told how wide a pointer that has to
+hold one of its own addresses is - IRExecutionUnit reads it off the module -
+and with two bytes it allocates from 0x8000 and keeps the frame it interprets
+on to 512 bytes rather than half a megabyte, which is what the one other
+16 bit target in LLDB asks its ABI plugin for.
+
+What still does not work is naming a __far global directly - "p fpt", or even
+"target variable fpt", answers "unimplemented opcode DW_OP_xderef".  That is
+not about pointer widths and not about the expression path: clang describes
+such a global with a location expression that ends in DW_OP_xderef, which is
+DWARF's "load through an address in this address space", and LLDB decodes that
+opcode without evaluating it.  Everything reached through a pointer, which is
+what a program mostly does, works; the global by name does not.
+
+lldb/unittests/Expression/IRMemoryMapTest.cpp covers the allocation half.  The
+rest of it is not a lit test, and the reason is worth writing down rather than
 leaving to be rediscovered.  The workflow that runs these tests does not build
 LLDB, and LLDB's own test suite has no C166 toolchain to build a program with,
 so a test there would be a test nothing runs.  What is tested is the half that
