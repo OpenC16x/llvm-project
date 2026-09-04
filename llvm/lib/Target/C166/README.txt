@@ -984,13 +984,30 @@ A symbol whose name merely starts "cc_" is still rejected rather than quoted,
 since only the sixteen conditions themselves are in the set.  That is a
 diagnostic and not a wrong program, which is the difference that mattered.
 
-The extended special function registers are in the table too, but only as
-addresses.  They sit at the same short addresses as the ordinary ones, mapped
-from F000H and F100H instead of FE00H and FF00H, so a "reg" field cannot tell
-the two apart and reaching one that way needs an EXTR the backend never emits.
-By address there is no such problem - the default DPPs already cover F000H - so
-"mov syscon1, r2" is a MOV mem, reg, and the registers are in a class of their
-own that no "reg" field can name.
+The extended special function registers are in the table too, and are reached
+two ways.  They sit at the same short addresses as the ordinary ones, mapped
+from F000H and F100H instead of FE00H and FF00H, so by address there is no
+problem at all - the default DPPs already cover F000H, and "mov syscon1, r2" is
+an ordinary MOV mem, reg.
+
+Through a "reg" field there is, because the field cannot tell the two apart:
+what distinguishes them is an EXTR in front of the instruction, which switches
+the register area over for the next few.  "push qx0" is that, written as one
+four byte instruction whose first word is the EXTR - one instruction rather
+than a pseudo that expands into two, because nothing may fall between an EXTR
+and what it covers and nothing can fall inside an instruction.
+
+That is the only way to reach one of these at all for pushing and popping,
+since there is no "push mem", and it is what an interrupt handler that uses the
+coprocessor's offset registers needs: those are QX0, QX1, QR0 and QR1, they are
+what a repeated CoMAC over a strided stream writes, and until this existed a
+handler that wrote one took the interrupted code's stride with it.
+
+A disassembly still shows the two instructions, because the bytes are two and
+say nothing else: the 16 bit decoder table is tried first, so "push qx0" reads
+back as an EXTR followed by a push of the ordinary register with the same short
+address.  That reassembles to the same bytes, which is what roundtrip.sh
+checks.
 
 TRAP is the software entry to a vector.  It does not read a vector through the
 table: it branches to the table entry itself, at 4 * the trap number, so the
@@ -1578,12 +1595,8 @@ Known limitations / things to do
   gives the instruction set, which is where it settled a different question:
   the ST10's MAC is this MAC, sharing every function code, so there is one mac
   feature rather than one per derivative.
-* An extended special function register is reachable by address but not
-  through a "reg" field: "mov syscon1, r2" works, "push syscon1" does not.
-  Getting at one that way needs an EXTR, and once encoded it is the same bytes
-  as the register with the same short address in the ordinary space, so there
-  would be nothing for a disassembly to go on.  Three of the XC164CM's are
-  still missing because its manual contradicts itself about where they are and
+* Three of the XC164CM's extended special function registers are still
+  missing, because its manual contradicts itself about where they are and
   nothing in it breaks the tie; the register file names which.  Two of the
   three are the pair the ST10F269 datasheet resolves for its own map and not
   for this one, which is written down there rather than acted on here.

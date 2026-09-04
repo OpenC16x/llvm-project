@@ -408,6 +408,14 @@ public:
   ExtendKind Extend = ExtendKind::None;
   uint32_t ExtendValue = 0;
   unsigned ExtendCount = 0;
+  /// Whether the EXTend in force is an EXTR, which switches what a "reg" field
+  /// names over to the extended special function registers.  It is a flag of
+  /// its own rather than an ExtendKind because EXTR overrides a different
+  /// thing from the others: EXTS and EXTP replace the data page for a "mem"
+  /// operand, and this replaces the base of the register area.  A part cannot
+  /// have both in force at once - the counter is one counter - so one bool
+  /// beside the kind says which of the two the current sequence is.
+  bool ExtendRegisterSpace = false;
 
   /// Where the program is considered finished, and where its result is.  The
   /// harness fills these in from the ELF symbol table.

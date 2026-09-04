@@ -15,12 +15,14 @@
 #include "C166InstrInfo.h"
 #include "C166Subtarget.h"
 #include "MCTargetDesc/C166MCTargetDesc.h"
+#include "MCTargetDesc/C166InstPrinter.h"
 #include "MCTargetDesc/C166UnwindRules.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
@@ -187,6 +189,28 @@ static void getMACSaveList(const MachineFunction &MF,
   if (MRI.isPhysRegModified(C166::MAL) || MRI.isPhysRegModified(C166::MAH) ||
       MRI.isPhysRegModified(C166::MSW))
     Regs.append({C166::MSW, C166::MAL, C166::MAH});
+
+  // And the four offset registers, on the same terms MRW and MCW are on: they
+  // are the unit's configuration, so a handler saves them where it writes them
+  // rather than merely because it makes a call.  A repeated coprocessor
+  // instruction over a circular buffer is what writes them - see
+  // C166MACRepeat.cpp - and until they were pushable a handler that did that
+  // left the interrupted code's buffer walking a different stride.
+  //
+  // They are in the extended register space, so pushing one is EXTR and then
+  // PUSH, which is what EPUSH is.  A part with the unit and without the EXTend
+  // instructions does not exist - the unit arrived with the second generation,
+  // which is where EXTR arrived - but -mattr can still describe one, so it is
+  // asked rather than assumed.
+  for (MCRegister Reg : {C166::QX0, C166::QX1, C166::QR0, C166::QR1})
+    if (writesRegisterOutright(MF, Reg, TRI))
+      Regs.push_back(Reg);
+}
+
+/// Whether \p Reg is one the extended space holds, which decides whether it is
+/// pushed with PUSH or with EPUSH.
+static bool isExtendedSFR(MCRegister Reg) {
+  return C166::ESFRAnyRegClass.contains(Reg);
 }
 
 /// How this function was entered, which is what decides the shape of the record
@@ -422,12 +446,25 @@ void C166FrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   // Then the coprocessor, if this handler disturbs it.
-  SmallVector<MCRegister, 5> MACSaves;
+  SmallVector<MCRegister, 9> MACSaves;
   getMACSaveList(MF, MACSaves);
-  for (MCRegister Reg : MACSaves)
-    BuildMI(MBB, MBBI, DL, TII.get(C166::PUSH))
+  for (MCRegister Reg : MACSaves) {
+    if (isExtendedSFR(Reg) && !STI.hasExtInstr()) {
+      const Function &F = MF.getFunction();
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F,
+          "an interrupt handler writes " +
+              Twine(C166InstPrinter::getRegisterName(Reg)) +
+              ", which is in the extended register space and can only be saved "
+              "with EXTR; select a processor that has the EXTend instructions",
+          DL));
+      continue;
+    }
+    BuildMI(MBB, MBBI, DL,
+            TII.get(isExtendedSFR(Reg) ? C166::EPUSH : C166::PUSH))
         .addReg(Reg)
         .setMIFlag(MachineInstr::FrameSetup);
+  }
   SavedWords += MACSaves.size();
 
   // All of those went on the hardware stack, so everything the rules above
@@ -514,11 +551,15 @@ void C166FrameLowering::emitEpilogue(MachineFunction &MF,
   // the mirror order puts MDC back after MDL and MDH, whose restoration would
   // otherwise leave MDC.MDRIU set whether or not it was, and puts MAH back
   // before MAL and MSW, which is the order the accumulator needs.
-  SmallVector<MCRegister, 5> MACSaves;
+  SmallVector<MCRegister, 9> MACSaves;
   getMACSaveList(MF, MACSaves);
-  for (MCRegister Reg : reverse(MACSaves))
-    BuildMI(MBB, MBBI, DL, TII.get(C166::POP), Reg)
+  for (MCRegister Reg : reverse(MACSaves)) {
+    if (isExtendedSFR(Reg) && !STI.hasExtInstr())
+      continue; // The prologue has already said why.
+    BuildMI(MBB, MBBI, DL,
+            TII.get(isExtendedSFR(Reg) ? C166::EPOP : C166::POP), Reg)
         .setMIFlag(MachineInstr::FrameDestroy);
+  }
 
   if (needsMulDivSave(MF))
     for (MCRegister Reg : {C166::MDH, C166::MDL, C166::MDC})

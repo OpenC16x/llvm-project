@@ -198,6 +198,15 @@ and it prints what came back:
   c -> S05
   pc = 00c00100
 
+EXTR is modelled, which the others are not quite the same as.  EXTS and EXTP
+replace the data page a "mem" operand goes through; EXTR replaces the base of
+the register area, so for the next few instructions a "reg" field names the
+register at F000H rather than the one at FE00H with the same short address.
+Nothing else distinguishes the two - the short address is the same number
+either way - so a simulator that did not model it would push the wrong register
+and say nothing.  It is one flag beside the EXTend kind and one line in
+regFieldAddress(); llvm/test/tools/c166-sim/esfr.s is what checks it.
+
 Two addresses are the simulator rather than storage.  They are in the top
 segment, which no C166 part populates and no linker script here places
 anything in, so a program reaches them with a far pointer or an EXTS:

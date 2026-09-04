@@ -2939,9 +2939,11 @@ void executeOne(Machine &M, const MCInst &MI, Op O, uint32_t PC) {
     M.ExtendCount = Imm(1) + 1;
     break;
   case Op::EXTR:
-    // Only the SFR space switch, which this simulator does not model because
-    // nothing here uses the extended SFRs.  Counting it keeps the sequence
-    // length right.
+    // The extended special function registers, which is the whole of what this
+    // one does: for the next few instructions a "reg" field names the register
+    // at F000H rather than the one at FE00H with the same short address.
+    // regFieldAddress() is where that is applied.
+    M.ExtendRegisterSpace = true;
     M.ExtendCount = Imm(0) + 1;
     break;
   case Op::ATOMIC:
