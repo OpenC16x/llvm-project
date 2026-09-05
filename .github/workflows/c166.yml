@@ -63,14 +63,45 @@ jobs:
           restore-keys: |
             c166-ccache-
 
+      # lldb is here because this target's debugger support is not all in
+      # llvm/lib/Target/C166: five commits changed IRMemoryMap, IRInterpreter,
+      # LLVMUserExpression, DWARFExpression, SymbolFileDWARF, TypeSystemClang
+      # and ClangExpressionDeclMap, and until it was built here none of that
+      # was compiled by CI at all.  Measured before it was added, in CPU
+      # minutes of compiling from the ninja log of a full build:
+      #
+      #   clang                      218
+      #   llvm and everything else   144
+      #   lldb                       102
+      #   lldb's unit tests           32
+      #   lld                         11
+      #
+      # so it is 36% on top of a build that was 372, against a timeout of 180
+      # minutes for a from-scratch build the cache note above calls "over an
+      # hour".  What a run with a warm cache pays is not that: ccache answers
+      # for the objects, and what is left is linking.  A run that changed
+      # nothing under lldb/ pays 17 seconds, which is the tests themselves; one
+      # that changed a header everything includes pays those plus a liblldb.so
+      # at about half a minute and 45 unit test binaries at 1.8 minutes of CPU
+      # between them.  Its objects are 116 MByte against the 478 the rest of
+      # the build makes, so the 2G cache above has room.
+      #
+      # The five options are pinned rather than left to cmake so that what the
+      # runner happens to have installed - Python, curses, libedit - cannot
+      # quietly turn this into a bigger build than the one that was measured.
       - name: Configure
         run: |
           cmake -S llvm -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_ENABLE_ASSERTIONS=ON \
-            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld;lldb" \
             -DLLVM_TARGETS_TO_BUILD="X86" \
             -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="C166" \
+            -DLLDB_ENABLE_PYTHON=OFF \
+            -DLLDB_ENABLE_CURSES=OFF \
+            -DLLDB_ENABLE_LIBEDIT=OFF \
+            -DLLDB_ENABLE_LZMA=OFF \
+            -DLLDB_ENABLE_LUA=OFF \
             -DLLVM_CCACHE_BUILD=ON \
             -DLLVM_INCLUDE_BENCHMARKS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
@@ -80,10 +111,10 @@ jobs:
       # time rather than building it, so asking ninja for it is an error.
       - name: Build
         run: |
-          ninja -C build clang lld llc opt llvm-mc llvm-objdump llvm-objcopy \
-            llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump llvm-symbolizer \
-            llvm-ar llvm-ranlib llvm-size llvm-config c166-sim \
-            FileCheck count not split-file
+          ninja -C build clang lld lldb llc opt llvm-mc llvm-objdump \
+            llvm-objcopy llvm-readobj llvm-readelf llvm-nm llvm-dwarfdump \
+            llvm-symbolizer llvm-ar llvm-ranlib llvm-size llvm-config \
+            c166-sim FileCheck count not split-file
 
       - name: Save the compiler cache
         if: always() && steps.ccache.outputs.cache-hit != 'true'
@@ -118,6 +149,22 @@ jobs:
         run: |
           ./build/bin/llvm-lit -sv $(grep -v '^#' \
             llvm/utils/C166Sim/differential/testdirs.txt)
+
+      # The half of this target's debugger work that can be tested where it
+      # lives.  The C166 sessions in llvm/utils/C166Sim/README.txt cannot be:
+      # LLDB's own suite has no C166 toolchain to build a program with, so a
+      # test there would be a test nothing runs.  What these do cover is the
+      # generic machinery those sessions lean on - a DWARF expression's address
+      # class marker, and an IRMemoryMap whose addresses have to fit in a
+      # pointer narrower than the architecture's.
+      #
+      # 32315 tests, 2 skipped, none failing, in 14 seconds of test time -
+      # unlike the lldb-shell suite, which fails 96 of its tests in a tree
+      # configured for this target alone, because anything that compiles a
+      # program gets "unknown target triple 'unknown'".  That one is
+      # deliberately not here.
+      - name: LLDB unit tests
+        run: ninja -C build check-lldb-unit
 
       # What comes out of the compiler has to assemble back to the same bytes,
       # which is what catches a name or a syntax the assembler reads

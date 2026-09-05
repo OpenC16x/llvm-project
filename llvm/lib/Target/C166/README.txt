@@ -1760,12 +1760,16 @@ Known limitations / things to do
   three of them are about this part having two pointer widths where every other
   target has one; llvm/utils/C166Sim/README.txt has them.
 
-  None of it is a lit test.  The workflow does not build LLDB and LLDB's own
-  suite has no C166 toolchain to build a program with, so a test there would be
-  a test nothing runs - the pieces that could be tested where they live are,
-  in lldb/unittests, and the rest is a session in that README to be repeated by
-  hand.  Making CI build LLDB is the thing that would change that, and it is a
-  decision about what the workflow is for rather than a defect.
+  Half of it is tested and half of it is a session to repeat by hand, and the
+  line between them is what LLDB's own suite can build.  The generic machinery
+  those four pieces changed is covered by unit tests in lldb/unittests, which
+  CI now builds and runs - LLVM_ENABLE_PROJECTS carries lldb and the workflow
+  runs check-lldb-unit, which was measured at 36% on top of a from-scratch
+  build and under two minutes on a warm cache; the numbers are in the workflow
+  beside the option.  What cannot be a test there is the C166 session itself,
+  because LLDB's suite has no C166 toolchain to build a program with, so it
+  would be a test nothing runs.  llvm/utils/C166Sim/README.txt is that session,
+  written out to be repeated.
 * The cost model's time answers are correct and nothing reads them.  There is
   a scheduling model now - C166Schedule.td, in states, from the same table of
   the instruction set manual the simulator counts with - and the two numbers

@@ -249,13 +249,15 @@ program; it is the variable that is in the far space, not the type.
 The same marker is what NVPTX and AMDGPU emit for a global in one of their
 address spaces, so this is not only about this part.
 
-lldb/unittests/Expression/IRMemoryMapTest.cpp covers the allocation half.  The
-rest of it is not a lit test, and the reason is worth writing down rather than
-leaving to be rediscovered.  The workflow that runs these tests does not build
-LLDB, and LLDB's own test suite has no C166 toolchain to build a program with,
-so a test there would be a test nothing runs.  What is tested is the half that
-can be - the stub - and gdb-stub.test beside the others drives it with
-rsp-client.py.
+lldb/unittests/Expression/IRMemoryMapTest.cpp covers the allocation half, and
+DWARFExpressionTest.cpp the address class marker; the workflow builds LLDB and
+runs check-lldb-unit, so both are checked on every run.  What is not a lit test
+is the session above, and the reason is worth writing down rather than leaving
+to be rediscovered: LLDB's own test suite has no C166 toolchain to build a
+program with, so a test there would be a test nothing runs.  The half that can
+be tested where it lives is - the stub, which gdb-stub.test beside the others
+drives with rsp-client.py, and the generic LLDB machinery, in those two unit
+tests - and the session is written out here so that it can be repeated.
 
 The protocol is not architecture specific, so an ordinary remote client works
 too, and tools/rsp-client.py is one - it is what the tests drive the stub with,
